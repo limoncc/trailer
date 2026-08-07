@@ -1,0 +1,63 @@
+---
+import Icon from './Icon.astro';
+
+interface Slide {
+  icon: string;   // lucide 图标名
+  title: string;
+  desc: string;
+}
+interface Props {
+  slides: Slide[];
+  interval?: number;   // 自动播放间隔(ms),默认 5000
+}
+
+const { slides, interval = 5000 } = Astro.props;
+---
+
+<div class="carousel" data-carousel data-interval={interval}>
+  <div class="carousel-viewport">
+    {slides.map((s, i) => (
+      <div class:list={["carousel-slide", { active: i === 0 }]} data-slide={i}>
+        <div class="carousel-icon" aria-hidden="true"><Icon name={s.icon} size={40} /></div>
+        <h3>{s.title}</h3>
+        <p>{s.desc}</p>
+      </div>
+    ))}
+  </div>
+
+  <button class="carousel-arrow prev" data-prev aria-label="Previous slide">‹</button>
+  <button class="carousel-arrow next" data-next aria-label="Next slide">›</button>
+
+  <div class="carousel-dots">
+    {slides.map((_, i) => (
+      <button
+        class:list={["carousel-dot", { active: i === 0 }]}
+        data-dot={i}
+        aria-label={`Slide ${i + 1}`}
+      />
+    ))}
+  </div>
+</div>
+
+<script>
+  const carousels = document.querySelectorAll<HTMLElement>("[data-carousel]");
+  carousels.forEach((el) => {
+    const slides = el.querySelectorAll<HTMLElement>("[data-slide]");
+    const dots = el.querySelectorAll<HTMLElement>("[data-dot]");
+    const interval = Number(el.dataset.interval || 5000);
+    let current = 0;
+
+    const go = (n: number) => {
+      if (slides.length === 0) return;
+      current = (n + slides.length) % slides.length;
+      slides.forEach((s, i) => s.classList.toggle("active", i === current));
+      dots.forEach((d, i) => d.classList.toggle("active", i === current));
+    };
+
+    el.querySelector("[data-prev]")?.addEventListener("click", () => go(current - 1));
+    el.querySelector("[data-next]")?.addEventListener("click", () => go(current + 1));
+    dots.forEach((d, i) => d.addEventListener("click", () => go(i)));
+
+    setInterval(() => go(current + 1), interval);
+  });
+</script>

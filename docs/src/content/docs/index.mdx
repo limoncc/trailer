@@ -1,0 +1,131 @@
+---
+title: Trailer
+description: "Trailer — next-gen ML experiment tracking: Rust core + Python SDK + rich Web UI"
+template: splash
+hero:
+  title: 'Next-gen <span class="hero-accent">ML experiment tracking</span>'
+  tagline: 'High-performance Rust core · Python SDK · Rich Web UI'
+  actions:
+    - text: Get Started
+      link: /getting-started/
+      variant: primary
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/limoncc/trailer
+      variant: secondary
+      icon: github
+---
+
+import FeatureCard from '../../components/FeatureCard.astro';
+import ShowcaseCarousel from '../../components/ShowcaseCarousel.astro';
+
+The ultimate trailer for your deep learning experiments — a lightning-fast, open-source experiment tracker combining TensorBoard's depth, Aim's fluidity, and W&B's ecosystem, powered by a **high-performance Rust core** and a local-first philosophy.
+
+<ShowcaseCarousel
+  slides={[
+    {
+      icon: 'zap',
+      title: 'High-performance Rust core',
+      desc: 'LTTB downsampling, batched ingestion, 100k-entry ring buffer — P99 < 100µs.',
+    },
+    {
+      icon: 'bar-chart',
+      title: 'Every data type you need',
+      desc: 'Scalars, text, figures, tables, media, histograms, embeddings, PCA, and model graphs.',
+    },
+    {
+      icon: 'rocket',
+      title: 'One-command local mode',
+      desc: '`trailer up` starts the full dashboard — no config, no HTTP overhead, data lands locally.',
+    },
+    {
+      icon: 'microscope',
+      title: 'Cross-project Explore',
+      desc: 'Line, scatter, and parallel-coordinates charts across runs — saved and shareable.',
+    },
+  ]}
+/>
+
+<div class="demo-wrap">
+  <video src={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/demo.webm`} autoplay loop muted playsinline class="demo-gif" preload="none" loading="lazy" poster={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/demo-poster.webp`}></video>
+</div>
+
+## Why Trailer?
+
+<div class="feature-grid">
+  <FeatureCard
+    icon="zap"
+    title="High-performance Rust core"
+    desc="LTTB downsampling, batched ingestion, 100k-entry ring buffer — P99 &lt; 100µs."
+  />
+  <FeatureCard
+    icon="bar-chart"
+    title="All data types"
+    desc="Scalars, text, figures, tables, media, histograms, embeddings, PCA, and model graphs."
+  />
+  <FeatureCard
+    icon="database"
+    title="Three storage backends"
+    desc="SQLite (default), PostgreSQL (teams), and TensorBoard-style file mode."
+  />
+  <FeatureCard
+    icon="rocket"
+    title="One-command local mode"
+    desc="`trailer up` starts the full dashboard — no config, no HTTP overhead."
+  />
+  <FeatureCard
+    icon="microscope"
+    title="Cross-project Explore"
+    desc="Line, scatter, and parallel-coordinates charts across runs — saved and shareable."
+  />
+  <FeatureCard
+    icon="palette"
+    title="Multi-theme UI"
+    desc="6 preset themes plus a theme-builder for custom accent colors."
+  />
+</div>
+
+## Quick start
+
+```bash
+pip install trailer-sdk
+```
+
+```python
+from trailer import Tracker
+
+t = Tracker(project="demo")
+for step in range(10):
+    t.log({"loss": 1.0 / (step + 1)}, step=step)
+t.finish()
+```
+
+```bash
+trailer up   # open http://127.0.0.1:5120
+```
+
+## How it works
+
+<div class="flow">
+  <span class="flow-step">Python SDK</span><span class="flow-arrow">→</span>
+  <span class="flow-step">Rust Ingest</span><span class="flow-arrow">→</span>
+  <span class="flow-step">SQLite / PostgreSQL / File</span><span class="flow-arrow">→</span>
+  <span class="flow-step">Web UI</span>
+</div>
+
+Data is buffered in a ring buffer and flushed in batches through PyO3 (local) or HTTP (remote) into the Rust core, then served to the web UI.
+
+## Built with
+
+<div class="tech-stack">
+  <span class="tech-badge">🦀 Rust</span>
+  <span class="tech-badge">🐍 Python</span>
+  <span class="tech-badge">⚡ SvelteKit</span>
+</div>
+
+## Next steps
+
+- [Getting Started](/getting-started/)
+- [Logging metrics and data](/sdk/logging/)
+- [Core concepts](/core-concepts/)
+- [Deployment](/deployment/)

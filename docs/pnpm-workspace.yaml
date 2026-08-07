@@ -1,0 +1,6 @@
+# 单包(docs 即根目录), packages 必须显式声明, 否则 pnpm 报 "packages field missing or empty"
+packages:
+  - '.'
+# pnpm 10 默认阻止 build scripts, 这里放行 esbuild 的 postinstall
+allowBuilds:
+  esbuild: true

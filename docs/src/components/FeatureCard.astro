@@ -1,0 +1,17 @@
+---
+import Icon from './Icon.astro';
+
+interface Props {
+  icon: string;   // lucide 图标名
+  title: string;
+  desc: string;
+}
+
+const { icon, title, desc } = Astro.props;
+---
+
+<div class="feature-card">
+  <div class="feature-icon"><Icon name={icon} size={26} /></div>
+  <h3>{title}</h3>
+  <p>{desc}</p>
+</div>

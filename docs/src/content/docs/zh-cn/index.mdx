@@ -1,0 +1,131 @@
+---
+title: Trailer
+description: "Trailer — next-gen ML 实验追踪工具:高性能 Rust 核心 + Python SDK + 丰富 Web UI"
+template: splash
+hero:
+  title: '新一代 <span class="hero-accent">ML 实验追踪</span>'
+  tagline: '高性能 Rust 核心 · Python SDK · 丰富 Web UI'
+  actions:
+    - text: 快速开始
+      link: /zh-cn/getting-started/
+      variant: primary
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/limoncc/trailer
+      variant: secondary
+      icon: github
+---
+
+import FeatureCard from '../../../components/FeatureCard.astro';
+import ShowcaseCarousel from '../../../components/ShowcaseCarousel.astro';
+
+为你的深度学习实验而生的终极预告片 —— 闪电般快速的开源实验追踪工具,融合 TensorBoard 的深度、Aim 的流畅与 W&B 的生态,以 **高性能 Rust 核心** + 本地优先为基石。
+
+<ShowcaseCarousel
+  slides={[
+    {
+      icon: 'zap',
+      title: '高性能 Rust 核心',
+      desc: 'LTTB 降采样、批量摄入管道、10 万条环形缓冲 —— P99 < 100µs。',
+    },
+    {
+      icon: 'bar-chart',
+      title: '全数据类型记录',
+      desc: '标量、文本、图表、表格、媒体、直方图、嵌入向量、PCA、模型结构图。',
+    },
+    {
+      icon: 'rocket',
+      title: '一条命令本地模式',
+      desc: '`trailer up` 启动完整看板 —— 零配置、零 HTTP 开销,数据落本地。',
+    },
+    {
+      icon: 'microscope',
+      title: '跨项目 Explore 分析',
+      desc: '跨 run 配置折线 / 散点 / 平行坐标图 —— 可保存与匿名分享。',
+    },
+  ]}
+/>
+
+<div class="demo-wrap">
+  <video src={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/demo.webm`} autoplay loop muted playsinline class="demo-gif" preload="none" loading="lazy" poster={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/demo-poster.webp`}></video>
+</div>
+
+## 为什么选择 Trailer?
+
+<div class="feature-grid">
+  <FeatureCard
+    icon="zap"
+    title="高性能 Rust 核心"
+    desc="LTTB 降采样、批量摄入管道、10 万条环形缓冲 —— P99 < 100µs。"
+  />
+  <FeatureCard
+    icon="bar-chart"
+    title="全数据类型"
+    desc="标量、文本、图表、表格、媒体、直方图、嵌入向量、PCA、模型结构图。"
+  />
+  <FeatureCard
+    icon="database"
+    title="三种存储后端"
+    desc="SQLite(默认)、PostgreSQL(团队)、TensorBoard 风格文件模式。"
+  />
+  <FeatureCard
+    icon="rocket"
+    title="一条命令本地模式"
+    desc="`trailer up` 启动完整看板 —— 零配置、零 HTTP 开销。"
+  />
+  <FeatureCard
+    icon="microscope"
+    title="跨项目 Explore 分析"
+    desc="跨 run 配置折线 / 散点 / 平行坐标图 —— 可保存与匿名分享。"
+  />
+  <FeatureCard
+    icon="palette"
+    title="多主题 UI"
+    desc="6 套预设主题 + theme-builder 定制主色。"
+  />
+</div>
+
+## 快速上手
+
+```bash
+pip install trailer-sdk
+```
+
+```python
+from trailer import Tracker
+
+t = Tracker(project="demo")
+for step in range(10):
+    t.log({"loss": 1.0 / (step + 1)}, step=step)
+t.finish()
+```
+
+```bash
+trailer up   # 打开 http://127.0.0.1:5120
+```
+
+## 工作原理
+
+<div class="flow">
+  <span class="flow-step">Python SDK</span><span class="flow-arrow">→</span>
+  <span class="flow-step">Rust Ingest</span><span class="flow-arrow">→</span>
+  <span class="flow-step">SQLite / PostgreSQL / 文件</span><span class="flow-arrow">→</span>
+  <span class="flow-step">Web UI</span>
+</div>
+
+数据经环形缓冲攒批,通过 PyO3(本地)或 HTTP(远程)进入 Rust 核心,再提供给 Web UI。
+
+## 技术栈
+
+<div class="tech-stack">
+  <span class="tech-badge">🦀 Rust</span>
+  <span class="tech-badge">🐍 Python</span>
+  <span class="tech-badge">⚡ SvelteKit</span>
+</div>
+
+## 下一步
+
+- [快速开始](/zh-cn/getting-started/)
+- [记录指标与数据](/zh-cn/sdk/logging/)
+- [核心概念](/zh-cn/core-concepts/)
+- [部署](/zh-cn/deployment/)
