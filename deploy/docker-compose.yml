@@ -1,0 +1,34 @@
+# Trailer 部署:trailer-server + PostgreSQL
+# 使用:cd deploy && docker compose up -d --build
+# 访问:http://localhost:5120
+# 说明:PG 镜像初始化时自动创建 trailer_db 空库;表结构由 server 首启自动迁移。
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: trailer
+      POSTGRES_PASSWORD: trailer
+      POSTGRES_DB: trailer_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trailer -d trailer_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  trailer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "5120:5120"
+    environment:
+      TRAILER_DATABASE_URL: postgres://trailer:trailer@db:5432/trailer_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

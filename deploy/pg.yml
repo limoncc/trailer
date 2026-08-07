@@ -1,0 +1,20 @@
+services:
+  pg:
+    image: postgres:16-alpine
+    container_name: trailer-pg
+    environment:
+      POSTGRES_USER: trailer
+      POSTGRES_PASSWORD: trailer
+      POSTGRES_DB: trailer_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trailer -d trailer_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
