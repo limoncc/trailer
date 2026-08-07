@@ -1,0 +1,54 @@
+# 文档站(GitHub Pages)部署
+# - main 分支 push(仅 docs/ 变更)或手动触发时,构建 Starlight 文档站并部署到 Pages
+#
+# 前提:仓库 Settings → Pages → Source 选择 "GitHub Actions"
+
+name: deploy-docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+
+      - name: Build docs (Starlight)
+        run: |
+          cd docs
+          pnpm install --frozen-lockfile
+          pnpm build
+          cd ..
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
