@@ -1,0 +1,59 @@
+[package]
+name = "trailer-core"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+description = "Trailer: core domain logic, storage abstraction, and algorithms"
+
+[dependencies]
+rand = "0.8"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1.3"
+thiserror = "2"
+tracing = "0.1"
+async-trait = "0.1"
+ts-rs = { version = "10", features = ["serde-json-impl"] }
+prost = "0.13"
+crc32c = "0.6"
+
+# Cross-platform hardware monitoring
+sysinfo = "0.39"
+
+# Linux: NVIDIA GPU monitoring via NVML
+[target.'cfg(target_os = "linux")'.dependencies]
+nvml-wrapper = "0.12"
+
+# macOS: Apple Silicon GPU monitoring (IOReport + IOKit)
+[target.'cfg(target_os = "macos")'.dependencies]
+macmon = "0.8"
+gpucap = "0.1"
+
+[features]
+default = []
+pg = ["sqlx/postgres"]
+
+[[test]]
+name = "pg_connect"
+required-features = ["pg"]
+
+[[test]]
+name = "contract"
+# SQLite tests run without pg feature; PG tests are #[cfg(feature = "pg")]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "lttb"
+harness = false
+
+[[bench]]
+name = "ingest"
+harness = false
+
+[[bench]]
+name = "storage"
+harness = false
