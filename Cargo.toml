@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/trailer-core",
+    "crates/trailer-server",
+    "crates/trailer-py",
+]
+resolver = "2"
+
+# trailer-py is a PyO3 cdylib — only buildable via maturin.
+# Exclude from default cargo build/test.
+default-members = [
+    "crates/trailer-core",
+    "crates/trailer-server",
+]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2021"
+license = "Elastic-2.0"

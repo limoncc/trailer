@@ -1,0 +1,54 @@
+# Rust
+target/
+**/*.rs.bk
+.criterion-baseline/
+
+# Python
+__pycache__/
+.pytest_cache
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+uv.lock
+*.so
+*.pyd
+
+# Frontend
+trailer-ui/node_modules/
+trailer-ui/build/
+trailer-ui/.svelte-kit/
+trailer-ui/.benchmarks/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Runtime data
+artifacts/
+*.db
+*.db-journal
+*.db-wal
+logs
+# OS
+.DS_Store
+
+# Environment
+.env
+.env.local
+vite.config.ts.timestamp-*
+trailer-sdk/trailer/trailer-server
+
+# Starlight 文档站生成物
+docs/node_modules/
+docs/.astro/
+docs/dist/
+
+# Built by build.py — included in wheel via maturin include
+trailer-sdk/trailer/trailer-server
+trailer-sdk/trailer/frontend/
+*.db-shm
+*.db-wal
+docs/导航指南.md
+docs/开源计划.md

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "trailer-sdk"
+version = "0.1.1"
+description = "Trailer: Next-gen experiment tracking — TensorBoard + Aim + W&B in Rust"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "msgpack>=1.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+trailer = "trailer.cli:main"
+
+[project.optional-dependencies]
+pg = ["psycopg2-binary>=2.9"]
+embedding = ["scikit-learn>=1.0"]
+
+[dependency-groups]
+dev = [
+    "maturin>=1.5,<2.0",
+    "pytest>=8.0",
+    "pytest-benchmark>=5.0",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "trailer.trailer"
+manifest-path = "crates/trailer-py/Cargo.toml"
+python-source = "trailer-sdk"
+# trailer-server 二进制 + 前端静态资源(frontend/build,由 build.py 复制到包内)。
+# 注意 maturin glob:`**` 单独不匹配文件,须用 `**/*` 递归;_app/ 是 SvelteKit 输出。
+include = ["trailer/trailer-server*", "trailer/frontend/build/*", "trailer/frontend/build/_app/**/*"]
+
+[tool.mypy]
+# msgpack 是 C 扩展库,未提供 py.typed/type stubs;仅对其跳过类型分析,不影响其他库的类型检查
+[[tool.mypy.overrides]]
+module = "msgpack"
+ignore_missing_imports = true

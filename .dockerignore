@@ -1,0 +1,12 @@
+# 构建上下文排除(加速 + 减小 context)
+.git/
+target/
+.venv/
+**/node_modules/
+**/__pycache__/
+**/dist/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+docs/node_modules/
