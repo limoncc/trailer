@@ -100,7 +100,7 @@
 
 <svelte:head><title>{report?.title || 'Report'} — Trailer</title></svelte:head>
 
-<div class="p-6 {editing ? '' : 'max-w-4xl'}">
+<div class="p-6 {editing ? '' : 'max-w-6xl'}">
   <a href="/reports" class="text-sm text-muted-foreground hover:text-foreground mb-2 inline-block">← Reports</a>
 
   {#if loading}
