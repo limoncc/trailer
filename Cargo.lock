@@ -4039,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "trailer-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "crc32c",
@@ -4062,7 +4062,7 @@ dependencies = [
 
 [[package]]
 name = "trailer-py"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "pyo3",
  "rmp-serde",
@@ -4073,7 +4073,7 @@ dependencies = [
 
 [[package]]
 name = "trailer-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "base64",
