@@ -3,7 +3,7 @@
 # 用法:
 #   cd <项目根>
 #   docker build --platform linux/amd64 -f deploy/sdk.Dockerfile -o dist .
-# 产物: dist/trailer-<ver>-cp312-cp312-manylinux_2_28_x86_64.whl
+# 产物: dist/trailer-<ver>-cp310-cp310-manylinux_2_28_x86_64.whl
 #
 # 说明: SDK wheel 除 Rust 扩展外还打包了 trailer-server 二进制与前端 build
 # (见 build.py + pyproject.toml [tool.maturin].include), 故需在 Linux 容器内
@@ -40,7 +40,7 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple "matu
 
 # 4) 复制项目(避免把根 target/ 带入 context, .dockerignore 已排除)
 WORKDIR /app
-COPY Cargo.toml Cargo.lock pyproject.toml build.py ./
+COPY Cargo.toml Cargo.lock pyproject.toml build.py README.md LICENSE ./
 COPY crates/ ./crates/
 COPY trailer-sdk/ ./trailer-sdk/
 COPY --from=frontend /app/trailer-ui/build ./trailer-ui/build
