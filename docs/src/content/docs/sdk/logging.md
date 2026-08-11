@@ -30,6 +30,17 @@ t.log({"loss": 0.5, "accuracy": 0.91}, step=10)
 - Auto step: consecutive `log()` calls increment automatically
 - Hardware-monitoring samples align with experiment steps; toggle Step / Wall Time views
 
+## Resuming a run
+
+```python
+t = Tracker(project="demo", resume_from="run_a1b2c3")   # reuse the run_id, continue from last_step
+```
+
+- Pass the same `run_id` via `resume_from` to append data to a previous run instead of creating a new one. On first run, persist `t.run_id` (e.g. into a checkpoint file) so it can be restored later
+- On resume the SDK asks the server for the run's last step and auto-increments from `last_step + 1`; with explicit `step=` you control the x-axis yourself
+- **Resume negotiation always goes over HTTP** (`POST /api/v1/runs/{id}/resume` + `GET /api/v1/runs/{id}/last_step`, default `127.0.0.1:5120`) — even in local mode. Run `trailer up` so step continuation works; otherwise the negotiation fails silently and auto-steps restart from 0
+- All three local storage backends support resuming: SQLite (`storage="sqlite"`, default), file mode (`storage="file", data_dir="data"`), PostgreSQL (`storage="postgres"`)
+
 ## Lifecycle
 
 ```python
