@@ -48,7 +48,20 @@
   let sliderWrap = $state<HTMLDivElement | null>(null);
   let dragging = false; // 非响应式：避免闭包读旧值
   // Surface 模式视角按钮通过 bind:this 调用组件暴露的 setView
-  let surfaceChart = $state<{ setView: (name: 'front' | 'side' | 'top' | 'reset') => void } | undefined>(undefined);
+  let surfaceChart = $state<{ setView: (name: 'front' | 'side' | 'top' | 'reset') => void; playRoll: () => void } | undefined>(undefined);
+
+  // 进入 Surface 视图时自动滚一次小球；切走后复位标志
+  let autoRolled = false;
+  $effect(() => {
+    if (view === 'surf') {
+      if (!autoRolled && current && surfaceChart) {
+        surfaceChart.playRoll();
+        autoRolled = true;
+      }
+    } else {
+      autoRolled = false;
+    }
+  });
 
   // 自动播放：循环切换 step
   let playing = $state(false);
@@ -186,6 +199,12 @@
           {/each}
         </div>
         {#if view === 'surf'}
+          <button
+            type="button"
+            class="px-2 py-0.5 text-[11px] border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            onclick={() => surfaceChart?.playRoll()}
+            aria-label="Roll ball"
+          >⚽ Roll</button>
           {#each [['front', 'Front'], ['side', 'Side'], ['top', 'Top'], ['reset', 'Reset']] as [k, l]}
             <button
               type="button"

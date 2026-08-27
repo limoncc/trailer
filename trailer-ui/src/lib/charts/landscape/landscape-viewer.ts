@@ -8,7 +8,7 @@
  * 交互：左键旋转 / 右键平移 / 滚轮缩放 / 双击复位 / 悬停读取 (α, β, loss)。
  */
 import * as THREE from 'three';
-import { buildSurfaceGeometry, SURFACE_THEME, type SurfaceGeometry } from './surface';
+import { buildSurfaceGeometry, SURFACE_THEME, type SurfaceGeometry, type BallPoint } from './surface';
 import type { ParsedLandscape } from './landscape';
 
 export { SURFACE_THEME };
@@ -48,11 +48,22 @@ export class LandscapeViewer {
   private _grid = new THREE.Group();
   private _axes = new THREE.Group();
   private _hover = new THREE.Group();
+  private _fx = new THREE.Group();
   private _mesh: THREE.Mesh | null = null;
   private _wire: THREE.LineSegments | null = null;
   private _wireframe = false;
   private _geo: SurfaceGeometry | null = null;
   private _data: ParsedLandscape | null = null;
+  private _hSpan = 6;
+  private _ball: THREE.Mesh | null = null;
+  private _ballAnim: {
+    pts: BallPoint[];
+    t0: number;
+    dur: number;
+    attr: THREE.BufferAttribute;
+    zmin: number;
+    range: number;
+  } | null = null;
   private _raf = 0;
   private _paused = false;
   private _target = new THREE.Vector3(0, 0, 0);
@@ -116,6 +127,7 @@ export class LandscapeViewer {
     scene.add(this._axes);
     scene.add(this._surface);
     scene.add(this._hover);
+    scene.add(this._fx);
   }
 
   // ===== 轨道控制（与 pca3d-viewer 同款：azimuth/polar 旋转 + 右键平移 + 滚轮缩放）=====
@@ -264,8 +276,79 @@ export class LandscapeViewer {
   private _loop = (): void => {
     if (this._paused) return;
     this._raf = requestAnimationFrame(this._loop);
+    this._tickBall();
     this.renderer.render(this.scene, this.camera);
   };
+
+  // ===== 小球滚落动画 =====
+  /** 沿 (α, β, loss) 路径播放小球滚落 + 尾迹（数据空间 → 世界坐标 y=hSpan·归一化loss） */
+  playBall(pts: BallPoint[], durationMs = 4000): void {
+    this.clearBall();
+    if (pts.length === 0 || !this._data) return;
+    const d = this._data;
+    const range = d.zmax - d.zmin || 1;
+    const toWorld = (p: BallPoint) =>
+      new THREE.Vector3(p[0], ((p[2] - d.zmin) / range) * this._hSpan, p[1]);
+
+    const r = Math.max(this._fitRadius * 0.018, 0.08);
+    const ball = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 20, 20),
+      new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0x92400e, roughness: 0.35 }),
+    );
+    ball.position.copy(toWorld(pts[0]));
+
+    const positions = new Float32Array(pts.length * 3);
+    const attr = new THREE.BufferAttribute(positions, 3);
+    attr.setUsage(THREE.DynamicDrawUsage);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', attr);
+    geo.setDrawRange(0, 0);
+    const trail = new THREE.Line(
+      geo,
+      new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.9 }),
+    );
+
+    this._fx.add(trail);
+    this._fx.add(ball);
+    this._ball = ball;
+    this._ballAnim = { pts, t0: performance.now(), dur: Math.max(200, durationMs), attr, zmin: d.zmin, range };
+    this.setPaused(false);
+  }
+
+  clearBall(): void {
+    this._ball = null;
+    this._ballAnim = null;
+    this._clearGroup(this._fx);
+  }
+
+  private _tickBall(): void {
+    const anim = this._ballAnim;
+    if (!anim || !this._ball) return;
+    const p = Math.min(1, (performance.now() - anim.t0) / anim.dur);
+    const fIdx = p * (anim.pts.length - 1);
+    const i0 = Math.min(Math.floor(fIdx), anim.pts.length - 1);
+    const frac = fIdx - i0;
+    const cur = anim.pts[i0];
+    const nxt = anim.pts[Math.min(i0 + 1, anim.pts.length - 1)];
+    const a = cur[0] + (nxt[0] - cur[0]) * frac;
+    const b = cur[1] + (nxt[1] - cur[1]) * frac;
+    const l = cur[2] + (nxt[2] - cur[2]) * frac;
+    this._ball.position.set(a, ((l - anim.zmin) / anim.range) * this._hSpan, b);
+
+    const arr = anim.attr.array as Float32Array;
+    for (let i = 0; i <= i0; i++) {
+      const [pa, pb, pl] = anim.pts[i];
+      arr[i * 3] = pa;
+      arr[i * 3 + 1] = ((pl - anim.zmin) / anim.range) * this._hSpan;
+      arr[i * 3 + 2] = pb;
+    }
+    arr[i0 * 3] = a;
+    arr[i0 * 3 + 1] = ((l - anim.zmin) / anim.range) * this._hSpan;
+    arr[i0 * 3 + 2] = b;
+    anim.attr.needsUpdate = true;
+    anim.attr.count = i0 + 2;
+    if (p >= 1) this._ballAnim = null;
+  }
 
   setPaused(paused: boolean): void {
     this._paused = paused;
@@ -392,6 +475,8 @@ export class LandscapeViewer {
 
     const geo = buildSurfaceGeometry(d);
     this._geo = geo;
+    this._hSpan = geo.hSpan;
+    this.clearBall();
 
     const buf = new THREE.BufferGeometry();
     buf.setAttribute('position', new THREE.BufferAttribute(geo.positions, 3));
@@ -474,6 +559,7 @@ export class LandscapeViewer {
     this._clearGroup(this._grid);
     this._clearGroup(this._axes);
     this._clearGroup(this._hover);
+    this._clearGroup(this._fx);
     if (this.renderer && this.renderer.domElement && this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
     }

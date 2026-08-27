@@ -71,3 +71,69 @@ export function buildSurfaceGeometry(d: ParsedLandscape, hSpan = 6): SurfaceGeom
 export function surfaceHeightBounds(g: SurfaceGeometry): { hMin: number; hMax: number } {
   return { hMin: 0, hMax: g.hSpan };
 }
+
+// ===== 小球滚落（梯度下降轨迹，纯函数可测）=====
+
+export type BallPoint = [number, number, number]; // (α, β, loss)
+
+export interface RollOptions {
+  /** 学习率（网格索引单位） */
+  lr?: number;
+  /** 动量 */
+  momentum?: number;
+  /** 最大迭代步 */
+  maxSteps?: number;
+  /** 动画帧上限（路径均匀降采样） */
+  maxPoints?: number;
+}
+
+function bilinear(d: ParsedLandscape, u: number, v: number): number {
+  const cu = Math.min(Math.max(u, 0), d.nCols - 1);
+  const cv = Math.min(Math.max(v, 0), d.nRows - 1);
+  const i = Math.min(Math.floor(cu), d.nCols - 2);
+  const j = Math.min(Math.floor(cv), d.nRows - 2);
+  const fu = cu - i;
+  const fv = cv - j;
+  const z00 = d.z[j * d.nCols + i];
+  const z10 = d.z[j * d.nCols + i + 1];
+  const z01 = d.z[(j + 1) * d.nCols + i];
+  const z11 = d.z[(j + 1) * d.nCols + i + 1];
+  return z00 * (1 - fu) * (1 - fv) + z10 * fu * (1 - fv) + z01 * (1 - fu) * fv + z11 * fu * fv;
+}
+
+/**
+ * 从全局最高点出发的动量梯度下降轨迹（"小球滚落"动画的数据）。
+ * 在连续网格索引空间做中心差分 + 动量更新，输出数据空间 (α, β, loss) 路径。
+ */
+export function rollBallPath(d: ParsedLandscape, opts: RollOptions = {}): BallPoint[] {
+  const { lr = 0.9, momentum = 0.8, maxSteps = 600, maxPoints = 160 } = opts;
+  if (d.z.length === 0) return [];
+
+  // 起点：全局最大 cell（最陡滚落，视觉最有戏剧性）
+  let start = 0;
+  for (let i = 1; i < d.z.length; i++) if (d.z[i] > d.z[start]) start = i;
+  let u = start % d.nCols;
+  let v = Math.floor(start / d.nCols);
+
+  let vu = 0, vv = 0;
+  const raw: BallPoint[] = [[d.xs[Math.round(u)], d.ys[Math.round(v)], bilinear(d, u, v)]];
+  for (let s = 0; s < maxSteps; s++) {
+    const gu = (bilinear(d, u + 1, v) - bilinear(d, u - 1, v)) / 2;
+    const gv = (bilinear(d, u, v + 1) - bilinear(d, u, v - 1)) / 2;
+    if (!Number.isFinite(gu) || !Number.isFinite(gv)) break;
+    vu = momentum * vu - lr * gu;
+    vv = momentum * vv - lr * gv;
+    u = Math.min(Math.max(u + vu, 0), d.nCols - 1);
+    v = Math.min(Math.max(v + vv, 0), d.nRows - 1);
+    raw.push([d.xs[Math.round(u)], d.ys[Math.round(v)], bilinear(d, u, v)]);
+    if (Math.abs(gu) < 1e-7 && Math.abs(gv) < 1e-7 && Math.abs(vu) < 1e-7 && Math.abs(vv) < 1e-7) break;
+  }
+
+  if (raw.length <= maxPoints) return raw;
+  const out: BallPoint[] = [];
+  for (let i = 0; i < maxPoints - 1; i++) {
+    out.push(raw[Math.round((i * (raw.length - 1)) / (maxPoints - 1))]);
+  }
+  out.push(raw[raw.length - 1]);
+  return out;
+}

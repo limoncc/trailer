@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSurfaceGeometry, SURFACE_THEME } from './surface';
+import { buildSurfaceGeometry, rollBallPath, SURFACE_THEME } from './surface';
 import { colormap, linspace, type ParsedLandscape } from './landscape';
 
 function makeParsed(nR = 3, nC = 3): ParsedLandscape {
@@ -62,6 +62,62 @@ describe('buildSurfaceGeometry', () => {
     const p = makeParsed();
     p.z = new Float32Array(0);
     expect(() => buildSurfaceGeometry(p)).toThrow();
+  });
+});
+
+describe('rollBallPath', () => {
+  function bowl(n = 41): ParsedLandscape {
+    const xs = linspace(-1, 1, n);
+    const ys = linspace(-1, 1, n);
+    const z = new Float32Array(n * n);
+    let zmin = Infinity, zmax = -Infinity;
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++) {
+        const v = xs[c] * xs[c] + ys[r] * ys[r];
+        z[r * n + c] = v;
+        if (v < zmin) zmin = v;
+        if (v > zmax) zmax = v;
+      }
+    return { nRows: n, nCols: n, xRange: [-1, 1], yRange: [-1, 1], xs, ys, z, zmin, zmax, meta: {} };
+  }
+
+  it('starts at the global maximum, descends monotonically, ends near the minimum', () => {
+    const d = bowl();
+    const path = rollBallPath(d);
+    expect(path.length).toBeGreaterThan(5);
+    // 起点在全局最高点
+    expect(path[0][2]).toBeCloseTo(d.zmax, 3);
+    // loss 单调不升（容忍浮点噪声）
+    for (let i = 1; i < path.length; i++) {
+      expect(path[i][2]).toBeLessThanOrEqual(path[i - 1][2] + 1e-9);
+    }
+    // 终点接近碗底
+    expect(path[path.length - 1][2]).toBeLessThan(0.05);
+    // 终点坐标在网格范围内
+    const [a, b] = path[path.length - 1];
+    expect(Math.abs(a)).toBeLessThan(0.15);
+    expect(Math.abs(b)).toBeLessThan(0.15);
+  });
+
+  it('subsamples long paths to a bounded frame count', () => {
+    const path = rollBallPath(bowl(), { maxPoints: 50 });
+    expect(path.length).toBeLessThanOrEqual(50);
+  });
+
+  it('returns finite points for a flat grid', () => {
+    const n = 8;
+    const d: ParsedLandscape = {
+      nRows: n, nCols: n, xRange: [-1, 1], yRange: [-1, 1],
+      xs: linspace(-1, 1, n), ys: linspace(-1, 1, n),
+      z: new Float32Array(n * n), zmin: 0, zmax: 0, meta: {},
+    };
+    const path = rollBallPath(d);
+    expect(path.length).toBeGreaterThanOrEqual(1);
+    for (const [a, b, l] of path) {
+      expect(Number.isFinite(a)).toBe(true);
+      expect(Number.isFinite(b)).toBe(true);
+      expect(Number.isFinite(l)).toBe(true);
+    }
   });
 });
 

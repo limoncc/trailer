@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { LandscapeViewer, SURFACE_THEME, type SurfaceHoverInfo } from './landscape-viewer';
+  import { rollBallPath } from './surface';
   import type { ParsedLandscape } from './landscape';
 
   interface Props {
@@ -67,6 +68,11 @@
   /// 供父组件通过 bind:this 调用：切换预设视角
   export function setView(name: 'front' | 'side' | 'top' | 'reset') {
     viewer?.setView(name);
+  }
+
+  /// 播放小球从最高点沿梯度滚落（数据变化后可重复调用）
+  export function playRoll() {
+    if (viewer && data) viewer.playBall(rollBallPath(data));
   }
 
   onDestroy(() => {
