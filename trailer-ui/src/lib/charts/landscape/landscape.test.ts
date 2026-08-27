@@ -81,9 +81,9 @@ describe('colormap', () => {
     expect(colormap(1, 'plasma')).toEqual([240, 249, 33]);
   });
 
-  it('defaults to plasma (明亮,避免大面积暗黑)', () => {
-    expect(colormap(0)).toEqual([13, 8, 135]);
-    expect(colormap(1)).toEqual([240, 249, 33]);
+  it('defaults to coolwarm (浅色发散,避免大面积暗黑)', () => {
+    expect(colormap(0)).toEqual([59, 76, 192]);
+    expect(colormap(1)).toEqual([180, 4, 38]);
   });
 
   it('coolwarm: bright diverging blue → white → red', () => {

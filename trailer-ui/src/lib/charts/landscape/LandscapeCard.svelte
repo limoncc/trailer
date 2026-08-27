@@ -32,7 +32,7 @@
   let expanded = $state(true);
   let view = $state<ViewMode>('heat');
   let wireframe = $state(false);
-  let cmap = $state('plasma');
+  let cmap = $state('coolwarm');
   let rollSpeed = $state(1); // 滚球速度倍率
   const ROLL_BASE_MS = 4000;
   // 默认选最新 step（一次性 init 标志，避免覆盖用户点击 step 0——导航指南 §4.7 踩坑）

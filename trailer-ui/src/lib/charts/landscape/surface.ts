@@ -25,13 +25,13 @@ export interface SurfaceGeometry {
 /**
  * 把解析后的景观网格转成带顶点色的三角面片。
  * @param hSpan 高度轴世界跨度（默认 6，与默认视角距离匹配）
- * @param cmapName 配色方案（默认 magma）
+ * @param cmapName 配色方案（默认 coolwarm）
  * @throws 网格为空或边长 <2
  */
 export function buildSurfaceGeometry(
   d: ParsedLandscape,
   hSpan = 6,
-  cmapName: string = 'magma',
+  cmapName: string = 'coolwarm',
 ): SurfaceGeometry {
   if (d.nRows < 2 || d.nCols < 2 || d.z.length < d.nRows * d.nCols) {
     throw new Error('landscape 网格无效：至少 2×2');

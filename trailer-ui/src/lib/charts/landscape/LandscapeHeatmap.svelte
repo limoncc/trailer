@@ -27,7 +27,7 @@
     contourLevels = [],
     contourRings = [],
     fillHeat = true,
-    cmap = 'plasma',
+    cmap = 'coolwarm',
     ballPath = [],
     rollToken = 0,
     ballDuration = 4000,

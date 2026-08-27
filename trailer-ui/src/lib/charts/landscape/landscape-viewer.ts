@@ -26,7 +26,7 @@ export interface LandscapeViewerOptions {
   gridColor?: number;
   axisColor?: number;
   wireframe?: boolean;
-  /** 配色方案名（landscape.ts COLORMAP_NAMES，默认 plasma） */
+  /** 配色方案名（landscape.ts COLORMAP_NAMES，默认 coolwarm） */
   cmap?: string;
   onHover?: (info: SurfaceHoverInfo | null) => void;
 }
@@ -54,7 +54,7 @@ export class LandscapeViewer {
   private _mesh: THREE.Mesh | null = null;
   private _wire: THREE.LineSegments | null = null;
   private _wireframe = false;
-  private _cmap = 'plasma';
+  private _cmap = 'coolwarm';
   private _geo: SurfaceGeometry | null = null;
   private _data: ParsedLandscape | null = null;
   private _hSpan = 6;
@@ -85,7 +85,7 @@ export class LandscapeViewer {
     this.gridColor = opts.gridColor ?? SURFACE_THEME.light.grid;
     this.axisColor = opts.axisColor ?? SURFACE_THEME.light.axis;
     this.wireframe = opts.wireframe ?? false;
-    this._cmap = opts.cmap ?? 'plasma';
+    this._cmap = opts.cmap ?? 'coolwarm';
     this.onHover = opts.onHover ?? null;
     this._onResize = () => {
       const W = this.container.clientWidth || 800;

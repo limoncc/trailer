@@ -136,10 +136,10 @@ export type ColormapName = (typeof COLORMAP_NAMES)[number];
 
 /**
  * t ∈ [0,1] → 指定方案的 RGB(0-255)，越界 clamp。供热力图/等高线/3D 曲面共用。
- * 默认 plasma：整体明亮饱满；magma 偏暗、viridis 经典、coolwarm 浅色发散。
+ * 默认 coolwarm：整体明亮饱满；magma 偏暗、viridis 经典、coolwarm 浅色发散。
  */
-export function colormap(t: number, name: string = 'plasma'): [number, number, number] {
-  const anchors = COLORMAP_TABLE[name] ?? COLORMAP_TABLE.plasma;
+export function colormap(t: number, name: string = 'coolwarm'): [number, number, number] {
+  const anchors = COLORMAP_TABLE[name] ?? COLORMAP_TABLE.coolwarm;
   const clamped = Math.min(1, Math.max(0, t));
   const pos = clamped * (anchors.length - 1);
   const i = Math.min(Math.floor(pos), anchors.length - 2);

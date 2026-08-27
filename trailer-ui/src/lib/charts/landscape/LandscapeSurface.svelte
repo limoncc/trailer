@@ -10,7 +10,7 @@
     /** step 切换时保留相机视角（默认 true） */
     keepView?: boolean;
     wireframe?: boolean;
-    /** 配色方案名（默认 plasma） */
+    /** 配色方案名（默认 coolwarm） */
     cmap?: string;
     showHover?: boolean;
   }
@@ -20,7 +20,7 @@
     height = 420,
     keepView = true,
     wireframe = false,
-    cmap = 'plasma',
+    cmap = 'coolwarm',
     showHover = true,
   }: Props = $props();
 
