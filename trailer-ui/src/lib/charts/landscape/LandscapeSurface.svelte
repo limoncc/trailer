@@ -10,6 +10,8 @@
     /** step 切换时保留相机视角（默认 true） */
     keepView?: boolean;
     wireframe?: boolean;
+    /** 配色方案名（默认 magma） */
+    cmap?: string;
     showHover?: boolean;
   }
 
@@ -18,6 +20,7 @@
     height = 420,
     keepView = true,
     wireframe = false,
+    cmap = 'magma',
     showHover = true,
   }: Props = $props();
 
@@ -52,13 +55,19 @@
     if (!viewer) {
       viewer = new LandscapeViewer(container, {
         wireframe,
+        cmap,
         backgroundColor: dark ? SURFACE_THEME.dark.bg : SURFACE_THEME.light.bg,
         gridColor: dark ? SURFACE_THEME.dark.grid : SURFACE_THEME.light.grid,
         axisColor: dark ? SURFACE_THEME.dark.axis : SURFACE_THEME.light.axis,
         onHover: showHover ? (info) => (hover = info) : undefined,
       });
     }
-    viewer.setData(data, { keepView: first ? false : keepView });
+    viewer.setData(data, { keepView: first ? false : keepView, cmap });
+  });
+
+  // 配色切换：保留相机重刷曲面
+  $effect(() => {
+    if (viewer && data) viewer.setData(data, { keepView: true, cmap });
   });
 
   $effect(() => {

@@ -5,8 +5,10 @@
   import {
     parseFigureToLandscape,
     buildContourLevels,
+    COLORMAP_NAMES,
   } from './landscape';
   import { buildContourRings } from './contour';
+  import { rollBallPath } from './surface';
   import type { LandscapeGroup, ParsedLandscape } from './landscape';
 
   interface Props {
@@ -25,6 +27,7 @@
   let expanded = $state(true);
   let view = $state<ViewMode>('heat');
   let wireframe = $state(false);
+  let cmap = $state('magma');
   // 默认选最新 step（一次性 init 标志，避免覆盖用户点击 step 0——导航指南 §4.7 踩坑）
   let selectedIndex = $state(0);
   let init = true;
@@ -50,17 +53,18 @@
   // Surface 模式视角按钮通过 bind:this 调用组件暴露的 setView
   let surfaceChart = $state<{ setView: (name: 'front' | 'side' | 'top' | 'reset') => void; playRoll: () => void } | undefined>(undefined);
 
-  // 进入 Surface 视图时自动滚一次小球；切走后复位标志
-  let autoRolled = false;
+  // 滚球：视图或数据帧变化即重放；⚽ 按钮手动触发
+  let rollToken = $state(0);
   $effect(() => {
-    if (view === 'surf') {
-      if (!autoRolled && current && surfaceChart) {
-        surfaceChart.playRoll();
-        autoRolled = true;
-      }
-    } else {
-      autoRolled = false;
-    }
+    void view;
+    void current;
+    rollToken++;
+  });
+  const ballPath = $derived(current ? rollBallPath(current) : []);
+
+  $effect(() => {
+    void rollToken;
+    if (view === 'surf' && current && surfaceChart) surfaceChart.playRoll();
   });
 
   // 自动播放：循环切换 step
@@ -187,7 +191,7 @@
         {/if}
       </div>
 
-      <!-- 视图切换 + 曲面视角/线框 -->
+      <!-- 视图切换 + 滚球 + 配色（滚球在三种视图下都可用）-->
       <div class="flex items-center gap-1 flex-wrap">
         <div class="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
           {#each VIEW_TABS as [k, l]}
@@ -198,13 +202,13 @@
             >{l}</button>
           {/each}
         </div>
+        <button
+          type="button"
+          class="px-2 py-0.5 text-[11px] border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          onclick={() => rollToken++}
+          aria-label="Roll ball"
+        >⚽ Roll</button>
         {#if view === 'surf'}
-          <button
-            type="button"
-            class="px-2 py-0.5 text-[11px] border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            onclick={() => surfaceChart?.playRoll()}
-            aria-label="Roll ball"
-          >⚽ Roll</button>
           {#each [['front', 'Front'], ['side', 'Side'], ['top', 'Top'], ['reset', 'Reset']] as [k, l]}
             <button
               type="button"
@@ -216,6 +220,15 @@
             <input type="checkbox" bind:checked={wireframe} class="accent-primary" /> wireframe
           </label>
         {/if}
+        <select
+          bind:value={cmap}
+          aria-label="Colormap"
+          class="ml-auto px-1.5 py-1 text-[11px] border border-border rounded-md bg-background text-muted-foreground"
+        >
+          {#each COLORMAP_NAMES as name}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
       </div>
 
       {#if view === 'surf'}
@@ -225,6 +238,7 @@
           height={compact ? 300 : 400}
           keepView
           {wireframe}
+          {cmap}
         />
       {:else}
         <LandscapeHeatmap
@@ -232,6 +246,9 @@
           height={compact ? 300 : 400}
           contourLevels={view === 'contour' ? levels : []}
           contourRings={view === 'contour' ? rings : []}
+          {cmap}
+          {ballPath}
+          {rollToken}
         />
       {/if}
 

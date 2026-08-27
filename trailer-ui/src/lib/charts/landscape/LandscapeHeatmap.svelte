@@ -9,9 +9,23 @@
     contourLevels?: number[];
     /** 等高线闭合环（数据空间坐标，由 buildContourRings 产出） */
     contourRings?: { id: number; points: [number, number][] }[];
+    /** 配色方案名（见 landscape.ts COLORMAP_NAMES） */
+    cmap?: string;
+    /** 小球滚落路径 (α, β, loss)（由 rollBallPath 产出） */
+    ballPath?: [number, number, number][];
+    /** 递增令牌：变化即重放滚球 */
+    rollToken?: number;
   }
 
-  let { data, height = 420, contourLevels = [], contourRings = [] }: Props = $props();
+  let {
+    data,
+    height = 420,
+    contourLevels = [],
+    contourRings = [],
+    cmap = 'magma',
+    ballPath = [],
+    rollToken = 0,
+  }: Props = $props();
 
   let container: HTMLDivElement;
   let canvas: HTMLCanvasElement;
@@ -27,6 +41,29 @@
     });
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => mo.disconnect();
+  });
+
+  // ---- 小球动画（非响应式内部状态；rollToken 变化即重放）----
+  const BALL_DURATION = 4000;
+  let ballIdx = -1;          // 当前帧在 ballPath 中的位置
+  let activePath: [number, number, number][] | null = null;
+  let ballGen = 0;
+
+  $effect(() => {
+    void rollToken;
+    if (rollToken <= 0 || ballPath.length === 0) return;
+    activePath = ballPath;
+    const gen = ++ballGen;
+    const start = performance.now();
+    const step = () => {
+      if (gen !== ballGen) return; // 已被新一轮动画取代
+      const p = Math.min(1, (performance.now() - start) / BALL_DURATION);
+      ballIdx = Math.round(p * (activePath!.length - 1));
+      draw();
+      if (p < 1) requestAnimationFrame(step);
+    };
+    ballIdx = 0;
+    requestAnimationFrame(step);
   });
 
   const PAD = { top: 10, right: 14, bottom: 34, left: 52 };
@@ -70,7 +107,7 @@
     for (let r = 0; r < d.nRows; r++) {
       for (let c = 0; c < d.nCols; c++) {
         const t = d.zmax > d.zmin ? (d.z[r * d.nCols + c] - d.zmin) / (d.zmax - d.zmin) : 0;
-        const [cr, cg, cb] = colormap(t);
+        const [cr, cg, cb] = colormap(t, cmap);
         const o = (r * d.nCols + c) * 4;
         img.data[o] = cr; img.data[o + 1] = cg; img.data[o + 2] = cb; img.data[o + 3] = 255;
       }
@@ -100,6 +137,37 @@
         ctx.closePath();
         ctx.stroke();
       }
+    }
+
+    // ---- 小球 + 尾迹 ----
+    if (activePath && ballIdx >= 0) {
+      const trail = dark ? 'rgba(255,255,255,0.85)' : 'rgba(17,24,39,0.65)';
+      ctx.strokeStyle = trail;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const lim = Math.min(ballIdx, activePath.length - 1);
+      for (let i = 0; i <= lim; i++) {
+        const [px, py] = toPx(activePath[i][0], activePath[i][1], d, R);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      // 起点标记
+      const [sx, sy] = toPx(activePath[0][0], activePath[0][1], d, R);
+      ctx.strokeStyle = trail;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+      ctx.stroke();
+      // 小球
+      const [bx, by] = toPx(activePath[lim][0], activePath[lim][1], d, R);
+      const r = Math.max(4.5, R.w * 0.008);
+      ctx.beginPath();
+      ctx.arc(bx, by, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.strokeStyle = dark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
 
     // ---- 绘图区边框 ----
@@ -169,9 +237,9 @@
     hover = { a, b, loss: d.z[r * d.nCols + c], mx, my };
   }
 
-  // 数据/等高线/主题变化 → 重绘
+  // 数据/等高线/主题/配色变化 → 重绘
   $effect(() => {
-    void data; void contourLevels; void contourRings; void dark;
+    void data; void contourLevels; void contourRings; void dark; void cmap;
     draw();
   });
 

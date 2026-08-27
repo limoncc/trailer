@@ -26,6 +26,8 @@ export interface LandscapeViewerOptions {
   gridColor?: number;
   axisColor?: number;
   wireframe?: boolean;
+  /** 配色方案名（landscape.ts COLORMAP_NAMES，默认 magma） */
+  cmap?: string;
   onHover?: (info: SurfaceHoverInfo | null) => void;
 }
 
@@ -52,6 +54,7 @@ export class LandscapeViewer {
   private _mesh: THREE.Mesh | null = null;
   private _wire: THREE.LineSegments | null = null;
   private _wireframe = false;
+  private _cmap = 'magma';
   private _geo: SurfaceGeometry | null = null;
   private _data: ParsedLandscape | null = null;
   private _hSpan = 6;
@@ -82,6 +85,7 @@ export class LandscapeViewer {
     this.gridColor = opts.gridColor ?? SURFACE_THEME.light.grid;
     this.axisColor = opts.axisColor ?? SURFACE_THEME.light.axis;
     this.wireframe = opts.wireframe ?? false;
+    this._cmap = opts.cmap ?? 'magma';
     this.onHover = opts.onHover ?? null;
     this._onResize = () => {
       const W = this.container.clientWidth || 800;
@@ -467,13 +471,14 @@ export class LandscapeViewer {
   }
 
   // ===== 数据加载：重建曲面 mesh（keepView 时保留相机）=====
-  setData(d: ParsedLandscape, opts?: { keepView?: boolean }): void {
+  setData(d: ParsedLandscape, opts?: { keepView?: boolean; cmap?: string }): void {
+    if (opts?.cmap && opts.cmap !== this._cmap) this._cmap = opts.cmap;
     this._clearGroup(this._surface);
     this._mesh = null;
     this._wire = null;
     this._data = d;
 
-    const geo = buildSurfaceGeometry(d);
+    const geo = buildSurfaceGeometry(d, 6, this._cmap);
     this._geo = geo;
     this._hSpan = geo.hSpan;
     this.clearBall();
