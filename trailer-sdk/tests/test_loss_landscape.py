@@ -130,3 +130,107 @@ class TestPackLandscape:
             _pack_landscape([[float("nan"), 0.0], [0.0, 0.0]])
         with pytest.raises(ValueError):
             _pack_landscape([[float("inf"), 0.0], [0.0, 0.0]])
+
+
+def _remote_tracker(monkeypatch):
+    """构造远程模式 Tracker + 捕获 POST payload（与 test_log_pca 同法）。"""
+    monkeypatch.setenv("TRAILER_HOST", "http://test:8080")
+    posted = []
+
+    def fake_urlopen(req, timeout=None):
+        posted.append(json.loads(req.data))
+        resp = Mock()
+        resp.status = 201
+        resp.__enter__ = Mock(return_value=resp)
+        resp.__exit__ = Mock(return_value=None)
+        return resp
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    from trailer.tracker import Tracker
+    t = Tracker(project="test", db_path=":memory:")
+    return t, posted
+
+
+class TestLogLossLandscape:
+    """log_loss_landscape 端到端：本地走 save_figure / 远程 POST figures。"""
+
+    def test_remote_post_payload(self, monkeypatch):
+        """远程模式 → POST {name, kind:'landscape', body, step}，body 完整可逆。"""
+        t, posted = _remote_tracker(monkeypatch)
+        grid = [[0.0, 1.0], [2.0, 3.0]]
+        t.log_loss_landscape(grid, name="ll", step=7, meta={"normalization": "filter"})
+        t.finish()
+
+        assert len(posted) >= 1
+        payload = posted[-1]
+        assert payload["kind"] == "landscape"
+        assert payload["name"] == "ll"
+        assert payload["step"] == 7
+        body = json.loads(payload["body"])
+        assert body["n_rows"] == 2 and body["n_cols"] == 2
+        assert body["z"] == [[0.0, 1.0], [2.0, 3.0]]
+        assert body["meta"]["normalization"] == "filter"
+
+    def test_numpy_input(self, monkeypatch):
+        """np.ndarray 输入端到端。"""
+        np = pytest.importorskip("numpy")
+        t, posted = _remote_tracker(monkeypatch)
+        g = np.arange(9, dtype=np.float64).reshape(3, 3)
+        t.log_loss_landscape(g * 0.5, name="arr")
+        t.finish()
+
+        body = json.loads(posted[-1]["body"])
+        assert (body["n_rows"], body["n_cols"]) == (3, 3)
+
+    def test_step_auto_increment(self, monkeypatch):
+        """step 自动递增；显式传 step 不递增。"""
+        t, posted = _remote_tracker(monkeypatch)
+        grid = [[0.0, 0.0], [0.0, 0.0]]
+        t.log_loss_landscape(grid, name="a")
+        t.log_loss_landscape(grid, name="b")
+        t.log_loss_landscape(grid, name="c", step=99)
+        t.finish()
+
+        posts = [p for p in posted if p.get("kind") == "landscape"]
+        steps = [p["step"] for p in posts]
+        assert steps[0] < steps[1]
+        assert steps[-1] == 99
+
+    def test_invalid_grid_prints_and_no_post(self, monkeypatch, capsys):
+        """非法网格打印提示且不抛异常、不产生 POST。"""
+        t, posted = _remote_tracker(monkeypatch)
+        out = t.log_loss_landscape([1.0, 2.0, 3.0])  # 一维非法
+        assert out is None
+        t.finish()
+
+        assert not any(p.get("kind") == "landscape" for p in posted)
+        assert "log_loss_landscape" in capsys.readouterr().out
+
+    def test_local_mode_routes_to_save_figure(self, monkeypatch):
+        """本地模式 → backend.save_figure(name, 'landscape', body, step, run_id)。"""
+        t, _posted = _remote_tracker(monkeypatch)
+        # 翻转为本地模式，后端换成捕获桩
+        calls = []
+        backend = Mock()
+        backend.save_figure.side_effect = (
+            lambda name, kind, body, step, run_id: calls.append((name, kind, body, step))
+        )
+        t._mode = "local"
+        t._backend = backend
+
+        t.log_loss_landscape([[0.0, 1.0], [1.0, 0.0]], name="loc", step=3)
+        t.finish()
+
+        assert len(calls) == 1
+        name, kind, body, step = calls[0]
+        assert (name, kind, step) == ("loc", "landscape", 3)
+        assert json.loads(body)["x_range"] == [-1.0, 1.0]
+
+    def test_default_name(self, monkeypatch):
+        """缺省 name='loss_landscape'。"""
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape([[0.0, 0.0], [0.0, 0.0]])
+        t.finish()
+
+        assert posted[-1]["name"] == "loss_landscape"

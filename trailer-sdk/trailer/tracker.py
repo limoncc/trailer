@@ -671,6 +671,67 @@ class Tracker:
             except Exception as exc:
                 print(f"Trailer: log_model failed: {exc}")
 
+    def log_loss_landscape(
+        self,
+        loss_grid,
+        *,
+        name: str = "loss_landscape",
+        step: int | None = None,
+        x_range=(-1.0, 1.0),
+        y_range=(-1.0, 1.0),
+        meta=None,
+    ) -> None:
+        """记录损失景观(2D loss surface)网格，前端 Landscape 面板展示热力图/等高线/3D 曲面。
+
+        z[row][col] = loss(θ* + α·δ + β·η)，α ∈ x_range，β ∈ y_range。
+        多个 step 各记一张即可在前端用滑条回放"景观随训练演化"动画。
+
+        ⚠️ 方向 δ/η 必须做 filter 归一化并跳过 bias/BN 参数——
+           BN 的尺度不变性会让未归一化方向呈现假悬崖(垃圾图)；
+           BN running statistics 处理方式见 examples/loss_landscape_demo.py。
+
+        Args:
+            loss_grid: 二维 list/tuple/np.ndarray，N×M（推荐 51×51），边长上限 250；
+            name: 卡片名（同名按 step 成组）。
+            step: 全局 step（None 自动递增）。
+            x_range / y_range: α/β 轴端点，缺省 (-1, 1)，乱序自动归一。
+            meta: 附加元数据（normalization/direction/seed/split 等），覆盖自动键。
+
+        Returns:
+            None。非法输入打印提示不抛异常（不阻塞训练循环）。
+        """
+        try:
+            data = _pack_landscape(loss_grid, x_range=x_range, y_range=y_range, meta=meta)
+        except Exception as e:
+            print(f"Trailer: log_loss_landscape failed: {e}")
+            return
+
+        if step is None:
+            step = self._step
+            self._step += 1
+        self._latest_step = max(self._latest_step, step)
+        self._notify_step(self._latest_step)
+
+        body = json.dumps(data)
+        if self._mode == "local":
+            try:
+                self._backend.save_figure(name, "landscape", body, step, self.run_id)
+            except Exception as e:
+                print(f"Trailer: log_loss_landscape failed: {e}")
+        else:
+            import urllib.request as _req
+            host = self._host or "http://127.0.0.1:5120"
+            payload = {"name": name, "kind": "landscape", "body": body, "step": step}
+            data_b = json.dumps(payload).encode()
+            req = _req.Request(
+                f"{host.rstrip('/')}/api/v1/runs/{self.run_id}/figures",
+                data=data_b, headers=self._auth_headers(), method="POST",
+            )
+            try:
+                _req.urlopen(req, timeout=30)
+            except Exception as exc:
+                print(f"Trailer: log_loss_landscape failed: {exc}")
+
     def log_embedding(
         self,
         vectors,
