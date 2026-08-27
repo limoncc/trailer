@@ -28,9 +28,11 @@ The run page (`/run/[id]`) shows up to 10 tabs. Tabs appear only when the run ha
 
 Each logged landscape (`t.log_loss_landscape(...)`, see [Advanced Data Types](/sdk/advanced-data/)) becomes a card:
 
-- **Heat** — viridis heatmap, hover reads (α, β, loss)
+- **Heat** — continuous colormap field, hover reads (α, β, loss)
 - **Contour** — heatmap with d3-contour overlay
 - **Surface** — interactive Three.js mesh: drag to rotate, scroll to zoom, wireframe toggle, Front/Side/Top views
+- **⚽ Roll** — replays a gradient-descent ball (from the highest point, with trail) in **every** view; auto-plays on view switch and on each new step frame
+- **Colormap picker** — magma (default) / plasma / viridis, applied to heatmap, contours and the 3D mesh
 - **Step slider + ▶ auto-play** — replay landscape evolution across training
 - Cards group by name and refresh live while the run is still training
 

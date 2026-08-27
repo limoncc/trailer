@@ -28,9 +28,11 @@ Run 页面(`/run/[id]`)展示最多 10 个标签。只有 run 有对应数据时
 
 每张记录的损失景观(`t.log_loss_landscape(...)`,见[高级数据类型](/zh-cn/sdk/advanced-data/))对应一张卡片:
 
-- **Heat** — viridis 热力图,悬停读取 (α, β, loss)
+- **Heat** — 连续色彩场,悬停读取 (α, β, loss)
 - **Contour** — 热力图 + d3-contour 等高线叠加
 - **Surface** — 可交互 Three.js 曲面:拖拽旋转、滚轮缩放、线框开关、Front/Side/Top 视角
+- **⚽ Roll** — **三种视图**都可重放梯度下降小球(从最高点滚落,带尾迹);切换视图或新数据帧时自动播放
+- **配色选择器** — magma(默认)/ plasma / viridis,热力图、等高线与 3D 曲面同步应用
 - **Step 滑块 + ▶ 自动播放** — 回放景观随训练的演化
 - 卡片按名称分组;run 仍在训练时按刷新间隔实时补帧
 
