@@ -9,6 +9,7 @@ Usage:
 """
 
 import json
+import math
 import os
 import time
 import threading
@@ -22,6 +23,84 @@ DEFAULT_PCA_COLORS = [
     "#5B8FF9", "#5AD8A6", "#5D7092", "#F6BD16", "#E8684A",
     "#6DC8EC", "#9270CA", "#FF9D4D", "#269A99", "#FF99C3",
 ]
+
+# 损失景观网格边长上限（典型 51×51；防 figures.body 文本体积失控）
+LANDSCAPE_MAX_EDGE = 250
+
+
+def _norm_range(r) -> list[float]:
+    """轴范围归一为 [min, max]；两端相等或非有限值视为无效。"""
+    a, b = float(r[0]), float(r[1])
+    if not (math.isfinite(a) and math.isfinite(b)):
+        raise ValueError(f"x/y_range 需为有限数值，收到 {r!r}")
+    lo, hi = sorted((a, b))
+    if math.isclose(lo, hi):
+        raise ValueError(f"range 两端不能相等: {r!r}")
+    return [lo, hi]
+
+
+def _round_sig6(v: float) -> float:
+    """保留 6 位有效数字（控 JSON 体积，精度对渲染无损）。"""
+    return float(f"{v:.6g}")
+
+
+def _pack_landscape(loss_grid, x_range=(-1.0, 1.0), y_range=(-1.0, 1.0), meta=None) -> dict:
+    """把损失景观二维矩阵打包为 figures(kind='landscape') 的 body dict。
+
+    Args:
+        loss_grid: 二维 list/tuple 或 np.ndarray（行主序：z[row][col]）。
+        x_range / y_range: α/β 轴端点，缺省 (-1, 1)，乱序自动归一。
+        meta: 用户元数据；同名键覆盖自动键。
+
+    Returns:
+        {"v", "n_rows", "n_cols", "x_range", "y_range", "z", "meta"}；
+        meta 自动含 n_rows/n_cols/x_range/y_range。
+
+    Raises:
+        ValueError: 非 2D、行列不齐、任一边长 <2 或 >250、含 NaN/Inf、range 无效。
+    """
+    rows = loss_grid.tolist() if hasattr(loss_grid, "tolist") else loss_grid
+    if not isinstance(rows, (list, tuple)) or len(rows) == 0:
+        raise ValueError("loss_grid 需为二维 N×M 矩阵")
+    n_rows = len(rows)
+    first = rows[0]
+    if not isinstance(first, (list, tuple)) or len(first) == 0:
+        raise ValueError("loss_grid 需为二维 N×M 矩阵（收到一维或空行）")
+    n_cols = len(first)
+    if n_rows < 2 or n_cols < 2:
+        raise ValueError(f"网格至少 2×2，收到 {n_rows}×{n_cols}")
+    if n_rows > LANDSCAPE_MAX_EDGE or n_cols > LANDSCAPE_MAX_EDGE:
+        raise ValueError(
+            f"网格边长超过上限 {LANDSCAPE_MAX_EDGE}，请降采样后再记录（收到 {n_rows}×{n_cols}）"
+        )
+
+    z: list[list[float]] = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, (list, tuple)) or len(row) != n_cols:
+            raise ValueError(f"第 {i} 行长度与首行不一致（{len(row)} != {n_cols}），网格需矩形")
+        out_row = []
+        for j, v in enumerate(row):
+            fv = float(v)
+            if not math.isfinite(fv):
+                raise ValueError(f"网格含非有限值 NaN/Inf（位置 [{i}][{j}]），前端无法解析")
+            out_row.append(_round_sig6(fv))
+        z.append(out_row)
+
+    xr = _norm_range(x_range)
+    yr = _norm_range(y_range)
+    merged = {"n_rows": n_rows, "n_cols": n_cols, "x_range": xr, "y_range": yr}
+    if meta:
+        merged.update(meta)
+
+    return {
+        "v": 1,
+        "n_rows": n_rows,
+        "n_cols": n_cols,
+        "x_range": xr,
+        "y_range": yr,
+        "z": z,
+        "meta": merged,
+    }
 
 
 class Tracker:
