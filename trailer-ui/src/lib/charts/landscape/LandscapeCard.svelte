@@ -21,13 +21,20 @@
 
   let { group, onMoveUp, onMoveDown, onRemove, compact = false }: Props = $props();
 
-  type ViewMode = 'heat' | 'contour' | 'surf';
-  const VIEW_TABS: [ViewMode, string][] = [['heat', 'Heat'], ['contour', 'Contour'], ['surf', 'Surface']];
+  type ViewMode = 'heat' | 'contour' | 'both' | 'surf';
+  const VIEW_TABS: [ViewMode, string][] = [
+    ['heat', 'Heat'],
+    ['contour', 'Contour'],
+    ['both', 'Both'],
+    ['surf', 'Surface'],
+  ];
 
   let expanded = $state(true);
   let view = $state<ViewMode>('heat');
   let wireframe = $state(false);
-  let cmap = $state('magma');
+  let cmap = $state('plasma');
+  let rollSpeed = $state(1); // 滚球速度倍率
+  const ROLL_BASE_MS = 4000;
   // 默认选最新 step（一次性 init 标志，避免覆盖用户点击 step 0——导航指南 §4.7 踩坑）
   let selectedIndex = $state(0);
   let init = true;
@@ -64,7 +71,7 @@
 
   $effect(() => {
     void rollToken;
-    if (view === 'surf' && current && surfaceChart) surfaceChart.playRoll();
+    if (view === 'surf' && current && surfaceChart) surfaceChart.playRoll(ROLL_BASE_MS / rollSpeed);
   });
 
   // 自动播放：循环切换 step
@@ -208,6 +215,15 @@
           onclick={() => rollToken++}
           aria-label="Roll ball"
         >⚽ Roll</button>
+        <select
+          bind:value={rollSpeed}
+          aria-label="Roll speed"
+          class="px-1 py-0.5 text-[11px] border border-border rounded-md bg-background text-muted-foreground"
+        >
+          {#each [0.5, 1, 2, 4] as s}
+            <option value={s}>{s}×</option>
+          {/each}
+        </select>
         {#if view === 'surf'}
           {#each [['front', 'Front'], ['side', 'Side'], ['top', 'Top'], ['reset', 'Reset']] as [k, l]}
             <button
@@ -244,11 +260,13 @@
         <LandscapeHeatmap
           data={current}
           height={compact ? 300 : 400}
-          contourLevels={view === 'contour' ? levels : []}
-          contourRings={view === 'contour' ? rings : []}
+          contourLevels={view === 'contour' || view === 'both' ? levels : []}
+          contourRings={view === 'contour' || view === 'both' ? rings : []}
+          fillHeat={view !== 'contour'}
           {cmap}
           {ballPath}
           {rollToken}
+          ballDuration={ROLL_BASE_MS / rollSpeed}
         />
       {/if}
 

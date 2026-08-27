@@ -10,7 +10,7 @@
     /** step 切换时保留相机视角（默认 true） */
     keepView?: boolean;
     wireframe?: boolean;
-    /** 配色方案名（默认 magma） */
+    /** 配色方案名（默认 plasma） */
     cmap?: string;
     showHover?: boolean;
   }
@@ -20,7 +20,7 @@
     height = 420,
     keepView = true,
     wireframe = false,
-    cmap = 'magma',
+    cmap = 'plasma',
     showHover = true,
   }: Props = $props();
 
@@ -79,9 +79,9 @@
     viewer?.setView(name);
   }
 
-  /// 播放小球从最高点沿梯度滚落（数据变化后可重复调用）
-  export function playRoll() {
-    if (viewer && data) viewer.playBall(rollBallPath(data));
+  /// 播放小球从最高点沿梯度滚落（durationMs 控制时长,数据变化后可重复调用）
+  export function playRoll(durationMs = 4000) {
+    if (viewer && data) viewer.playBall(rollBallPath(data), durationMs);
   }
 
   onDestroy(() => {

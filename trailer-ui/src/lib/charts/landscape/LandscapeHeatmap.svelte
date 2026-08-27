@@ -5,16 +5,20 @@
   interface Props {
     data: ParsedLandscape | null;
     height?: number;
-    /** 等值线阈值（数据空间）；非空时在热力图上叠加等高线 */
+    /** 等值线阈值（数据空间）；非空时叠加等高线 */
     contourLevels?: number[];
     /** 等高线闭合环（数据空间坐标，由 buildContourRings 产出） */
     contourRings?: { id: number; points: [number, number][] }[];
+    /** 是否绘制热力底色（false = 纯等高线模式） */
+    fillHeat?: boolean;
     /** 配色方案名（见 landscape.ts COLORMAP_NAMES） */
     cmap?: string;
     /** 小球滚落路径 (α, β, loss)（由 rollBallPath 产出） */
     ballPath?: [number, number, number][];
     /** 递增令牌：变化即重放滚球 */
     rollToken?: number;
+    /** 滚球动画时长 ms（球速 = 4000/该值） */
+    ballDuration?: number;
   }
 
   let {
@@ -22,9 +26,11 @@
     height = 420,
     contourLevels = [],
     contourRings = [],
-    cmap = 'magma',
+    fillHeat = true,
+    cmap = 'plasma',
     ballPath = [],
     rollToken = 0,
+    ballDuration = 4000,
   }: Props = $props();
 
   let container: HTMLDivElement;
@@ -44,20 +50,21 @@
   });
 
   // ---- 小球动画（非响应式内部状态；rollToken 变化即重放）----
-  const BALL_DURATION = 4000;
   let ballIdx = -1;          // 当前帧在 ballPath 中的位置
   let activePath: [number, number, number][] | null = null;
+  let activeDur = 4000;
   let ballGen = 0;
 
   $effect(() => {
     void rollToken;
     if (rollToken <= 0 || ballPath.length === 0) return;
     activePath = ballPath;
+    activeDur = Math.max(300, ballDuration);
     const gen = ++ballGen;
     const start = performance.now();
     const step = () => {
       if (gen !== ballGen) return; // 已被新一轮动画取代
-      const p = Math.min(1, (performance.now() - start) / BALL_DURATION);
+      const p = Math.min(1, (performance.now() - start) / activeDur);
       ballIdx = Math.round(p * (activePath!.length - 1));
       draw();
       if (p < 1) requestAnimationFrame(step);
@@ -103,25 +110,28 @@
     const d = data;
 
     // ---- 热力图主体：逐格 ImageData → 拉伸到绘图区（平滑 = 连续色彩场）----
-    const img = ctx.createImageData(d.nCols, d.nRows);
-    for (let r = 0; r < d.nRows; r++) {
-      for (let c = 0; c < d.nCols; c++) {
-        const t = d.zmax > d.zmin ? (d.z[r * d.nCols + c] - d.zmin) / (d.zmax - d.zmin) : 0;
-        const [cr, cg, cb] = colormap(t, cmap);
-        const o = (r * d.nCols + c) * 4;
-        img.data[o] = cr; img.data[o + 1] = cg; img.data[o + 2] = cb; img.data[o + 3] = 255;
+    // fillHeat=false 时跳过底色，只画等高线（纯等高线模式）
+    if (fillHeat) {
+      const img = ctx.createImageData(d.nCols, d.nRows);
+      for (let r = 0; r < d.nRows; r++) {
+        for (let c = 0; c < d.nCols; c++) {
+          const t = d.zmax > d.zmin ? (d.z[r * d.nCols + c] - d.zmin) / (d.zmax - d.zmin) : 0;
+          const [cr, cg, cb] = colormap(t, cmap);
+          const o = (r * d.nCols + c) * 4;
+          img.data[o] = cr; img.data[o + 1] = cg; img.data[o + 2] = cb; img.data[o + 3] = 255;
+        }
       }
+      const off = document.createElement('canvas');
+      off.width = d.nCols; off.height = d.nRows;
+      off.getContext('2d')!.putImageData(img, 0, 0);
+      // 注意 β 行序：网格 r=0 对应 yRange[0]（底部）→ 翻转绘制
+      ctx.imageSmoothingEnabled = true;
+      ctx.save();
+      ctx.translate(R.x, R.y + R.h);
+      ctx.scale(1, -1);
+      ctx.drawImage(off, 0, 0, d.nCols, d.nRows, 0, 0, R.w, R.h);
+      ctx.restore();
     }
-    const off = document.createElement('canvas');
-    off.width = d.nCols; off.height = d.nRows;
-    off.getContext('2d')!.putImageData(img, 0, 0);
-    // 注意 β 行序：网格 r=0 对应 yRange[0]（底部）→ 翻转绘制
-    ctx.imageSmoothingEnabled = true;
-    ctx.save();
-    ctx.translate(R.x, R.y + R.h);
-    ctx.scale(1, -1);
-    ctx.drawImage(off, 0, 0, d.nCols, d.nRows, 0, 0, R.w, R.h);
-    ctx.restore();
 
     // ---- 等高线（共享比例尺叠画）----
     if (contourLevels.length > 0 && contourRings.length > 0) {
@@ -237,9 +247,9 @@
     hover = { a, b, loss: d.z[r * d.nCols + c], mx, my };
   }
 
-  // 数据/等高线/主题/配色变化 → 重绘
+  // 数据/等高线/主题/配色/底色开关变化 → 重绘
   $effect(() => {
-    void data; void contourLevels; void contourRings; void dark; void cmap;
+    void data; void contourLevels; void contourRings; void dark; void cmap; void fillHeat;
     draw();
   });
 
