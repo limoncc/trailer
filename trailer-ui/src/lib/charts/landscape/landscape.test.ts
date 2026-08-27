@@ -81,9 +81,17 @@ describe('colormap', () => {
     expect(colormap(1, 'plasma')).toEqual([240, 249, 33]);
   });
 
-  it('defaults to magma', () => {
-    expect(colormap(0)).toEqual([0, 0, 4]);
-    expect(colormap(1)).toEqual([252, 253, 191]);
+  it('defaults to plasma (明亮,避免大面积暗黑)', () => {
+    expect(colormap(0)).toEqual([13, 8, 135]);
+    expect(colormap(1)).toEqual([240, 249, 33]);
+  });
+
+  it('coolwarm: bright diverging blue → white → red', () => {
+    expect(colormap(0, 'coolwarm')).toEqual([59, 76, 192]);
+    expect(colormap(1, 'coolwarm')).toEqual([180, 4, 38]);
+    // 中段足够亮(不黑)
+    const [r, g, b] = colormap(0.5, 'coolwarm');
+    expect(r + g + b).toBeGreaterThan(500);
   });
 
   it('clamps out-of-range t', () => {

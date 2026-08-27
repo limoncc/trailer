@@ -125,6 +125,10 @@ const COLORMAP_TABLE: Record<string, ReadonlyArray<readonly [number, number, num
     [13, 8, 135], [70, 3, 159], [114, 1, 168], [156, 23, 158], [189, 55, 134],
     [216, 87, 107], [237, 121, 83], [251, 159, 58], [240, 249, 33],
   ],
+  coolwarm: [
+    [59, 76, 192], [107, 142, 241], [156, 188, 247], [205, 217, 232], [232, 230, 230],
+    [242, 209, 194], [237, 168, 150], [221, 115, 96], [180, 4, 38],
+  ],
 };
 
 export const COLORMAP_NAMES = Object.keys(COLORMAP_TABLE) as string[];
@@ -132,10 +136,10 @@ export type ColormapName = (typeof COLORMAP_NAMES)[number];
 
 /**
  * t ∈ [0,1] → 指定方案的 RGB(0-255)，越界 clamp。供热力图/等高线/3D 曲面共用。
- * 默认 magma：暗底 → 紫红 → 火橙 → 淡黄，比 viridis 更耐看。
+ * 默认 plasma：整体明亮饱满；magma 偏暗、viridis 经典、coolwarm 浅色发散。
  */
-export function colormap(t: number, name: string = 'magma'): [number, number, number] {
-  const anchors = COLORMAP_TABLE[name] ?? COLORMAP_TABLE.magma;
+export function colormap(t: number, name: string = 'plasma'): [number, number, number] {
+  const anchors = COLORMAP_TABLE[name] ?? COLORMAP_TABLE.plasma;
   const clamped = Math.min(1, Math.max(0, t));
   const pos = clamped * (anchors.length - 1);
   const i = Math.min(Math.floor(pos), anchors.length - 2);
