@@ -1,0 +1,231 @@
+<script lang="ts">
+  import { onDestroy } from 'svelte';
+  import LandscapeHeatmap from './LandscapeHeatmap.svelte';
+  import LandscapeSurface from './LandscapeSurface.svelte';
+  import {
+    parseFigureToLandscape,
+    buildContourLevels,
+  } from './landscape';
+  import { buildContourRings } from './contour';
+  import type { LandscapeGroup, ParsedLandscape } from './landscape';
+
+  interface Props {
+    group: LandscapeGroup;
+    onMoveUp?: () => void;
+    onMoveDown?: () => void;
+    onRemove?: () => void;
+    compact?: boolean;
+  }
+
+  let { group, onMoveUp, onMoveDown, onRemove, compact = false }: Props = $props();
+
+  type ViewMode = 'heat' | 'contour' | 'surf';
+  const VIEW_TABS: [ViewMode, string][] = [['heat', 'Heat'], ['contour', 'Contour'], ['surf', 'Surface']];
+
+  let expanded = $state(true);
+  let view = $state<ViewMode>('heat');
+  let wireframe = $state(false);
+  // 默认选最新 step（一次性 init 标志，避免覆盖用户点击 step 0——导航指南 §4.7 踩坑）
+  let selectedIndex = $state(0);
+  let init = true;
+  const idx = $derived(Math.min(selectedIndex, Math.max(0, group.rows.length - 1)));
+
+  const steps = $derived(group.rows.map((r) => r.step));
+  const currentRow = $derived(group.rows[idx]);
+  const current = $derived<ParsedLandscape | null>(
+    currentRow ? parseFigureToLandscape(currentRow) : null,
+  );
+  const sliderPct = $derived(group.rows.length > 1 ? (idx / (group.rows.length - 1)) * 100 : 0);
+
+  // 首次就绪时默认选最新 step（一次性）
+  $effect(() => {
+    if (init && group.rows.length > 0) {
+      init = false;
+      selectedIndex = group.rows.length - 1;
+    }
+  });
+
+  let sliderWrap = $state<HTMLDivElement | null>(null);
+  let dragging = false; // 非响应式：避免闭包读旧值
+  // Surface 模式视角按钮通过 bind:this 调用组件暴露的 setView
+  let surfaceChart = $state<{ setView: (name: 'front' | 'side' | 'top' | 'reset') => void } | undefined>(undefined);
+
+  // 自动播放：循环切换 step
+  let playing = $state(false);
+  let playTimer: ReturnType<typeof setInterval> | undefined;
+
+  function togglePlay() {
+    if (group.rows.length < 2) return;
+    playing = !playing;
+    if (playing) {
+      playTimer = setInterval(() => {
+        selectedIndex = (selectedIndex + 1) % group.rows.length;
+      }, 700);
+    } else {
+      if (playTimer) clearInterval(playTimer);
+      playTimer = undefined;
+    }
+  }
+
+  onDestroy(() => {
+    if (playTimer) clearInterval(playTimer);
+  });
+
+  function setIdxFromPointer(clientX: number) {
+    if (!sliderWrap || group.rows.length < 2) return;
+    const rect = sliderWrap.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    selectedIndex = Math.round(ratio * (group.rows.length - 1));
+  }
+
+  // Contour 模式：阈值 + 环数据随当前帧派生
+  const CONTOUR_COUNT = 8;
+  const levels = $derived(current ? buildContourLevels(current.zmin, current.zmax, CONTOUR_COUNT) : []);
+  const rings = $derived(
+    current && levels.length > 0 ? buildContourRings(current.z, current.nRows, current.nCols, levels, current.xs, current.ys) : [],
+  );
+
+  // meta 徽标（已知键优先，展示前 6 个）
+  const metaBadges = $derived.by(() => {
+    if (!current) return [];
+    const preferred = ['normalization', 'direction', 'seed', 'split', 'loss_fn', 'precision'];
+    const out: [string, string][] = [];
+    for (const k of preferred) {
+      const v = (current.meta as Record<string, unknown>)[k];
+      if (v !== undefined && v !== null && typeof v !== 'object') out.push([k, String(v)]);
+    }
+    for (const [k, v] of Object.entries(current.meta)) {
+      if (out.length >= 6) break;
+      if (preferred.includes(k)) continue;
+      if (v !== undefined && v !== null && typeof v !== 'object') out.push([k, String(v)]);
+    }
+    return out;
+  });
+</script>
+
+<div class="rounded-xl border border-border bg-card text-card-foreground shadow-sm">
+  <!-- header -->
+  <div class="flex items-center gap-2 px-3 py-2">
+    <button
+      type="button"
+      class="text-xs text-muted-foreground hover:text-foreground"
+      onclick={() => (expanded = !expanded)}
+      aria-label={expanded ? 'Collapse' : 'Expand'}
+    >{expanded ? '▾' : '▸'}</button>
+    <button
+      type="button"
+      class="flex-1 text-left font-mono text-sm font-semibold truncate hover:text-foreground"
+      onclick={() => (expanded = !expanded)}
+    >{group.name}</button>
+    <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{group.rows.length} steps</span>
+    {#if onMoveUp}
+      <button type="button" class="text-xs text-muted-foreground hover:text-foreground" onclick={onMoveUp} aria-label="Move up">↑</button>
+    {/if}
+    {#if onMoveDown}
+      <button type="button" class="text-xs text-muted-foreground hover:text-foreground" onclick={onMoveDown} aria-label="Move down">↓</button>
+    {/if}
+    {#if onRemove}
+      <button type="button" class="text-xs text-muted-foreground hover:text-destructive" onclick={onRemove} aria-label="Remove">✕</button>
+    {/if}
+  </div>
+
+  {#if expanded}
+    <div class="px-3 pb-3 space-y-3">
+      <!-- step 滑块（1 step 时禁用但保留高度，与多 step 卡片对齐） -->
+      <div class="flex items-center gap-3 px-1 {group.rows.length < 2 ? 'opacity-40' : ''}">
+        <span class="shrink-0 text-xs text-muted-foreground font-medium">Step {steps[idx]}</span>
+        <div
+          bind:this={sliderWrap}
+          role="slider"
+          tabindex={group.rows.length > 1 ? 0 : -1}
+          aria-label="Step"
+          aria-valuemin={steps[0]}
+          aria-valuemax={steps[steps.length - 1]}
+          aria-valuenow={steps[idx]}
+          aria-valuetext={`Step ${steps[idx]} of ${steps[steps.length - 1]}`}
+          class="trailer-slider relative h-5 flex-1 cursor-pointer touch-none select-none"
+          onpointerdown={(e) => { if (group.rows.length < 2) return; dragging = true; setIdxFromPointer(e.clientX); }}
+          onpointermove={(e) => { if (dragging) setIdxFromPointer(e.clientX); }}
+          onpointerup={() => { dragging = false; }}
+          onpointerleave={() => { dragging = false; }}
+          onkeydown={(e) => {
+            if (group.rows.length < 2) return;
+            const s = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+            if (s === 0) return;
+            e.preventDefault();
+            selectedIndex = Math.min(group.rows.length - 1, Math.max(0, selectedIndex + s));
+          }}
+        >
+          <div class="absolute inset-y-0 left-0 my-auto h-1 w-full rounded-full bg-border"></div>
+          <div class="absolute inset-y-0 left-0 my-auto h-1 rounded-full bg-primary" style="width: {sliderPct}%"></div>
+          <div
+            class="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-primary shadow"
+            style="left: {sliderPct}%"
+          ></div>
+        </div>
+        <span class="shrink-0 text-xs text-muted-foreground font-medium">{steps[idx]} / {steps[steps.length - 1]}</span>
+        {#if group.rows.length > 1}
+          <button
+            type="button"
+            class="shrink-0 px-1.5 text-[11px] border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            onclick={togglePlay}
+            aria-label={playing ? 'Pause' : 'Play'}
+          >{playing ? '⏸' : '▶'}</button>
+        {/if}
+      </div>
+
+      <!-- 视图切换 + 曲面视角/线框 -->
+      <div class="flex items-center gap-1 flex-wrap">
+        <div class="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
+          {#each VIEW_TABS as [k, l]}
+            <button
+              type="button"
+              class="px-2 py-0.5 text-[11px] {view === k ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50'}"
+              onclick={() => (view = k)}
+            >{l}</button>
+          {/each}
+        </div>
+        {#if view === 'surf'}
+          {#each [['front', 'Front'], ['side', 'Side'], ['top', 'Top'], ['reset', 'Reset']] as [k, l]}
+            <button
+              type="button"
+              class="px-2 py-0.5 text-[11px] border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              onclick={() => surfaceChart?.setView(k as 'front' | 'side' | 'top' | 'reset')}
+            >{l}</button>
+          {/each}
+          <label class="ml-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+            <input type="checkbox" bind:checked={wireframe} class="accent-primary" /> wireframe
+          </label>
+        {/if}
+      </div>
+
+      {#if view === 'surf'}
+        <LandscapeSurface
+          bind:this={surfaceChart}
+          data={current}
+          height={compact ? 300 : 400}
+          keepView
+          {wireframe}
+        />
+      {:else}
+        <LandscapeHeatmap
+          data={current}
+          height={compact ? 300 : 400}
+          contourLevels={view === 'contour' ? levels : []}
+          contourRings={view === 'contour' ? rings : []}
+        />
+      {/if}
+
+      <!-- meta 徽标 -->
+      {#if metaBadges.length > 0}
+        <div class="flex items-center gap-2 flex-wrap">
+          {#each metaBadges as [k, v]}
+            <span class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {k}={v}
+            </span>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+</div>
