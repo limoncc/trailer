@@ -60,13 +60,9 @@
   // Surface 模式视角按钮通过 bind:this 调用组件暴露的 setView
   let surfaceChart = $state<{ setView: (name: 'front' | 'side' | 'top' | 'reset') => void; playRoll: () => void } | undefined>(undefined);
 
-  // 滚球：视图或数据帧变化即重放；⚽ 按钮手动触发
+  // 滚球：rollToken 只在 ⚽ 点击处理器里递增(不在 effect 内写状态——Svelte 5 反模式)。
+  // 自动重放由数据驱动：新帧 → current 变化 → ballPath 新数组身份 → 各视图自身 effect 重放。
   let rollToken = $state(0);
-  $effect(() => {
-    void view;
-    void current;
-    rollToken++;
-  });
   const ballPath = $derived(current ? rollBallPath(current) : []);
 
   $effect(() => {

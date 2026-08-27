@@ -71,6 +71,8 @@
     };
     ballIdx = 0;
     requestAnimationFrame(step);
+    // 卸载/依赖变更时作废进行中的 rAF
+    return () => { ballGen++; };
   });
 
   const PAD = { top: 10, right: 14, bottom: 34, left: 52 };

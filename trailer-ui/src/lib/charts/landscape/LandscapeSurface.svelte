@@ -25,6 +25,7 @@
   }: Props = $props();
 
   let container: HTMLDivElement;
+  // 普通变量(非 $state)：仅供闭包/onDestroy 使用,避免 effect 内读写竞争
   let viewer: LandscapeViewer | null = null;
   let hover = $state<SurfaceHoverInfo | null>(null);
   let dark = $state(false);
@@ -48,10 +49,12 @@
     return () => mo.disconnect();
   });
 
-  // 建 viewer + 数据更新合一：step 切换不重建 WebGL 上下文
+  // 唯一的创建/数据 effect：依赖 (container, data, cmap, wireframe)。
+  // 之前拆成两个 effect 双重 setData,第二个的 clearBall 会清掉父组件刚 playBall 的小球。
+  // initialized 为普通变量(非响应式)：仅表达"是否已做过首次相机复位"。
+  let initialized = false;
   $effect(() => {
     if (!container || !data) return;
-    const first = !viewer;
     if (!viewer) {
       viewer = new LandscapeViewer(container, {
         wireframe,
@@ -62,16 +65,9 @@
         onHover: showHover ? (info) => (hover = info) : undefined,
       });
     }
-    viewer.setData(data, { keepView: first ? false : keepView, cmap });
-  });
-
-  // 配色切换：保留相机重刷曲面
-  $effect(() => {
-    if (viewer && data) viewer.setData(data, { keepView: true, cmap });
-  });
-
-  $effect(() => {
-    viewer?.setWireframe(wireframe);
+    viewer.setWireframe(wireframe);
+    viewer.setData(data, { keepView: initialized, cmap });
+    initialized = true;
   });
 
   /// 供父组件通过 bind:this 调用：切换预设视角

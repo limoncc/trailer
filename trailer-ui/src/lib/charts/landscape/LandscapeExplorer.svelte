@@ -32,8 +32,9 @@
         if (!refresh) {
           rows = lsRows;
           hidden = new Set();
-        } else {
-          // 增量合并新 step（按 name:step 去重），保留已有数据避免重置用户选中
+          groups = groupLandscapeFigures(rows);
+        } else if (lsRows.length !== rows.length) {
+          // 仅在真正出现新帧时才更新——避免 5s 轮询替换数组身份引发全链路无意义重算
           const seen = new Set(rows.map((r) => `${r.name}:${r.step}`));
           const merged = [...rows];
           for (const r of lsRows) {
@@ -41,8 +42,8 @@
             if (!seen.has(key)) { merged.push(r); seen.add(key); }
           }
           rows = merged;
+          groups = groupLandscapeFigures(rows);
         }
-        groups = groupLandscapeFigures(rows);
       }
     } catch {}
     loading = false;
