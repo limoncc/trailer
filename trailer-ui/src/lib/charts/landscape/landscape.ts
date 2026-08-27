@@ -42,7 +42,8 @@ export interface ParsedLandscape {
   meta: Record<string, unknown>;
 }
 
-function linspace(a: number, b: number, n: number): Float64Array {
+/** 含端点的等距坐标轴。 */
+export function linspace(a: number, b: number, n: number): Float64Array {
   const out = new Float64Array(n);
   const step = n > 1 ? (b - a) / (n - 1) : 0;
   for (let i = 0; i < n; i++) out[i] = a + step * i;
