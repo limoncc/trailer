@@ -4,6 +4,7 @@ import {
   colormap,
   buildContourLevels,
   groupLandscapeFigures,
+  COLORMAP_NAMES,
 } from './landscape';
 import type { LandscapeFigureRow } from './landscape';
 
@@ -63,19 +64,45 @@ describe('parseFigureToLandscape', () => {
   });
 });
 
-describe('colormap (viridis)', () => {
-  it('maps endpoints to viridis first/last anchors', () => {
-    expect(colormap(0)).toEqual([68, 1, 84]);
-    expect(colormap(1)).toEqual([253, 231, 37]);
+describe('colormap', () => {
+  it('viridis: explicit name keeps classic endpoints/anchor', () => {
+    expect(colormap(0, 'viridis')).toEqual([68, 1, 84]);
+    expect(colormap(0.5, 'viridis')).toEqual([33, 145, 140]);
+    expect(colormap(1, 'viridis')).toEqual([253, 231, 37]);
   });
 
-  it('hits anchor exactly at midpoint', () => {
-    expect(colormap(0.5)).toEqual([33, 145, 140]);
+  it('magma: dark → fiery → pale endpoints', () => {
+    expect(colormap(0, 'magma')).toEqual([0, 0, 4]);
+    expect(colormap(1, 'magma')).toEqual([252, 253, 191]);
+  });
+
+  it('plasma: deep blue → yellow endpoints', () => {
+    expect(colormap(0, 'plasma')).toEqual([13, 8, 135]);
+    expect(colormap(1, 'plasma')).toEqual([240, 249, 33]);
+  });
+
+  it('defaults to magma', () => {
+    expect(colormap(0)).toEqual([0, 0, 4]);
+    expect(colormap(1)).toEqual([252, 253, 191]);
   });
 
   it('clamps out-of-range t', () => {
-    expect(colormap(-5)).toEqual([68, 1, 84]);
-    expect(colormap(42)).toEqual([253, 231, 37]);
+    expect(colormap(-5, 'viridis')).toEqual([68, 1, 84]);
+    expect(colormap(42, 'viridis')).toEqual([253, 231, 37]);
+  });
+
+  it('covers every registered map with valid rgb triplets', () => {
+    for (const name of COLORMAP_NAMES) {
+      for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+        const [r, g, b] = colormap(t, name);
+        expect(r).toBeGreaterThanOrEqual(0);
+        expect(r).toBeLessThanOrEqual(255);
+        expect(g).toBeGreaterThanOrEqual(0);
+        expect(g).toBeLessThanOrEqual(255);
+        expect(b).toBeGreaterThanOrEqual(0);
+        expect(b).toBeLessThanOrEqual(255);
+      }
+    }
   });
 });
 

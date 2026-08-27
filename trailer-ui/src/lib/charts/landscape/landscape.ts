@@ -110,27 +110,38 @@ export function groupLandscapeFigures(rows: LandscapeFigureRow[]): LandscapeGrou
     .map(([name, list]) => ({ name, rows: [...list].sort((a, b) => a.step - b.step) }));
 }
 
-// viridis 色 LUT 锚点（9 等分采样，与 matplotlib viridis 一致）
-const VIRIDIS_ANCHORS: ReadonlyArray<readonly [number, number, number]> = [
-  [68, 1, 84],
-  [71, 45, 123],
-  [59, 82, 139],
-  [44, 114, 142],
-  [33, 145, 140],
-  [40, 174, 128],
-  [94, 201, 98],
-  [173, 220, 48],
-  [253, 231, 37],
-];
+// ---- 色彩映射方案 ----
+// viridis 9 等分锚点（经典）；magma/plasma 为 matplotlib 同名 colormap 的采样锚点。
+const COLORMAP_TABLE: Record<string, ReadonlyArray<readonly [number, number, number]>> = {
+  viridis: [
+    [68, 1, 84], [71, 45, 123], [59, 82, 139], [44, 114, 142], [33, 145, 140],
+    [40, 174, 128], [94, 201, 98], [173, 220, 48], [253, 231, 37],
+  ],
+  magma: [
+    [0, 0, 4], [20, 14, 54], [59, 15, 112], [100, 26, 128], [140, 41, 129],
+    [183, 55, 121], [222, 73, 104], [247, 112, 92], [254, 159, 109], [252, 253, 191],
+  ],
+  plasma: [
+    [13, 8, 135], [70, 3, 159], [114, 1, 168], [156, 23, 158], [189, 55, 134],
+    [216, 87, 107], [237, 121, 83], [251, 159, 58], [240, 249, 33],
+  ],
+};
 
-/** t ∈ [0,1] → viridis RGB(0-255)，越界 clamp。供热力图/等高线/3D 曲面共用。 */
-export function colormap(t: number): [number, number, number] {
+export const COLORMAP_NAMES = Object.keys(COLORMAP_TABLE) as string[];
+export type ColormapName = (typeof COLORMAP_NAMES)[number];
+
+/**
+ * t ∈ [0,1] → 指定方案的 RGB(0-255)，越界 clamp。供热力图/等高线/3D 曲面共用。
+ * 默认 magma：暗底 → 紫红 → 火橙 → 淡黄，比 viridis 更耐看。
+ */
+export function colormap(t: number, name: string = 'magma'): [number, number, number] {
+  const anchors = COLORMAP_TABLE[name] ?? COLORMAP_TABLE.magma;
   const clamped = Math.min(1, Math.max(0, t));
-  const pos = clamped * (VIRIDIS_ANCHORS.length - 1);
-  const i = Math.min(Math.floor(pos), VIRIDIS_ANCHORS.length - 2);
+  const pos = clamped * (anchors.length - 1);
+  const i = Math.min(Math.floor(pos), anchors.length - 2);
   const frac = pos - i;
-  const a = VIRIDIS_ANCHORS[i];
-  const b = VIRIDIS_ANCHORS[i + 1];
+  const a = anchors[i];
+  const b = anchors[i + 1];
   return [
     Math.round(a[0] + (b[0] - a[0]) * frac),
     Math.round(a[1] + (b[1] - a[1]) * frac),

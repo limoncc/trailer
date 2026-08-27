@@ -42,12 +42,15 @@ describe('buildSurfaceGeometry', () => {
     expect(hOf(4)).toBeLessThan(hOf(5));
   });
 
-  it('vertex colors follow viridis colormap of normalized z', () => {
-    const g = buildSurfaceGeometry(makeParsed());
+  it('vertex colors follow the requested colormap of normalized z', () => {
+    const g = buildSurfaceGeometry(makeParsed(), 6, 'viridis');
     // 顶点色为 0-1 归一化，放大 255 与 0-255 LUT 对比
     const cOf = (i: number) => [g.colors[i * 3] * 255, g.colors[i * 3 + 1] * 255, g.colors[i * 3 + 2] * 255];
-    expect(cOf(0)[0]).toBeCloseTo(colormap(0)[0], 0);
-    expect(cOf(8)[0]).toBeCloseTo(colormap(1)[0], 0);
+    expect(cOf(0)[0]).toBeCloseTo(colormap(0, 'viridis')[0], 0);
+    expect(cOf(8)[0]).toBeCloseTo(colormap(1, 'viridis')[0], 0);
+    // 默认 magma 与 viridis 不同
+    const gm = buildSurfaceGeometry(makeParsed());
+    expect(gm.colors[0]).not.toBeCloseTo(g.colors[0], 3);
   });
 
   it('indices build two triangles per quad', () => {
