@@ -176,6 +176,40 @@ def resolve_mode(model, mode: str | None = None) -> str:
     return "serial" if nbytes >= AUTO_SERIAL_THRESHOLD else "vector"
 
 
+def _device_total_memory(device):
+    """设备总显存(字节);查不到/不支持 → 0(调用方按"未知"走保守分支)。"""
+    import torch
+
+    try:
+        if device.type == "cuda":
+            return torch.cuda.get_device_properties(device).total_memory
+        if device.type == "mps":
+            return int(getattr(torch.mps, "recommended_max_memory", lambda: 0)())
+    except Exception:
+        pass
+    return 0
+
+
+def _directions_spec(model):
+    """serial 模式的方向构造策略 → (device, dtype)。
+
+    模型设备上放得下 3× 模型字节(模型 + 双方向)→ 方向留原设备、按模型 dtype
+    存半精度;放不下(CUDA 查询失败按放不下)→ 方向落 CPU,评估时逐层流式上卡,
+    GPU 峰值 = 模型 + 激活。CPU 模型平凡返回自身。
+    """
+    import torch
+
+    p0 = next(model.parameters())
+    device, dtype = p0.device, p0.dtype
+    if device.type not in ("cuda", "mps"):
+        return device, dtype
+    model_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
+    total = _device_total_memory(device)
+    if total and 3 * model_bytes <= 0.8 * total:
+        return device, dtype
+    return torch.device("cpu"), dtype
+
+
 def _resolve_chunk(P: int, bytes_per_point: int, chunk: int | None = None, parallel: str | None = None) -> int:
     """并行批量推算:显式 chunk > parallel 档位 > 默认 ~300MB 自适应,钳位 [1, P]。
 

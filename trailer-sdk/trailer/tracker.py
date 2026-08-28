@@ -682,6 +682,7 @@ class Tracker:
         criterion=None,
         chunk: int | None = None,
         parallel: str | None = None,
+        mode: str | None = None,
         seed: int = 0,
         name: str = "loss_landscape",
         step: int | None = None,
@@ -715,9 +716,13 @@ class Tracker:
             n: 自动模式网格分辨率(默认 51)
             nbatches: 自动模式评估的固定 batch 子集数(默认 8)
             criterion: 自动模式损失函数(默认 CrossEntropyLoss)
-            chunk: 自动模式每批并行评估的网格点数(None 自动按参数量定,显存紧张调小)
-            parallel: 自动模式并行档位 "low"/"medium"/"high"/"max"(按设备显存选择,
+            chunk: 自动模式 vector 评估每批并行网格点数(None 自动按参数量定,显存紧张调小)
+            parallel: 自动模式 vector 并行档位 "low"/"medium"/"high"/"max"(按设备显存选择,
                       映射 64MB/256MB/1GB/4GB 工作集;chunk 显式给定时忽略)
+            mode: 评估模式 "auto"(缺省)/"vector"/"serial"。auto 按模型字节数判定
+                  (≥512MB 走 serial);serial 为逐点 in-place 低显存路径——大模型(LLM)
+                  参数零拷贝,方向自动落 CPU 流式,也适用于 vmap 不兼容的模型
+                  (flash-attn/自定义算子);serial 忽略 chunk/parallel
             seed: 方向随机种子(同 run 内保持一致以保证帧间可比)
             name: 卡片名(同名按 step 成组)
             step: 全局 step(None 自动递增)
@@ -730,29 +735,37 @@ class Tracker:
         if hasattr(loss_grid, "parameters"):  # torch nn.Module → 自动计算模式
             try:
                 from trailer.landscape import (
+                    _directions_spec,
                     evaluate_grid,
                     filter_normalized_directions,
                     interpolation_directions,
                     resolve_batches,
+                    resolve_mode,
                 )
 
                 eval_batches = resolve_batches(batches, nbatches)
+                eff_mode = resolve_mode(loss_grid, mode)
+                dir_kwargs = (
+                    dict(zip(("device", "dtype"), _directions_spec(loss_grid)))
+                    if eff_mode == "serial" else {}
+                )
                 if model_b is not None:
-                    delta, eta = interpolation_directions(loss_grid, model_b, seed=seed)
+                    delta, eta = interpolation_directions(loss_grid, model_b, seed=seed, **dir_kwargs)
                     auto_meta = {"direction": "interp", "between": "model → model_b"}
                 else:
-                    delta, eta = filter_normalized_directions(loss_grid, seed=seed)
+                    delta, eta = filter_normalized_directions(loss_grid, seed=seed, **dir_kwargs)
                     auto_meta = {"direction": "random"}
                 meta = {
                     "normalization": "filter",
                     "seed": seed,
                     "grid": n,
+                    "mode": eff_mode,
                     **auto_meta,
                     **(meta or {}),
                 }
                 loss_grid = evaluate_grid(
                     loss_grid, eval_batches, delta, eta,
-                    n=n, criterion=criterion, chunk=chunk, parallel=parallel,
+                    n=n, criterion=criterion, chunk=chunk, parallel=parallel, mode=eff_mode,
                 )
             except ImportError as e:
                 print(f"Trailer: log_loss_landscape 自动模式需要 torch+numpy: {e}")

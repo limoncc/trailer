@@ -334,6 +334,57 @@ class TestLogLossLandscapeAuto:
         assert kind == "landscape"
         assert body["n_rows"] == 5
 
+    def test_auto_meta_records_mode(self, monkeypatch):
+        """mode 参数透传并写进 meta。"""
+        torch = pytest.importorskip("torch")
+        model, batches = self._toy()
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape(model, batches, n=5, mode="serial")
+        t.finish()
+
+        body = json.loads([p for p in posted if p.get("kind") == "landscape"][-1]["body"])
+        assert body["meta"]["mode"] == "serial"
+        assert (body["n_rows"], body["n_cols"]) == (5, 5)
+
+    def test_auto_default_mode_is_vector(self, monkeypatch):
+        """小模型缺省判定 vector,meta 记录实际生效值。"""
+        torch = pytest.importorskip("torch")
+        model, batches = self._toy()
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape(model, batches, n=5)
+        t.finish()
+
+        body = json.loads([p for p in posted if p.get("kind") == "landscape"][-1]["body"])
+        assert body["meta"]["mode"] == "vector"
+
+    def test_auto_serial_lowmem_end_to_end(self, monkeypatch):
+        """阈值缩小让 toy 判为 serial → 走低显存路径:结果有限、参数 bit-exact 恢复。"""
+        import trailer.landscape as ls
+        torch = pytest.importorskip("torch")
+        model, batches = self._toy()
+        base = [p.detach().clone() for p in model.parameters()]
+        monkeypatch.setattr(ls, "AUTO_SERIAL_THRESHOLD", 1)
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape(model, batches, n=5)
+        t.finish()
+
+        body = json.loads([p for p in posted if p.get("kind") == "landscape"][-1]["body"])
+        assert body["meta"]["mode"] == "serial"
+        assert all(v == v for row in body["z"] for v in row)   # 无 NaN
+        for p, b in zip(model.parameters(), base):
+            assert torch.equal(p, b)
+
+    def test_auto_invalid_mode_prints_no_post(self, monkeypatch, capsys):
+        """非法 mode 不抛异常、不产生 POST。"""
+        torch = pytest.importorskip("torch")
+        model, batches = self._toy()
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape(model, batches, n=5, mode="turbo")
+        t.finish()
+
+        assert not any(p.get("kind") == "landscape" for p in posted)
+        assert "log_loss_landscape" in capsys.readouterr().out
+
 
 class TestEvaluateGridVectorized:
     """向量化实现与串行参考实现等价(chunk 大小无关)。"""
