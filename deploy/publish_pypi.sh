@@ -71,18 +71,36 @@ if [ ${#WHEELS[@]} -eq 0 ]; then
   exit 1
 fi
 
+# ── 版本一致性守卫:防止用陈旧缓存 wheel 发错版本(文件名不可变,PyPI 拒绝同版本重传) ──
+EXPECTED_VERSION=$(grep -m1 '^version' "$(dirname "$0")/../pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
+if [ -z "$EXPECTED_VERSION" ]; then
+  echo "❌ 无法从 pyproject.toml 读取版本号(请在仓库根目录运行)"
+  exit 1
+fi
+for w in "${WHEELS[@]}"; do
+  if [[ "$(basename "$w")" != *-"$EXPECTED_VERSION"-* ]]; then
+    echo "❌ wheel 版本与 pyproject.toml ($EXPECTED_VERSION) 不一致: $(basename "$w")"
+    echo "   dist/wheels 里很可能是上次发版留下的陈旧缓存(PyPI 文件名不可变,重传会被 400 拒绝)"
+    echo "   处理: rm -rf \"$WHEEL_DIR\" 后重跑(自动重新下载), 或传入正确目录"
+    exit 1
+  fi
+done
+echo "✅ wheel 版本一致: $EXPECTED_VERSION"
+
 # ── 检查 twine(缺失则安装) ──
 if ! command -v twine >/dev/null 2>&1; then
   echo "📦 未安装 twine, 正在安装..."
   pip install twine
 fi
 
-# ── 凭据: __token__ + API token ──
+# ── 凭据: 优先环境变量, 其次 ~/.pypirc(twine 自动读取) ──
 if [ -z "${TWINE_PASSWORD:-}" ]; then
   if [ -n "${PYPI_TOKEN:-}" ]; then
     export TWINE_PASSWORD="$PYPI_TOKEN"
+  elif grep -q '^password' ~/.pypirc 2>/dev/null; then
+    echo "🔑 使用 ~/.pypirc 中保存的凭据"
   else
-    echo "❌ 请设置 TWINE_PASSWORD(或 PYPI_TOKEN) 为 PyPI API token"
+    echo "❌ 未找到 PyPI 凭据: 设置 TWINE_PASSWORD(或 PYPI_TOKEN), 或在 ~/.pypirc 保存"
     echo "   PyPI → Account settings → API tokens → 创建(scope 选 trailer-sdk)"
     exit 1
   fi
