@@ -28,6 +28,8 @@ export interface LandscapeViewerOptions {
   wireframe?: boolean;
   /** 配色方案名（landscape.ts COLORMAP_NAMES，默认 coolwarm） */
   cmap?: string;
+  /** 值域缩放（默认 linear；log 放大碗底细节） */
+  scale?: LandscapeScale;
   onHover?: (info: SurfaceHoverInfo | null) => void;
 }
 
@@ -86,6 +88,7 @@ export class LandscapeViewer {
     this.axisColor = opts.axisColor ?? SURFACE_THEME.light.axis;
     this.wireframe = opts.wireframe ?? false;
     this._cmap = opts.cmap ?? 'coolwarm';
+    this._scale = opts.scale ?? 'linear';
     this.onHover = opts.onHover ?? null;
     this._onResize = () => {
       const W = this.container.clientWidth || 800;
