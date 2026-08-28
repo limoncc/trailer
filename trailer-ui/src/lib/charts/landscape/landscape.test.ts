@@ -149,3 +149,75 @@ describe('groupLandscapeFigures', () => {
     expect(groupLandscapeFigures([])).toEqual([]);
   });
 });
+
+// ---- 值域缩放(linear / log)----
+
+import {
+  makeLandscapeScaler,
+  buildContourLevelsScaled,
+} from './landscape';
+
+describe('makeLandscapeScaler', () => {
+  it('linear mode maps endpoints to [0,1] and midpoint linearly', () => {
+    const s = makeLandscapeScaler(0, 10, 'linear');
+    expect(s.toT(0)).toBe(0);
+    expect(s.toT(10)).toBe(1);
+    expect(s.toT(5)).toBeCloseTo(0.5);
+  });
+
+  it('log mode is monotonic and expands near the bottom', () => {
+    const s = makeLandscapeScaler(0, 100, 'log');
+    expect(s.toT(0)).toBe(0);
+    expect(s.toT(100)).toBe(1);
+    // 碗底细节放大:z=1 的显示位置 ≈ log1p(1)/log1p(100) ≈ 0.15,远高于线性的 0.01
+    expect(s.toT(1)).toBeGreaterThan(0.1);
+    expect(s.toT(0)).toBeLessThan(s.toT(1));
+    expect(s.toT(1)).toBeLessThan(s.toT(10));
+    expect(s.toT(10)).toBeLessThan(s.toT(100));
+  });
+
+  it('invert round-trips in both modes', () => {
+    for (const mode of ['linear', 'log'] as const) {
+      const s = makeLandscapeScaler(2, 200, mode);
+      for (const z of [2, 3.5, 17, 200]) {
+        expect(s.invert(s.toT(z))).toBeCloseTo(z, 4);
+      }
+    }
+  });
+
+  it('log mode tolerates negative data via offset log', () => {
+    const s = makeLandscapeScaler(-5, 5, 'log');
+    expect(s.toT(-5)).toBe(0);
+    expect(s.toT(5)).toBe(1);
+    expect(s.toT(-5)).toBeLessThan(s.toT(0));
+    expect(s.invert(s.toT(1.23))).toBeCloseTo(1.23, 4);
+  });
+
+  it('degenerate constant grid: t ≡ 0 and invert pins to zmin', () => {
+    const s = makeLandscapeScaler(3, 3, 'log');
+    expect(s.toT(3)).toBe(0);
+    expect(s.invert(1)).toBe(3);
+  });
+});
+
+describe('buildContourLevelsScaled', () => {
+  it('returns k increasing levels strictly inside (zmin, zmax)', () => {
+    const s = makeLandscapeScaler(0, 100, 'log');
+    const levels = buildContourLevelsScaled(s, 8);
+    expect(levels.length).toBe(8);
+    expect(levels[0]).toBeGreaterThan(0);
+    expect(levels[levels.length - 1]).toBeLessThan(100);
+    for (let i = 1; i < levels.length; i++) expect(levels[i]).toBeGreaterThan(levels[i - 1]);
+  });
+
+  it('log levels cluster near the bottom (first gap < last gap)', () => {
+    const s = makeLandscapeScaler(0, 100, 'log');
+    const levels = buildContourLevelsScaled(s, 8);
+    expect(levels[1] - levels[0]).toBeLessThan(levels[levels.length - 1] - levels[levels.length - 2]);
+  });
+
+  it('degenerate grid yields no levels', () => {
+    const s = makeLandscapeScaler(7, 7, 'log');
+    expect(buildContourLevelsScaled(s, 8)).toEqual([]);
+  });
+});

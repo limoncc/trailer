@@ -4,7 +4,7 @@
  * 顶点布局：行主序（r=β 行、c=α 列），position = (xs[c], h(z), ys[r])，
  * 颜色 = viridis(z 归一化)。索引为每格两个三角形。
  */
-import { colormap, type ParsedLandscape } from './landscape';
+import { colormap, makeLandscapeScaler, type LandscapeScale, type ParsedLandscape } from './landscape';
 
 export const SURFACE_THEME = {
   light: { bg: 0xffffff, grid: 0xc9d4e3, axis: 0x334155 },
@@ -26,25 +26,27 @@ export interface SurfaceGeometry {
  * 把解析后的景观网格转成带顶点色的三角面片。
  * @param hSpan 高度轴世界跨度（默认 6，与默认视角距离匹配）
  * @param cmapName 配色方案（默认 coolwarm）
+ * @param scale 值域缩放：linear 常规 min-max；log 放大碗底细节（默认 linear）
  * @throws 网格为空或边长 <2
  */
 export function buildSurfaceGeometry(
   d: ParsedLandscape,
   hSpan = 6,
   cmapName: string = 'coolwarm',
+  scale: LandscapeScale = 'linear',
 ): SurfaceGeometry {
   if (d.nRows < 2 || d.nCols < 2 || d.z.length < d.nRows * d.nCols) {
     throw new Error('landscape 网格无效：至少 2×2');
   }
   const { nRows, nCols } = d;
-  const range = d.zmax - d.zmin;
+  const scaler = makeLandscapeScaler(d.zmin, d.zmax, scale);
   const positions = new Float32Array(nRows * nCols * 3);
   const colors = new Float32Array(nRows * nCols * 3);
 
   for (let r = 0; r < nRows; r++) {
     for (let c = 0; c < nCols; c++) {
       const i = r * nCols + c;
-      const t = range > 0 ? (d.z[i] - d.zmin) / range : 0;
+      const t = scaler.toT(d.z[i]);
       positions[i * 3] = d.xs[c];
       positions[i * 3 + 1] = t * hSpan;
       positions[i * 3 + 2] = d.ys[r];

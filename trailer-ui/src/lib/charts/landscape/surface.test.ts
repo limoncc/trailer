@@ -130,3 +130,29 @@ describe('SURFACE_THEME', () => {
     expect(SURFACE_THEME.dark.bg).toBeDefined();
   });
 });
+
+describe('buildSurfaceGeometry scale option', () => {
+  it('log scale lifts low-z vertices but pins both endpoints', () => {
+    const d = makeParsed(2, 2); // z = 0,1,2,3 → zmin 0 zmax 3
+    const lin = buildSurfaceGeometry(d, 6, 'coolwarm', 'linear');
+    const log = buildSurfaceGeometry(d, 6, 'coolwarm', 'log');
+    const hOf = (g: ReturnType<typeof buildSurfaceGeometry>, i: number) => g.positions[i * 3 + 1];
+    expect(hOf(lin, 0)).toBeCloseTo(0);
+    expect(hOf(log, 0)).toBeCloseTo(0);           // zmin → 0(两模式一致)
+    expect(hOf(lin, 1)).toBeCloseTo(6 * (1 / 3));
+    // z=1 在 log 下明显高于线性:log1p(1)/log1p(3) ≈ 0.5 × 6
+    expect(hOf(log, 1)).toBeGreaterThan(hOf(lin, 1));
+    expect(hOf(log, 3)).toBeCloseTo(6);           // zmax → hSpan(两模式一致)
+  });
+
+  it('vertex colors follow the scaled t', () => {
+    const d = makeParsed(2, 2);
+    const lin = buildSurfaceGeometry(d, 6, 'coolwarm', 'linear');
+    const log = buildSurfaceGeometry(d, 6, 'coolwarm', 'log');
+    // 端点(z=0→colors[0..2]、z=3→colors[9..11])t 相同 → 颜色一致;
+    // z=1 顶点(colors[3..5])t 不同 → 颜色不同
+    expect(log.colors[0]).toBeCloseTo(lin.colors[0], 5);
+    expect(log.colors[9]).toBeCloseTo(lin.colors[9], 5);
+    expect(log.colors[3]).not.toBeCloseTo(lin.colors[3], 3);
+  });
+});

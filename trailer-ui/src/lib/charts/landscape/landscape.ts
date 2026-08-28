@@ -161,3 +161,54 @@ export function buildContourLevels(zmin: number, zmax: number, k: number): numbe
   for (let i = 1; i <= k; i++) levels.push(zmin + (range * i) / (k + 1));
   return levels;
 }
+
+// ---- 值域缩放（配色 / 等高线分级 / 3D 高度共用）----
+
+export type LandscapeScale = 'linear' | 'log';
+
+export interface LandscapeScaler {
+  /** 数据空间 loss → 显示空间 [0,1]（配色、高度、等高线分级必须共用同一缩放） */
+  toT(z: number): number;
+  /** 显示空间 [0,1] → 数据空间（等高线分级求阈值用） */
+  invert(t: number): number;
+  mode: LandscapeScale;
+}
+
+/**
+ * 构造值域缩放器。linear 为常规 min-max；log 用偏移对数 log1p(z - zmin + ε)——
+ * 碗底（低 loss 区）的细节被放大，极端"墙"不再压扁整幅图的色阶。
+ * 负值数据（手动网格）经 zmin 偏移同样支持；常值网格退化为恒 0。
+ */
+export function makeLandscapeScaler(
+  zmin: number,
+  zmax: number,
+  mode: LandscapeScale = 'linear',
+): LandscapeScaler {
+  const range = zmax - zmin;
+  if (mode !== 'log' || !(range > 0)) {
+    return {
+      mode: range > 0 ? mode : 'linear',
+      toT: (z) => (range > 0 ? Math.min(1, Math.max(0, (z - zmin) / range)) : 0),
+      invert: (t) => zmin + Math.min(1, Math.max(0, t)) * range,
+    };
+  }
+  const eps = Math.max(range * 1e-9, 1e-12);
+  const lo = Math.log1p(eps);
+  const span = Math.log1p(range + eps) - lo;
+  return {
+    mode,
+    toT: (z) => {
+      const t = (Math.log1p(Math.max(z, zmin) - zmin + eps) - lo) / span;
+      return Math.min(1, Math.max(0, t));
+    },
+    invert: (t) => zmin + Math.expm1(lo + Math.min(1, Math.max(0, t)) * span) - eps,
+  };
+}
+
+/** k 条等值线阈值：显示空间均匀分层后映射回数据空间（log 刻度时低区更密）。 */
+export function buildContourLevelsScaled(scaler: LandscapeScaler, k: number): number[] {
+  if (!(k > 0)) return [];
+  const levels: number[] = [];
+  for (let i = 1; i <= k; i++) levels.push(scaler.invert(i / (k + 1)));
+  return levels[0] === levels[levels.length - 1] ? [] : levels;
+}

@@ -9,7 +9,7 @@
  */
 import * as THREE from 'three';
 import { buildSurfaceGeometry, SURFACE_THEME, type SurfaceGeometry, type BallPoint } from './surface';
-import type { ParsedLandscape } from './landscape';
+import { makeLandscapeScaler, type LandscapeScale, type LandscapeScaler, type ParsedLandscape } from './landscape';
 
 export { SURFACE_THEME };
 
@@ -55,6 +55,8 @@ export class LandscapeViewer {
   private _wire: THREE.LineSegments | null = null;
   private _wireframe = false;
   private _cmap = 'coolwarm';
+  private _scale: LandscapeScale = 'linear';
+  private _scaler: LandscapeScaler = makeLandscapeScaler(0, 1, 'linear');
   private _geo: SurfaceGeometry | null = null;
   private _data: ParsedLandscape | null = null;
   private _hSpan = 6;
@@ -64,8 +66,6 @@ export class LandscapeViewer {
     t0: number;
     dur: number;
     attr: THREE.BufferAttribute;
-    zmin: number;
-    range: number;
   } | null = null;
   private _raf = 0;
   private _paused = false;
@@ -285,14 +285,12 @@ export class LandscapeViewer {
   };
 
   // ===== 小球滚落动画 =====
-  /** 沿 (α, β, loss) 路径播放小球滚落 + 尾迹（数据空间 → 世界坐标 y=hSpan·归一化loss） */
+  /** 沿 (α, β, loss) 路径播放小球滚落 + 尾迹（loss 经当前缩放映射为世界高度） */
   playBall(pts: BallPoint[], durationMs = 4000): void {
     this.clearBall();
     if (pts.length === 0 || !this._data) return;
-    const d = this._data;
-    const range = d.zmax - d.zmin || 1;
     const toWorld = (p: BallPoint) =>
-      new THREE.Vector3(p[0], ((p[2] - d.zmin) / range) * this._hSpan, p[1]);
+      new THREE.Vector3(p[0], this._scaler.toT(p[2]) * this._hSpan, p[1]);
 
     const r = Math.max(this._fitRadius * 0.018, 0.08);
     const ball = new THREE.Mesh(
@@ -315,7 +313,7 @@ export class LandscapeViewer {
     this._fx.add(trail);
     this._fx.add(ball);
     this._ball = ball;
-    this._ballAnim = { pts, t0: performance.now(), dur: Math.max(200, durationMs), attr, zmin: d.zmin, range };
+    this._ballAnim = { pts, t0: performance.now(), dur: Math.max(200, durationMs), attr };
     this.setPaused(false);
   }
 
@@ -337,17 +335,18 @@ export class LandscapeViewer {
     const a = cur[0] + (nxt[0] - cur[0]) * frac;
     const b = cur[1] + (nxt[1] - cur[1]) * frac;
     const l = cur[2] + (nxt[2] - cur[2]) * frac;
-    this._ball.position.set(a, ((l - anim.zmin) / anim.range) * this._hSpan, b);
+    const hOf = (loss: number) => this._scaler.toT(loss) * this._hSpan;
+    this._ball.position.set(a, hOf(l), b);
 
     const arr = anim.attr.array as Float32Array;
     for (let i = 0; i <= i0; i++) {
       const [pa, pb, pl] = anim.pts[i];
       arr[i * 3] = pa;
-      arr[i * 3 + 1] = ((pl - anim.zmin) / anim.range) * this._hSpan;
+      arr[i * 3 + 1] = hOf(pl);
       arr[i * 3 + 2] = pb;
     }
     arr[i0 * 3] = a;
-    arr[i0 * 3 + 1] = ((l - anim.zmin) / anim.range) * this._hSpan;
+    arr[i0 * 3 + 1] = hOf(l);
     arr[i0 * 3 + 2] = b;
     anim.attr.needsUpdate = true;
     anim.attr.count = i0 + 2;
@@ -455,7 +454,7 @@ export class LandscapeViewer {
     };
 
     this._axes.add(label('α', [x1 + pad * 0.35, y0, z0], 'left', labelH));
-    this._axes.add(label('loss', [x0, y1 + pad * 0.35, z0], 'center', labelH));
+    this._axes.add(label(this._scale === 'log' ? 'loss (log)' : 'loss', [x0, y1 + pad * 0.35, z0], 'center', labelH));
     this._axes.add(label('β', [x0, y0, z1 + pad * 0.35], 'center', labelH));
   }
 
@@ -471,8 +470,10 @@ export class LandscapeViewer {
   }
 
   // ===== 数据加载：重建曲面 mesh（keepView 时保留相机）=====
-  setData(d: ParsedLandscape, opts?: { keepView?: boolean; cmap?: string }): void {
+  setData(d: ParsedLandscape, opts?: { keepView?: boolean; cmap?: string; scale?: LandscapeScale }): void {
     if (opts?.cmap && opts.cmap !== this._cmap) this._cmap = opts.cmap;
+    if (opts?.scale && opts.scale !== this._scale) this._scale = opts.scale;
+    this._scaler = makeLandscapeScaler(d.zmin, d.zmax, this._scale);
     this._clearGroup(this._surface);
     this._mesh = null;
     this._wire = null;
@@ -484,7 +485,7 @@ export class LandscapeViewer {
       d.ys[d.nRows - 1] - d.ys[0],
     );
     const hSpan = horizSpan * 1.4 + 1e-6;
-    const geo = buildSurfaceGeometry(d, hSpan, this._cmap);
+    const geo = buildSurfaceGeometry(d, hSpan, this._cmap, this._scale);
     this._geo = geo;
     this._hSpan = geo.hSpan;
     this.clearBall();
