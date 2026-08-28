@@ -57,7 +57,7 @@
 
   $effect(() => {
     void rollToken;
-    if (rollToken <= 0 || ballPath.length === 0) return;
+    if (ballPath.length === 0) return; // rollToken 仅作手动重放信号(⚽),初始 0 时也自动播放一次
     activePath = ballPath;
     activeDur = Math.max(300, ballDuration);
     const gen = ++ballGen;

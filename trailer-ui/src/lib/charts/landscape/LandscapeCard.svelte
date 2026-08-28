@@ -30,7 +30,7 @@
   ];
 
   let expanded = $state(true);
-  let view = $state<ViewMode>('heat');
+  let view = $state<ViewMode>('both'); // 默认等高线+热力图叠加
   let wireframe = $state(false);
   let cmap = $state('coolwarm');
   let rollSpeed = $state(1); // 滚球速度倍率
