@@ -271,6 +271,8 @@
     bind:this={container}
     class="relative w-full"
     style="height: {height}px;"
+    role="img"
+    aria-label="Loss landscape heatmap — axes α (direction 1) and β (direction 2), color encodes loss"
     onmousemove={onMove}
     onmouseleave={() => (hover = null)}
   >
