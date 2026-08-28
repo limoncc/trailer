@@ -158,25 +158,103 @@ PARALLEL_PRESETS = {
     "max": 4 << 30,       # 4GB   —— 服务器级
 }
 
-# 模型字节数阈值:超过则 mode="auto" 判定走低显存串行路径。
-# 向量化路径峰值 ≈ (5+2C)×模型字节,512MB 模型已需 >10GB,越过消费卡红线。
-AUTO_SERIAL_THRESHOLD = 512 << 20
+# vector 路径的默认显存预算:参数项(模型+双方向)与每点项(扰动张量+激活)都计入,
+# 超预算自动收缩 chunk,连 chunk=1 都放不下则转 serial——默认零调参。
+DEFAULT_MEMORY_BUDGET = 1 << 30
 
 
-def resolve_mode(model, mode: str | None = None) -> str:
-    """评估模式归一化:"auto"(或 None)按模型字节数判定 vector/serial。
+def _measure_activation_bytes(model, xs):
+    """一次前向的激活显存占用估算(峰值);测不了返回 0。
 
-    - "vector":torch.func 向量化,小模型快 1~2 个数量级
-    - "serial":逐点 in-place 扰动,参数零拷贝——大模型(LLM)/vmap 不兼容的模型
+    CUDA 用 max_memory_allocated(精确到算子内部);MPS 无峰值 API,在各模块
+    边界采样 current_allocated_memory 再放大 1.5 倍;CPU 无显存概念返回 0。
+    """
+    import torch
+
+    device = next(model.parameters()).device
+    try:
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+            torch.cuda.reset_peak_memory_stats(device)
+            base = torch.cuda.memory_allocated(device)
+            with torch.no_grad():
+                model(xs)
+            torch.cuda.synchronize(device)
+            return max(int(torch.cuda.max_memory_allocated(device) - base), 0)
+        if device.type == "mps":
+            alloc = torch.mps.current_allocated_memory
+            base = int(alloc())
+            peak = [base]
+            hooks = [
+                m.register_forward_pre_hook(
+                    lambda m, inp: peak.__setitem__(0, max(peak[0], int(alloc())))
+                )
+                for m in model.modules()
+            ]
+            try:
+                with torch.no_grad():
+                    model(xs)
+                peak[0] = max(peak[0], int(alloc()))
+            finally:
+                for h in hooks:
+                    h.remove()
+            # 模块边界采样不到算子内部峰值,放大 1.5 倍保守
+            return max(int((peak[0] - base) * 1.5), 0)
+    except Exception:
+        return 0
+    return 0
+
+
+def _plan_chunk(P: int, fixed_bytes: int, per_point_bytes: int, budget: int) -> int | None:
+    """预算内选最小可行 chunk:fixed + chunk×per_point ≤ budget;连 1 个点都放不下 → None。"""
+    if per_point_bytes <= 0:
+        return P
+    if fixed_bytes + per_point_bytes > budget:
+        return None
+    return max(1, min(P, int((budget - fixed_bytes) // per_point_bytes)))
+
+
+def plan_evaluation(model, batches, mode: str | None = None, chunk: int | None = None, parallel: str | None = None, n: int = 51) -> tuple[str, int | None]:
+    """评估总体规划 → (生效模式, chunk)。Tracker 与 evaluate_grid 共用,保证 meta 一致。
+
+    - mode="serial" 显式 → ("serial", None)(chunk/parallel 忽略)
+    - 显式 chunk/parallel → ("vector", 解析后的 chunk)(不做激活探测,保持档位语义)
+    - 其余(auto 与显式 "vector"):探测一次前向的激活占用,在 DEFAULT_MEMORY_BUDGET
+      内选最小可行 chunk 走 vector——参数项(模型+双方向 fp32)与每点项
+      (扰动张量 fp32 + 批量激活)都计入;连 chunk=1 都放不下 → ("serial", None)
     """
     if mode not in (None, "auto", "vector", "serial"):
         raise ValueError(f'mode 取值需为 "auto"/"vector"/"serial" 之一,收到: {mode!r}')
-    if mode in ("vector", "serial"):
-        return mode
+    P = n * n
+    if mode == "serial":
+        return "serial", None
+
+    named = list(model.named_parameters())
+    numel = sum(p.numel() for _, p in named)
+    if chunk is not None or parallel is not None:
+        bytes_per_point = max(numel * named[0][1].element_size(), 1) if named else 1
+        return "vector", _resolve_chunk(P, bytes_per_point, chunk=chunk, parallel=parallel)
+
     import torch
 
-    nbytes = sum(p.numel() * p.element_size() for p in model.parameters())
-    return "serial" if nbytes >= AUTO_SERIAL_THRESHOLD else "vector"
+    if not named:
+        return "vector", P
+    device = named[0][1].device
+    model_bytes = sum(p.numel() * p.element_size() for _, p in named)
+    fixed = model_bytes + 8 * numel             # 双方向 fp32 常驻
+    xs = torch.cat([x.to(device) for x, _ in batches])
+    was_training = model.training
+    model.eval()                                 # 探测与正式评估语义一致(冻结 BN)
+    try:
+        act = _measure_activation_bytes(model, xs)
+    finally:
+        if was_training:
+            model.train()
+    per_point = 4 * numel + act                  # 扰动张量 fp32 + 一份批量激活
+    planned = _plan_chunk(P, fixed, per_point, DEFAULT_MEMORY_BUDGET)
+    if planned is None:
+        return "serial", None
+    return "vector", planned
 
 
 def _device_total_memory(device):
@@ -232,11 +310,13 @@ def _resolve_chunk(P: int, bytes_per_point: int, chunk: int | None = None, paral
 def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk: int | None = None, parallel: str | None = None, mode: str | None = None):
     """网格评估:z[row][col] = loss(θ* + α·δ + β·η)(row→β, col→α, 端点 ±1)。
 
-    - mode="vector"(小模型缺省):基于 torch.func(functional_call + vmap)把同一
-      chunk 内的网格点合并成批量前向,快 1~2 个数量级,GPU 上收益最大
-    - mode="serial"(大模型 auto 判定 / 显式指定):逐点 in-place 扰动
-      (见 _evaluate_grid_lowmem)——参数零拷贝,任何 nn.Module 可跑
-      (vmap 不兼容 flash-attn/自定义算子的模型请用它)
+    默认零调参:mode 缺省时由 plan_evaluation 按显存预算自动规划——探测一次
+    前向的激活占用,在 DEFAULT_MEMORY_BUDGET(1GB)内选最小可行 chunk 走
+    vector(参数项+激活项都计入预算);连 chunk=1 都放不下(大模型)转 serial。
+
+    - mode="vector":torch.func 批量前向(functional_call + vmap),小模型快 1~2 个数量级
+    - mode="serial":逐点 in-place 扰动(_evaluate_grid_lowmem)——参数零拷贝,
+      任何 nn.Module 可跑(vmap 不兼容 flash-attn/自定义算子的模型也走它)
     - torch<2.0 自动回退串行实现;结果两路等价(有测试保证)
 
     - loss 按 batch 内样本数加权平均(等价于拼接后取均值)
@@ -244,18 +324,16 @@ def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk
     - 返回 numpy 数组,可直接交给 Tracker.log_loss_landscape
 
     Args:
-        chunk: vector 模式每批并行评估的网格点数。None → 由 parallel 档位
-               (或默认 auto)推算;显存紧张可调小(如 64),小模型可调大。
-        parallel: vector 模式并行档位 "low" / "medium" / "high" / "max"——映射不同
-                  的扰动参数工作集显存预算(64MB/256MB/1GB/4GB),按设备能力选择。
-                  chunk 显式给定时优先于 parallel;两者都缺省则按 ~300MB 自适应。
-        mode: "auto"(缺省)/ "vector" / "serial"。auto 按 AUTO_SERIAL_THRESHOLD
-              (512MB 模型字节)判定;serial 忽略 chunk/parallel。
+        chunk: vector 模式每批并行评估的网格点数。显式给定 → 跳过预算规划
+               (高级用法;缺省时自动规划,无需设置)。
+        parallel: vector 并行档位 "low"/"medium"/"high"/"max"(64MB/256MB/1GB/4GB
+                  参数工作集)——显式覆盖自动规划;chunk 显式给定时优先。
+        mode: "auto"(缺省,预算规划)/ "vector" / "serial";serial 忽略 chunk/parallel。
     """
     import numpy as np
     import torch
 
-    mode = resolve_mode(model, mode)
+    mode, chunk = plan_evaluation(model, batches, mode=mode, chunk=chunk, parallel=parallel, n=n)
     try:
         from torch.func import functional_call, vmap
     except ImportError:  # torch < 2.0 → 串行路径(不依赖 torch.func)
@@ -283,9 +361,9 @@ def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk
     betas = torch.linspace(-1.0, 1.0, n, device=device).repeat_interleave(n)
     P = n * n
 
-    numel = sum(p.numel() for p in base)
-    bytes_per_point = max(numel * base[0].element_size(), 1)
-    chunk = _resolve_chunk(P, bytes_per_point, chunk=chunk, parallel=parallel)
+    # chunk 已由 plan_evaluation 解析(显式档位或显存预算规划)
+    if not (isinstance(chunk, int) and 1 <= chunk <= P):
+        raise ValueError(f"chunk 需在 [1, {P}] 内,收到: {chunk!r}")
 
     was_training = model.training
     model.eval()

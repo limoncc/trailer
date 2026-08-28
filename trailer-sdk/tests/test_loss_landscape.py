@@ -363,7 +363,7 @@ class TestLogLossLandscapeAuto:
         torch = pytest.importorskip("torch")
         model, batches = self._toy()
         base = [p.detach().clone() for p in model.parameters()]
-        monkeypatch.setattr(ls, "AUTO_SERIAL_THRESHOLD", 1)
+        monkeypatch.setattr(ls, "DEFAULT_MEMORY_BUDGET", 1)
         t, posted = _remote_tracker(monkeypatch)
         t.log_loss_landscape(model, batches, n=5)
         t.finish()
@@ -485,37 +485,97 @@ class TestResolveChunk:
             _resolve_chunk(49, 1, parallel="turbo")
 
 
-class TestResolveMode:
-    """mode 归一化:auto 按模型字节数判定(AUTO_SERIAL_THRESHOLD),显式值直通。"""
+class TestPlanChunk:
+    """显存预算内的 chunk 规划:参数项与激活项都计入预算,放不下返回 None(转 serial)。"""
 
-    def _model(self):
+    def test_prefers_smallest_chunk_that_fits(self):
+        from trailer.landscape import _plan_chunk
+
+        # 每点成本 10 → floor(1000/10)=100(取最小可行 chunk,不取大)
+        assert _plan_chunk(P=9999, fixed_bytes=0, per_point_bytes=10, budget=1000) == 100
+
+    def test_clamped_to_grid_and_floor_one(self):
+        from trailer.landscape import _plan_chunk
+
+        assert _plan_chunk(P=49, fixed_bytes=0, per_point_bytes=1, budget=10**9) == 49
+        # 预算够 1 个点 → 1;一个点都放不下 → None(由上层转 serial)
+        assert _plan_chunk(P=9999, fixed_bytes=0, per_point_bytes=900, budget=1000) == 1
+
+    def test_fixed_bytes_counted(self):
+        from trailer.landscape import _plan_chunk
+
+        # 固定项(模型+双方向)900 → 剩 100 → 10 个点
+        assert _plan_chunk(P=9999, fixed_bytes=900, per_point_bytes=10, budget=1000) == 10
+
+    def test_none_when_even_one_point_blows_budget(self):
+        from trailer.landscape import _plan_chunk
+
+        assert _plan_chunk(P=9999, fixed_bytes=10**9, per_point_bytes=10**9, budget=1000) is None
+
+
+class TestPlanEvaluation:
+    """auto 总体规划:一次前向探测激活占用,预算内 vector+最小 chunk,放不下 serial。
+
+    默认零调参——chunk/parallel/mode 都是可选覆盖项。
+    """
+
+    def _toy(self):
         torch = pytest.importorskip("torch")
-        return torch.nn.Linear(4, 2)
+        torch.manual_seed(0)
+        model = torch.nn.Linear(4, 2)
+        x = torch.randn(8, 4)
+        y = torch.randint(0, 2, (8,))
+        return torch, model, [(x, y)]
 
-    def test_small_model_auto_is_vector(self):
-        from trailer.landscape import resolve_mode
-
-        assert resolve_mode(self._model(), "auto") == "vector"
-        assert resolve_mode(self._model(), None) == "vector"
-
-    def test_big_model_auto_is_serial(self, monkeypatch):
+    def test_explicit_serial_passthrough(self):
         import trailer.landscape as ls
-        from trailer.landscape import resolve_mode
 
-        monkeypatch.setattr(ls, "AUTO_SERIAL_THRESHOLD", 1)  # 阈值缩到 1 字节
-        assert resolve_mode(self._model(), "auto") == "serial"
-
-    def test_explicit_mode_passthrough(self):
-        from trailer.landscape import resolve_mode
-
-        assert resolve_mode(self._model(), "serial") == "serial"
-        assert resolve_mode(self._model(), "vector") == "vector"
+        torch, model, batches = self._toy()
+        assert ls.plan_evaluation(model, batches, mode="serial", n=5) == ("serial", None)
 
     def test_invalid_mode_raises(self):
-        from trailer.landscape import resolve_mode
+        import trailer.landscape as ls
 
+        torch, model, batches = self._toy()
         with pytest.raises(ValueError):
-            resolve_mode(self._model(), "turbo")
+            ls.plan_evaluation(model, batches, mode="turbo", n=5)
+
+    def test_auto_small_model_is_vector_with_chunk(self):
+        import trailer.landscape as ls
+
+        torch, model, batches = self._toy()
+        mode, chunk = ls.plan_evaluation(model, batches, n=5)   # CPU:激活探测返回 0
+        assert mode == "vector"
+        assert chunk is not None and 1 <= chunk <= 25           # P = 5×5
+
+    def test_auto_flips_serial_when_budget_hopeless(self, monkeypatch):
+        import trailer.landscape as ls
+
+        torch, model, batches = self._toy()
+        monkeypatch.setattr(ls, "DEFAULT_MEMORY_BUDGET", 1)     # 1 字节预算必然放不下
+        assert ls.plan_evaluation(model, batches, n=5) == ("serial", None)
+
+    def test_auto_shrinks_chunk_with_big_activations(self, monkeypatch):
+        import trailer.landscape as ls
+
+        torch, model, batches = self._toy()
+        monkeypatch.setattr(ls, "_measure_activation_bytes", lambda m, xs: 1 << 20)  # 前向 1MB
+        mode, chunk = ls.plan_evaluation(model, batches, n=41)
+        assert mode == "vector"
+        # 预算 1GB,每点 ≈ 4·numel + 1MB ≈ 1MB → chunk 远小于纯参数预算的值
+        assert chunk <= 1024
+
+    def test_explicit_chunk_skips_probe(self, monkeypatch):
+        import trailer.landscape as ls
+
+        torch, model, batches = self._toy()
+
+        def boom(m, xs):  # 显式 chunk 时不应做激活探测
+            raise AssertionError("probe should not run")
+
+        monkeypatch.setattr(ls, "_measure_activation_bytes", boom)
+        mode, chunk = ls.plan_evaluation(model, batches, chunk=7, n=5)
+        assert (mode, chunk) == ("vector", 7)
 
 
 class TestEvaluateGridLowMemory:
@@ -599,7 +659,7 @@ class TestEvaluateGridLowMemory:
         np, torch, model, batches = self._toy()
         from trailer.landscape import evaluate_grid, filter_normalized_directions
 
-        monkeypatch.setattr(ls, "AUTO_SERIAL_THRESHOLD", 1)    # 阈值缩到 1 字节
+        monkeypatch.setattr(ls, "DEFAULT_MEMORY_BUDGET", 1)    # 1 字节预算必然放不下
         delta, eta = filter_normalized_directions(model, seed=3)
         grid = evaluate_grid(model, batches, delta, eta, n=7, mode="auto")
         explicit = evaluate_grid(model, batches, delta, eta, n=7, mode="serial")

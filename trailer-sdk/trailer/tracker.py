@@ -716,13 +716,15 @@ class Tracker:
             n: 自动模式网格分辨率(默认 51)
             nbatches: 自动模式评估的固定 batch 子集数(默认 8)
             criterion: 自动模式损失函数(默认 CrossEntropyLoss)
-            chunk: 自动模式 vector 评估每批并行网格点数(None 自动按参数量定,显存紧张调小)
-            parallel: 自动模式 vector 并行档位 "low"/"medium"/"high"/"max"(按设备显存选择,
-                      映射 64MB/256MB/1GB/4GB 工作集;chunk 显式给定时忽略)
-            mode: 评估模式 "auto"(缺省)/"vector"/"serial"。auto 按模型字节数判定
-                  (≥512MB 走 serial);serial 为逐点 in-place 低显存路径——大模型(LLM)
-                  参数零拷贝,方向自动落 CPU 流式,也适用于 vmap 不兼容的模型
-                  (flash-attn/自定义算子);serial 忽略 chunk/parallel
+            chunk: vector 评估每批并行网格点数——显式给定则跳过自动预算规划(高级用法;
+                   缺省时自动规划,无需设置)
+            parallel: vector 并行档位 "low"/"medium"/"high"/"max"(64MB/256MB/1GB/4GB
+                      参数工作集),显式覆盖自动预算规划;chunk 显式给定时优先
+            mode: "auto"(缺省,零调参)/"vector"/"serial"。auto 探测一次前向的激活
+                  占用,在显存预算(默认 1GB)内选最小可行 chunk 走 vector,放不下转
+                  serial;serial 为逐点 in-place 低显存路径——大模型(LLM)参数零拷贝,
+                  方向自动落 CPU 流式,也适用于 vmap 不兼容的模型(flash-attn/
+                  自定义算子);serial 忽略 chunk/parallel
             seed: 方向随机种子(同 run 内保持一致以保证帧间可比)
             name: 卡片名(同名按 step 成组)
             step: 全局 step(None 自动递增)
@@ -739,12 +741,16 @@ class Tracker:
                     evaluate_grid,
                     filter_normalized_directions,
                     interpolation_directions,
+                    plan_evaluation,
                     resolve_batches,
-                    resolve_mode,
                 )
 
                 eval_batches = resolve_batches(batches, nbatches)
-                eff_mode = resolve_mode(loss_grid, mode)
+                # 零调参:预算规划出生效模式与 chunk(激活占用计入预算),
+                # chunk/parallel/mode 显式给定时作为覆盖项
+                eff_mode, planned_chunk = plan_evaluation(
+                    loss_grid, eval_batches, mode=mode, chunk=chunk, parallel=parallel, n=n,
+                )
                 dir_kwargs = (
                     dict(zip(("device", "dtype"), _directions_spec(loss_grid)))
                     if eff_mode == "serial" else {}
@@ -765,7 +771,8 @@ class Tracker:
                 }
                 loss_grid = evaluate_grid(
                     loss_grid, eval_batches, delta, eta,
-                    n=n, criterion=criterion, chunk=chunk, parallel=parallel, mode=eff_mode,
+                    n=n, criterion=criterion, chunk=planned_chunk,
+                    parallel=None, mode=eff_mode,
                 )
             except ImportError as e:
                 print(f"Trailer: log_loss_landscape 自动模式需要 torch+numpy: {e}")
