@@ -24,6 +24,7 @@ trailer-ui/.benchmarks/
 .idea/
 .vscode/
 *.swp
+.zcode/
 
 # Runtime data
 artifacts/
@@ -53,3 +54,4 @@ trailer-sdk/trailer/frontend/
 docs/导航指南.md
 docs/开源计划.md
 docs/日常工作流.md
+docs/损失景观开发计划.md
