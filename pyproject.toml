@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "trailer-sdk"
-version = "0.1.1"
+version = "0.1.2"
 description = "Trailer: Next-gen experiment tracking — TensorBoard + Aim + W&B in Rust"
 readme = "README.md"
 license = { file = "LICENSE" }
