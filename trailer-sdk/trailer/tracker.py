@@ -681,6 +681,7 @@ class Tracker:
         nbatches: int = 8,
         criterion=None,
         chunk: int | None = None,
+        parallel: str | None = None,
         seed: int = 0,
         name: str = "loss_landscape",
         step: int | None = None,
@@ -715,6 +716,8 @@ class Tracker:
             nbatches: 自动模式评估的固定 batch 子集数(默认 8)
             criterion: 自动模式损失函数(默认 CrossEntropyLoss)
             chunk: 自动模式每批并行评估的网格点数(None 自动按参数量定,显存紧张调小)
+            parallel: 自动模式并行档位 "low"/"medium"/"high"/"max"(按设备显存选择,
+                      映射 64MB/256MB/1GB/4GB 工作集;chunk 显式给定时忽略)
             seed: 方向随机种子(同 run 内保持一致以保证帧间可比)
             name: 卡片名(同名按 step 成组)
             step: 全局 step(None 自动递增)
@@ -747,7 +750,10 @@ class Tracker:
                     **auto_meta,
                     **(meta or {}),
                 }
-                loss_grid = evaluate_grid(loss_grid, eval_batches, delta, eta, n=n, criterion=criterion, chunk=chunk)
+                loss_grid = evaluate_grid(
+                    loss_grid, eval_batches, delta, eta,
+                    n=n, criterion=criterion, chunk=chunk, parallel=parallel,
+                )
             except ImportError as e:
                 print(f"Trailer: log_loss_landscape 自动模式需要 torch+numpy: {e}")
                 return

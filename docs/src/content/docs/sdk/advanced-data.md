@@ -77,6 +77,7 @@ Visualize the 2D loss surface around your weights — heatmap, contour lines, an
 t.log_loss_landscape(model, train_loader, n=51, step=epoch)       # random directions
 t.log_loss_landscape(model, loader, model_b=ckpt, step=epoch)     # two-checkpoint interpolation
 t.log_loss_landscape(model, loader, n=51, chunk=128)              # smaller chunks if VRAM-tight
+t.log_loss_landscape(model, loader, parallel="high")              # presets: low/medium/high/max
 ```
 
 **Manual mode (any framework / offline)** — pass a pre-computed grid:

@@ -367,3 +367,24 @@ class TestEvaluateGridVectorized:
         whole = evaluate_grid(model, batches, delta, eta, n=7)
         chunked = evaluate_grid(model, batches, delta, eta, n=7, chunk=2)
         assert np.allclose(whole, chunked, atol=1e-6)
+
+    def test_parallel_presets_equivalent(self):
+        """low→max 档位只改变并行批量,结果必须一致。"""
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        low = evaluate_grid(model, batches, delta, eta, n=7, parallel="low")
+        high = evaluate_grid(model, batches, delta, eta, n=7, parallel="high")
+        base = evaluate_grid(model, batches, delta, eta, n=7)
+        assert np.allclose(low, base, atol=1e-6)
+        assert np.allclose(high, base, atol=1e-6)
+
+    def test_parallel_invalid_preset_raises(self):
+        """未知档位应显式报错,而不是静默回退。"""
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        with pytest.raises(ValueError):
+            evaluate_grid(model, batches, delta, eta, n=7, parallel="turbo")

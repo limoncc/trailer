@@ -104,7 +104,16 @@ def _evaluate_grid_serial(model, batches, delta, eta, n: int = 51, criterion=Non
     return grid
 
 
-def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk: int | None = None):
+# 并行档位 → 扰动参数工作集显存预算(设备能力不同,用户按需选择)
+PARALLEL_PRESETS = {
+    "low": 64 << 20,      # 64MB  —— 集显/老卡/内存紧张
+    "medium": 256 << 20,  # 256MB —— 普通独显
+    "high": 1 << 30,      # 1GB   —— 大显存 GPU
+    "max": 4 << 30,       # 4GB   —— 服务器级
+}
+
+
+def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk: int | None = None, parallel: str | None = None):
     """向量化网格评估:z[row][col] = loss(θ* + α·δ + β·η)(row→β, col→α, 端点 ±1)。
 
     基于 torch.func(functional_call + vmap)把同一 chunk 内的网格点合并成批量前向,
@@ -116,8 +125,11 @@ def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk
     - 返回 numpy 数组,可直接交给 Tracker.log_loss_landscape
 
     Args:
-        chunk: 每批并行评估的网格点数。None → 按参数量自动(工作集预算 ~300MB);
+        chunk: 每批并行评估的网格点数。None → 由 parallel 档位(或默认 auto)推算;
                显存紧张可调小(如 64),小模型可调大。
+        parallel: 并行档位 "low" / "medium" / "high" / "max"——映射不同的扰动参数
+                  工作集显存预算(64MB/256MB/1GB/4GB),按自己设备能力选择。
+                  chunk 显式给定时优先于 parallel;两者都缺省则按 ~300MB 自适应。
     """
     import numpy as np
     import torch
@@ -147,10 +159,17 @@ def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk
     betas = torch.linspace(-1.0, 1.0, n, device=device).repeat_interleave(n)
     P = n * n
 
+    numel = sum(p.numel() for p in base)
+    bytes_per_point = max(numel * base[0].element_size(), 1)
+
     if chunk is None:
-        numel = sum(p.numel() for p in base)
-        bytes_per_point = max(numel * base[0].element_size(), 1)
-        chunk = max(8, min(P, int(3e8 // bytes_per_point)))   # 扰动参数工作集预算 ~300MB
+        if parallel is not None:
+            if parallel not in PARALLEL_PRESETS:
+                raise ValueError(f"parallel 取值需为 {sorted(PARALLEL_PRESETS)} 之一,收到: {parallel!r}")
+            budget = PARALLEL_PRESETS[parallel]
+            chunk = max(8, min(P, max(int(budget // bytes_per_point), 8)))
+        else:
+            chunk = max(8, min(P, max(int(3e8 // bytes_per_point), 8)))   # 默认 ~300MB 自适应
     chunk = max(1, min(chunk, P))
 
     was_training = model.training

@@ -77,6 +77,7 @@ t.log_pca(vectors, name="embeddings", step=step)
 t.log_loss_landscape(model, train_loader, n=51, step=epoch)       # 随机方向
 t.log_loss_landscape(model, loader, model_b=ckpt, step=epoch)     # 两 checkpoint 插值
 t.log_loss_landscape(model, loader, n=51, chunk=128)              # 显存紧张时调小 chunk
+t.log_loss_landscape(model, loader, parallel="high")              # 并行档位: low/medium/high/max
 ```
 
 **手动模式(其他框架 / 离线计算)**——传现成网格:
