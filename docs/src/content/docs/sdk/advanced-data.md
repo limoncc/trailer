@@ -80,14 +80,17 @@ t.log_loss_landscape(model, loader, n=51, chunk=128)              # vector mode:
 t.log_loss_landscape(model, loader, parallel="high")              # vector presets: low/medium/high/max
 ```
 
-**Evaluation modes** — `mode="auto"` (default) picks per model size, and the recorded `meta.mode` shows what actually ran:
+**Evaluation modes** — zero tuning by default. With no `mode`/`chunk`/`parallel`, the SDK probes one forward pass to measure activation footprint, then picks the cheapest plan that fits a ~1GB VRAM budget (`DEFAULT_MEMORY_BUDGET`): the smallest viable `chunk` on the vectorized path, or the serial path when even a single grid point doesn't fit. The recorded `meta.mode` shows what actually ran:
 
-- **`vector`** (weights < 512MB): `torch.func` batched forward (`vmap` + `functional_call`, chunked). Peak VRAM ≈ (5 + 2·chunk) × model bytes — orders of magnitude faster, ideal up to ~a few hundred million params.
-- **`serial`** (weights ≥ 512MB, or forced with `mode="serial"`): perturbs weights **in place**, one grid point at a time, restoring each point exactly from a CPU backup — **zero full-model copies**. GPU peak ≈ model + activations. If the device can't also hold both direction tensors, they're built on CPU in the model's dtype and streamed layer-by-layer (adds a PCIe transfer per point — prefer `n=21` over `n=51`). Also the escape hatch for models `vmap` can't trace (flash-attention, custom CUDA ops, quantized kernels).
+- **`vector`** (the common case): `torch.func` batched forward (`vmap` + `functional_call`). The budget counts **both** parameter copies (model + fp32 directions + perturbed batch) **and** batched activations — the latter is what actually dominates on real batches. Order-of-magnitude faster; ideal whenever it fits the budget.
+- **`serial`** (large models, or when the budget can't be met): perturbs weights **in place**, one grid point at a time, restoring each point exactly from a CPU backup — **zero full-model copies**. GPU peak ≈ model + activations. If the device can't also hold both direction tensors, they're built on CPU in the model's dtype and streamed layer-by-layer. Also the escape hatch for models `vmap` can't trace (flash-attention, custom CUDA ops, quantized kernels).
+
+`chunk` / `parallel` / `mode` remain as **opt-in overrides** (explicit values skip the probe and keep the preset semantics):
 
 ```python
-t.log_loss_landscape(model, loader, mode="serial")   # force the low-memory path
-t.log_loss_landscape(model, loader)                  # auto: ≥512MB of weights → serial
+t.log_loss_landscape(model, loader)                    # auto: memory-budgeted, zero tuning
+t.log_loss_landscape(model, loader, mode="serial")     # force the low-memory path
+t.log_loss_landscape(model, loader, parallel="high")   # opt into a bigger parameter working set
 ```
 
 **Manual mode (any framework / offline)** — pass a pre-computed grid:

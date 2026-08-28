@@ -80,14 +80,17 @@ t.log_loss_landscape(model, loader, n=51, chunk=128)              # vector 模�
 t.log_loss_landscape(model, loader, parallel="high")              # vector 并行档位: low/medium/high/max
 ```
 
-**评估模式**——`mode="auto"`(缺省)按模型规模自动选择,记录的 `meta.mode` 标明实际走的路径:
+**评估模式**——默认零调参:不传 `mode`/`chunk`/`parallel` 时,SDK 先探测一次前向的激活占用,然后在约 1GB 的显存预算(`DEFAULT_MEMORY_BUDGET`)内选最省的可行方案——预算内选最小 `chunk` 走 vector,连单个网格点都放不下则转 serial。记录的 `meta.mode` 标明实际走的路径:
 
-- **`vector`**(权重 < 512MB):`torch.func` 批量前向(`vmap`+`functional_call`,按参数量分 chunk)。峰值显存 ≈ (5+2·chunk)× 模型字节——快 1~2 个数量级,适合数亿参数以内。
-- **`serial`**(权重 ≥ 512MB,或 `mode="serial"` 强制):**in-place 逐点扰动**,每个网格点评估完从 CPU 备份精确恢复——**零整模型参数副本**,GPU 峰值 ≈ 模型 + 激活。设备放不下双方向张量时,方向按模型 dtype 建在 CPU、逐层流式上卡(每点多一次 PCIe 传输,建议 `n=21` 而非 `n=51`)。`vmap` 无法追踪的模型(flash-attention、自定义 CUDA 算子、量化内核)也走这条路径。
+- **`vector`**(多数情况):`torch.func` 批量前向(`vmap`+`functional_call`)。预算同时计入**参数项**(模型+fp32 双方向+扰动批量)与**批量激活**——真实 batch 下后者才是大头。快 1~2 个数量级,预算装得下就优先用它。
+- **`serial`**(大模型,或预算无法满足):**in-place 逐点扰动**,每个网格点评估完从 CPU 备份精确恢复——**零整模型参数副本**,GPU 峰值 ≈ 模型 + 激活。设备放不下双方向张量时,方向按模型 dtype 建在 CPU、逐层流式上卡。`vmap` 无法追踪的模型(flash-attention、自定义 CUDA 算子、量化内核)也走这条路径。
+
+`chunk` / `parallel` / `mode` 保留为**可选覆盖项**(显式给定会跳过探测,保持档位语义):
 
 ```python
-t.log_loss_landscape(model, loader, mode="serial")   # 强制低显存路径
-t.log_loss_landscape(model, loader)                  # auto:权重 ≥512MB 自动 serial
+t.log_loss_landscape(model, loader)                    # auto:显存预算自动规划,零调参
+t.log_loss_landscape(model, loader, mode="serial")     # 强制低显存路径
+t.log_loss_landscape(model, loader, parallel="high")   # 显式换更大的参数工作集
 ```
 
 **手动模式(其他框架 / 离线计算)**——传现成网格:
