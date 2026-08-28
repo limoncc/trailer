@@ -26,7 +26,7 @@
     ['heat', 'Heat'],
     ['contour', 'Contour'],
     ['both', 'Both'],
-    ['surf', 'Surf'],
+    ['surf', '3D'],
   ];
 
   let expanded = $state(true);

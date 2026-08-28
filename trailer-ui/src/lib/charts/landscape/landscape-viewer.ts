@@ -478,7 +478,13 @@ export class LandscapeViewer {
     this._wire = null;
     this._data = d;
 
-    const geo = buildSurfaceGeometry(d, 6, this._cmap);
+    // 高度自适应底座跨度:瘦高/扁平数据都能保持协调纵横比(固定 6 对窄底座会显得主体小)
+    const horizSpan = Math.max(
+      d.xs[d.nCols - 1] - d.xs[0],
+      d.ys[d.nRows - 1] - d.ys[0],
+    );
+    const hSpan = horizSpan * 1.4 + 1e-6;
+    const geo = buildSurfaceGeometry(d, hSpan, this._cmap);
     this._geo = geo;
     this._hSpan = geo.hSpan;
     this.clearBall();
@@ -516,22 +522,25 @@ export class LandscapeViewer {
     this._buildGrid(b);
     this._buildAxes(b);
 
-    this._fitRadius = Math.max(b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ) * 1.25 + 1;
+    // 视角拟合:目标点取包围盒中心,距离取"水平跨度/高度较大者×1.5"——
+    // 包围球公式会被瘦高地形的空白角落撑远,导致主体显得小
+    this._target.set((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2);
+    this._fitRadius = Math.max(horizSpan, geo.hSpan) * 1.5 + 0.4;
     if (!opts?.keepView) this.resetView();
   }
 
   setView(name: 'reset' | 'front' | 'side' | 'top'): void {
     const r = this._fitRadius || 18;
-    this._target.set(0, 0, 0);
-    const t = this._target;
+    const t = this._target; // 包围盒中心(随数据更新),保证主体居中
     if (name === 'front') {
-      this.camera.position.set(0, 0, r); this.camera.up.set(0, 1, 0);
+      this.camera.position.set(t.x, t.y, t.z + r); this.camera.up.set(0, 1, 0);
     } else if (name === 'side') {
-      this.camera.position.set(r, 0, 0); this.camera.up.set(0, 1, 0);
+      this.camera.position.set(t.x + r, t.y, t.z); this.camera.up.set(0, 1, 0);
     } else if (name === 'top') {
-      this.camera.position.set(0, r, 0); this.camera.up.set(0, 0, -1);
+      this.camera.position.set(t.x, t.y + r, t.z); this.camera.up.set(0, 0, -1);
     } else {
-      this.camera.position.set(r * 0.7, r * 0.6, r * 0.7); this.camera.up.set(0, 1, 0);
+      this.camera.position.set(t.x + r * 0.62, t.y + r * 0.5, t.z + r * 0.62);
+      this.camera.up.set(0, 1, 0);
     }
     this.camera.lookAt(t);
   }

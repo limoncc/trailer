@@ -31,7 +31,7 @@ Each logged landscape (`t.log_loss_landscape(...)`, see [Advanced Data Types](/s
 - **Heat** — pure colormap field, hover reads (α, β, loss)
 - **Contour** — pure contour lines (no fill)
 - **Both** — heatmap + d3-contour overlay
-- **Surface** — interactive Three.js mesh: drag to rotate, scroll to zoom, wireframe toggle, Front/Side/Top views
+- **3D** — interactive Three.js surface mesh: drag to rotate, scroll to zoom, wireframe toggle, Front/Side/Top views
 - **⚽ Roll + speed** — replays a gradient-descent ball (from the highest point, with trail) in **every** view; speed selectable 0.5×–4×; auto-plays on view switch and on each new step frame
 - **Colormap picker** — coolwarm (default) / plasma / magma / viridis, applied to heatmap, contours and the 3D mesh
 - **Step slider + ▶ auto-play** — replay landscape evolution across training (slider moves between *logged* frames — log per epoch for step-by-step playback)
