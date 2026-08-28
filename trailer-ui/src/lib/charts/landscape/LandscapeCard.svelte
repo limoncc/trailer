@@ -26,7 +26,7 @@
     ['heat', 'Heat'],
     ['contour', 'Contour'],
     ['both', 'Both'],
-    ['surf', 'Surface'],
+    ['surf', 'Surf'],
   ];
 
   let expanded = $state(true);
@@ -34,6 +34,7 @@
   let wireframe = $state(false);
   let cmap = $state('coolwarm');
   let rollSpeed = $state(1); // 滚球速度倍率
+  let surfView = $state<'front' | 'side' | 'top' | 'reset'>('reset');
   const ROLL_BASE_MS = 4000;
   // 默认选最新 step（一次性 init 标志，避免覆盖用户点击 step 0——导航指南 §4.7 踩坑）
   let selectedIndex = $state(0);
@@ -57,8 +58,8 @@
 
   let sliderWrap = $state<HTMLDivElement | null>(null);
   let dragging = false; // 非响应式：避免闭包读旧值
-  // Surface 模式视角按钮通过 bind:this 调用组件暴露的 setView
-  let surfaceChart = $state<{ setView: (name: 'front' | 'side' | 'top' | 'reset') => void; playRoll: () => void } | undefined>(undefined);
+  // Surface 模式视角/滚球通过 bind:this 调用组件暴露的方法
+  let surfaceChart = $state<{ setView: (name: 'front' | 'side' | 'top' | 'reset') => void; playRoll: (durationMs?: number) => void } | undefined>(undefined);
 
   // 滚球：rollToken 只在 ⚽ 点击处理器里递增(不在 effect 内写状态——Svelte 5 反模式)。
   // 自动重放由数据驱动：新帧 → current 变化 → ballPath 新数组身份 → 各视图自身 effect 重放。
@@ -194,48 +195,59 @@
         {/if}
       </div>
 
-      <!-- 视图切换 + 滚球 + 配色（滚球在三种视图下都可用）-->
-      <div class="flex items-center gap-1 flex-wrap">
-        <div class="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
+      <!-- 视图切换 + 滚球 + 配色（单行紧凑布局）-->
+      <div class="flex items-center gap-1 flex-wrap text-[11px]">
+        <div class="flex items-center gap-px border border-border rounded-md overflow-hidden">
           {#each VIEW_TABS as [k, l]}
             <button
               type="button"
-              class="px-2 py-0.5 text-[11px] {view === k ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50'}"
+              class="px-1.5 py-0.5 {view === k ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50'}"
               onclick={() => (view = k)}
             >{l}</button>
           {/each}
         </div>
         <button
           type="button"
-          class="px-2 py-0.5 text-[11px] border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          class="px-1.5 py-0.5 border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           onclick={() => rollToken++}
           aria-label="Roll ball"
-        >⚽ Roll</button>
+          title="小球梯度滚落"
+        >⚽</button>
         <select
           bind:value={rollSpeed}
           aria-label="Roll speed"
-          class="px-1 py-0.5 text-[11px] border border-border rounded-md bg-background text-muted-foreground"
+          title="滚球速度"
+          class="px-0.5 py-0.5 border border-border rounded-md bg-background text-muted-foreground"
         >
           {#each [0.5, 1, 2, 4] as s}
             <option value={s}>{s}×</option>
           {/each}
         </select>
         {#if view === 'surf'}
-          {#each [['front', 'Front'], ['side', 'Side'], ['top', 'Top'], ['reset', 'Reset']] as [k, l]}
-            <button
-              type="button"
-              class="px-2 py-0.5 text-[11px] border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              onclick={() => surfaceChart?.setView(k as 'front' | 'side' | 'top' | 'reset')}
-            >{l}</button>
-          {/each}
-          <label class="ml-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-            <input type="checkbox" bind:checked={wireframe} class="accent-primary" /> wireframe
-          </label>
+          <select
+            bind:value={surfView}
+            onchange={() => surfaceChart?.setView(surfView)}
+            aria-label="Camera view"
+            title="视角"
+            class="px-0.5 py-0.5 border border-border rounded-md bg-background text-muted-foreground"
+          >
+            {#each [['front', 'Front'], ['side', 'Side'], ['top', 'Top'], ['reset', 'Reset']] as [k, l]}
+              <option value={k}>{l}</option>
+            {/each}
+          </select>
+          <button
+            type="button"
+            class="px-1.5 py-0.5 border border-border rounded-md {wireframe ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50'}"
+            onclick={() => (wireframe = !wireframe)}
+            aria-label="Wireframe"
+            title="线框"
+          >▦</button>
         {/if}
         <select
           bind:value={cmap}
           aria-label="Colormap"
-          class="ml-auto px-1.5 py-1 text-[11px] border border-border rounded-md bg-background text-muted-foreground"
+          title="配色"
+          class="ml-auto px-0.5 py-0.5 border border-border rounded-md bg-background text-muted-foreground"
         >
           {#each COLORMAP_NAMES as name}
             <option value={name}>{name}</option>
