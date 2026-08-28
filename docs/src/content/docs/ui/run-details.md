@@ -34,6 +34,7 @@ Each logged landscape (`t.log_loss_landscape(...)`, see [Advanced Data Types](/s
 - **3D** — interactive Three.js surface mesh: drag to rotate, scroll to zoom, wireframe toggle, Front/Side/Top views
 - **⚽ Roll + speed** — replays a gradient-descent ball (from the highest point, with trail) in **every** view; speed selectable 0.5×–4×; auto-plays on view switch and on each new step frame
 - **Colormap picker** — coolwarm (default) / plasma / magma / viridis, applied to heatmap, contours and the 3D mesh
+- **Z scale (log / lin)** — default **log**: an offset-log scale expands near-minimum detail so the bowl stays visible even when extreme walls dominate the min–max range; contour levels densify near the bottom accordingly; the 3D loss axis is labeled `(log)`. Hover tooltips always show the raw loss
 - **Step slider + ▶ auto-play** — replay landscape evolution across training (slider moves between *logged* frames — log per epoch for step-by-step playback)
 - Cards group by name and refresh live while the run is still training
 
