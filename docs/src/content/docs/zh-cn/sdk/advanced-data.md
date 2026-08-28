@@ -69,18 +69,26 @@ t.log_pca(vectors, name="embeddings", step=step)
 
 ## 损失景观(Loss Landscape)
 
-可视化权重附近的 2D 损失曲面——热力图、等高线、可交互 3D 曲面。网格在训练循环内计算并按 step 记录,Landscape 标签页可用滑条回放"景观随训练演化":
+可视化权重附近的 2D 损失曲面——热力图、等高线、可交互 3D 曲面。每个 step 记录一张网格,Landscape 标签页即可回放"景观随训练演化"。
+
+**自动模式(PyTorch,推荐)**——直接传模型:SDK 自动构造 filter 归一化方向(跳过 bias/BN)、在固定 batch 子集上评估网格、恢复原参数并记录。需要训练环境装有 `torch`(缺失时友好跳过,绝不阻塞训练):
+
+```python
+t.log_loss_landscape(model, train_loader, n=51, step=epoch)       # 随机方向
+t.log_loss_landscape(model, loader, model_b=ckpt, step=epoch)     # 两 checkpoint 插值
+```
+
+**手动模式(其他框架 / 离线计算)**——传现成网格:
 
 ```python
 # z[row][col] = loss(θ* + α·δ + β·η), α ∈ x_range, β ∈ y_range
 grid = ...  # N×N 浮点矩阵,推荐 51×51,边长上限 250
 t.log_loss_landscape(grid, name="landscape", step=epoch,
                      x_range=(-1, 1), y_range=(-1, 1),
-                     meta={"normalization": "filter", "direction": "random",
-                           "seed": 0, "split": "train"})
+                     meta={"normalization": "filter", "direction": "random", "seed": 0})
 ```
 
-> **⚠️ 画图前必读**——方向 δ/η 必须做 **filter 归一化**(按输出通道逐个 `d_f ← d_f/‖d_f‖·‖θ_f‖`),且必须**跳过 bias / BatchNorm 参数**。未归一化的随机方向在 BN 网络上会因尺度不变性产生假悬崖(Li et al., NeurIPS 2018)。可直接复制的 PyTorch 配方(含 BN running statistics 陷阱处理)见 `trailer-sdk/examples/loss_landscape_demo.py`,加 `--self-check` 可在无数据集情况下验证方向数学。
+> **⚠️ 画图前必读**——方向 δ/η 必须 **filter 归一化**(按输出通道逐个 `d_f ← d_f/‖d_f‖·‖θ_f‖`),且必须**跳过 bias / BatchNorm 参数**。未归一化的随机方向在 BN 网络上会因尺度不变性产生假悬崖(Li et al., NeurIPS 2018)。自动模式已内置处理;手动模式可直接复制的 PyTorch 配方(含 BN running statistics 陷阱)见 `trailer-sdk/examples/loss_landscape_demo.py`(`--self-check` 可在无数据集情况下验证方向数学),构件亦可导入:`from trailer.landscape import filter_normalized_directions, evaluate_grid`。
 
 实践默认值:51×51 网格 × 固定 8 个 batch 子集(10M 参数 CNN 约 2–5 GPU 分钟),取 train loss,每个 run 固定方向 seed 保证跨 step 可比。
 

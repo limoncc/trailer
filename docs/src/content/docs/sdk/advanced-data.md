@@ -69,18 +69,26 @@ t.log_pca(vectors, name="embeddings", step=step)
 
 ## Loss landscapes
 
-Visualize the 2D loss surface around your weights — heatmap, contour lines, and an interactive 3D surface. Grids are computed in your training loop and logged per step, so the Landscape tab can replay how the landscape evolves during training:
+Visualize the 2D loss surface around your weights — heatmap, contour lines, and an interactive 3D surface. Log one grid per step and the Landscape tab replays how the landscape evolves during training.
+
+**Auto mode (PyTorch, recommended)** — pass the model; the SDK builds filter-normalized directions (skipping bias/BN), evaluates the grid on a fixed batch subset, restores your parameters and records it. Requires `torch` in the training environment (missing → friendly skip, never blocks training):
+
+```python
+t.log_loss_landscape(model, train_loader, n=51, step=epoch)       # random directions
+t.log_loss_landscape(model, loader, model_b=ckpt, step=epoch)     # two-checkpoint interpolation
+```
+
+**Manual mode (any framework / offline)** — pass a pre-computed grid:
 
 ```python
 # z[row][col] = loss(θ* + α·δ + β·η), α ∈ x_range, β ∈ y_range
 grid = ...  # N×N float matrix, 51×51 recommended, edge ≤ 250
 t.log_loss_landscape(grid, name="landscape", step=epoch,
                      x_range=(-1, 1), y_range=(-1, 1),
-                     meta={"normalization": "filter", "direction": "random",
-                           "seed": 0, "split": "train"})
+                     meta={"normalization": "filter", "direction": "random", "seed": 0})
 ```
 
-> **⚠️ Read before plotting** — directions δ/η must be **filter-normalized** (per output channel: `d_f ← d_f/‖d_f‖·‖θ_f‖`) and must **skip bias / BatchNorm parameters**. Unnormalized random directions produce fake cliffs on BN networks due to scale invariance (Li et al., NeurIPS 2018). A ready-to-copy PyTorch recipe covering the BN running-stats pitfall lives in `trailer-sdk/examples/loss_landscape_demo.py` (run with `--self-check` to verify the math without a dataset).
+> **⚠️ Read before plotting** — directions δ/η must be **filter-normalized** (per output channel: `d_f ← d_f/‖d_f‖·‖θ_f‖`) and must **skip bias / BatchNorm parameters**. Unnormalized random directions produce fake cliffs on BN networks due to scale invariance (Li et al., NeurIPS 2018). Auto mode handles this for you. For manual use, a ready-to-copy PyTorch recipe covering the BN running-stats pitfall lives in `trailer-sdk/examples/loss_landscape_demo.py` (`--self-check` verifies the math without a dataset), and the building blocks are importable: `from trailer.landscape import filter_normalized_directions, evaluate_grid`.
 
 Practical defaults: 51×51 grid over fixed 8-batch subset (≈2–5 GPU-minutes for a 10M-param CNN), train loss, fixed direction seed per run for cross-step comparability.
 
