@@ -112,6 +112,42 @@ PARALLEL_PRESETS = {
     "max": 4 << 30,       # 4GB   —— 服务器级
 }
 
+# 模型字节数阈值:超过则 mode="auto" 判定走低显存串行路径。
+# 向量化路径峰值 ≈ (5+2C)×模型字节,512MB 模型已需 >10GB,越过消费卡红线。
+AUTO_SERIAL_THRESHOLD = 512 << 20
+
+
+def resolve_mode(model, mode: str | None = None) -> str:
+    """评估模式归一化:"auto"(或 None)按模型字节数判定 vector/serial。
+
+    - "vector":torch.func 向量化,小模型快 1~2 个数量级
+    - "serial":逐点 in-place 扰动,参数零拷贝——大模型(LLM)/vmap 不兼容的模型
+    """
+    if mode not in (None, "auto", "vector", "serial"):
+        raise ValueError(f'mode 取值需为 "auto"/"vector"/"serial" 之一,收到: {mode!r}')
+    if mode in ("vector", "serial"):
+        return mode
+    import torch
+
+    nbytes = sum(p.numel() * p.element_size() for p in model.parameters())
+    return "serial" if nbytes >= AUTO_SERIAL_THRESHOLD else "vector"
+
+
+def _resolve_chunk(P: int, bytes_per_point: int, chunk: int | None = None, parallel: str | None = None) -> int:
+    """并行批量推算:显式 chunk > parallel 档位 > 默认 ~300MB 自适应,钳位 [1, P]。
+
+    下限 1:预算连一个网格点都放不下时降级为逐点评估,而不是强推多点导致 OOM。
+    """
+    if chunk is None:
+        if parallel is not None:
+            if parallel not in PARALLEL_PRESETS:
+                raise ValueError(f"parallel 取值需为 {sorted(PARALLEL_PRESETS)} 之一,收到: {parallel!r}")
+            budget = PARALLEL_PRESETS[parallel]
+        else:
+            budget = int(3e8)   # 默认 ~300MB 自适应
+        chunk = max(int(budget // bytes_per_point), 1)
+    return max(1, min(chunk, P))
+
 
 def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk: int | None = None, parallel: str | None = None):
     """向量化网格评估:z[row][col] = loss(θ* + α·δ + β·η)(row→β, col→α, 端点 ±1)。
@@ -161,16 +197,7 @@ def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk
 
     numel = sum(p.numel() for p in base)
     bytes_per_point = max(numel * base[0].element_size(), 1)
-
-    if chunk is None:
-        if parallel is not None:
-            if parallel not in PARALLEL_PRESETS:
-                raise ValueError(f"parallel 取值需为 {sorted(PARALLEL_PRESETS)} 之一,收到: {parallel!r}")
-            budget = PARALLEL_PRESETS[parallel]
-            chunk = max(8, min(P, max(int(budget // bytes_per_point), 8)))
-        else:
-            chunk = max(8, min(P, max(int(3e8 // bytes_per_point), 8)))   # 默认 ~300MB 自适应
-    chunk = max(1, min(chunk, P))
+    chunk = _resolve_chunk(P, bytes_per_point, chunk=chunk, parallel=parallel)
 
     was_training = model.training
     model.eval()

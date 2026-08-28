@@ -388,3 +388,80 @@ class TestEvaluateGridVectorized:
         delta, eta = filter_normalized_directions(model, seed=3)
         with pytest.raises(ValueError):
             evaluate_grid(model, batches, delta, eta, n=7, parallel="turbo")
+
+
+class TestResolveChunk:
+    """chunk 推算纯函数:显式 chunk > parallel 档位 > 默认 ~300MB 自适应。
+
+    大模型场景(评估结论):预算连一个网格点都放不下时必须降级到 1 逐点评估,
+    旧版下限 8 会强推 8 份扰动参数直接 OOM。
+    """
+
+    def test_budget_below_single_point_degrades_to_one(self):
+        from trailer.landscape import _resolve_chunk
+
+        # low=64MB 预算 < 单点 1GB → 1(旧版返回 8)
+        assert _resolve_chunk(P=2601, bytes_per_point=1 << 30, parallel="low") == 1
+
+    def test_parallel_preset_maps_budget(self):
+        from trailer.landscape import _resolve_chunk
+
+        assert _resolve_chunk(9999, 1 << 20, parallel="low") == 64
+        assert _resolve_chunk(9999, 1 << 20, parallel="high") == 1024
+
+    def test_clamped_to_grid_points(self):
+        from trailer.landscape import _resolve_chunk
+
+        assert _resolve_chunk(P=49, bytes_per_point=1, parallel="high") == 49
+
+    def test_explicit_chunk_wins(self):
+        from trailer.landscape import _resolve_chunk
+
+        assert _resolve_chunk(9999, 1, chunk=7, parallel="max") == 7
+        assert _resolve_chunk(9999, 1, chunk=0) == 1        # 非法值钳位到 1
+        assert _resolve_chunk(100, 1, chunk=500) == 100     # 不超过网格点数
+
+    def test_default_adaptive_budget(self):
+        from trailer.landscape import _resolve_chunk
+
+        assert _resolve_chunk(9999, 300_000) == 1000        # ~300MB 默认预算
+        assert _resolve_chunk(9999, 300_000_000) == 1
+
+    def test_invalid_parallel_raises(self):
+        from trailer.landscape import _resolve_chunk
+
+        with pytest.raises(ValueError):
+            _resolve_chunk(49, 1, parallel="turbo")
+
+
+class TestResolveMode:
+    """mode 归一化:auto 按模型字节数判定(AUTO_SERIAL_THRESHOLD),显式值直通。"""
+
+    def _model(self):
+        torch = pytest.importorskip("torch")
+        return torch.nn.Linear(4, 2)
+
+    def test_small_model_auto_is_vector(self):
+        from trailer.landscape import resolve_mode
+
+        assert resolve_mode(self._model(), "auto") == "vector"
+        assert resolve_mode(self._model(), None) == "vector"
+
+    def test_big_model_auto_is_serial(self, monkeypatch):
+        import trailer.landscape as ls
+        from trailer.landscape import resolve_mode
+
+        monkeypatch.setattr(ls, "AUTO_SERIAL_THRESHOLD", 1)  # 阈值缩到 1 字节
+        assert resolve_mode(self._model(), "auto") == "serial"
+
+    def test_explicit_mode_passthrough(self):
+        from trailer.landscape import resolve_mode
+
+        assert resolve_mode(self._model(), "serial") == "serial"
+        assert resolve_mode(self._model(), "vector") == "vector"
+
+    def test_invalid_mode_raises(self):
+        from trailer.landscape import resolve_mode
+
+        with pytest.raises(ValueError):
+            resolve_mode(self._model(), "turbo")
