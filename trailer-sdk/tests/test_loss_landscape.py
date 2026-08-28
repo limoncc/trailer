@@ -234,3 +234,102 @@ class TestLogLossLandscape:
         t.finish()
 
         assert posted[-1]["name"] == "loss_landscape"
+
+
+class TestLogLossLandscapeAuto:
+    """传入 nn.Module + batches 的自动计算模式(鸭子类型重载)。"""
+
+    def _toy(self, seed=0):
+        torch = pytest.importorskip("torch")
+        torch.manual_seed(seed)
+        model = torch.nn.Sequential(
+            torch.nn.Flatten(), torch.nn.Linear(16, 8), torch.nn.ReLU(), torch.nn.Linear(8, 2)
+        )
+        x = torch.randn(32, 16)
+        y = torch.randint(0, 2, (32,))
+        return model, [(x[:16], y[:16]), (x[16:], y[16:])]
+
+    def test_auto_random_direction(self, monkeypatch):
+        """传 nn.Module → 自动计算网格,meta 自动补 direction/normalization。"""
+        torch = pytest.importorskip("torch")
+        model, batches = self._toy()
+        t, posted = _remote_tracker(monkeypatch)
+        base = [p.detach().clone() for p in model.parameters()]
+        ce = torch.nn.functional.cross_entropy
+        # 网格中心(α=β=0) = 全部评估 batch 的平均 loss(evaluate_grid 的聚合方式)
+        base_loss = sum(float(ce(model(x), y)) * len(x) for x, y in batches) / sum(len(x) for x, y in batches)
+
+        t.log_loss_landscape(model, batches, name="auto", step=3, n=9, seed=0)
+        t.finish()
+
+        payload = [p for p in posted if p.get("kind") == "landscape"][-1]
+        assert payload["step"] == 3
+        body = json.loads(payload["body"])
+        assert (body["n_rows"], body["n_cols"]) == (9, 9)
+        assert body["meta"]["direction"] == "random"
+        assert body["meta"]["normalization"] == "filter"
+        assert body["meta"]["seed"] == 0
+        assert all(v == v for row in body["z"] for v in row)  # 无 NaN
+        # 参数必须被恢复
+        for p, b in zip(model.parameters(), base):
+            assert torch.equal(p, b)
+        # 网格中心(α=β=0)应等于原模型 loss
+        assert abs(body["z"][4][4] - base_loss) < 1e-3
+
+    def test_auto_interp_direction(self, monkeypatch):
+        """model_b 提供时走两 checkpoint 插值方向。"""
+        model_a, batches = self._toy(seed=0)
+        model_b, _ = self._toy(seed=1)
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape(model_a, batches, model_b=model_b, name="interp", n=7, seed=5)
+        t.finish()
+
+        body = json.loads([p for p in posted if p.get("kind") == "landscape"][-1]["body"])
+        assert (body["n_rows"], body["n_cols"]) == (7, 7)
+        assert body["meta"]["direction"] == "interp"
+
+    def test_auto_user_meta_overrides(self, monkeypatch):
+        """用户 meta 覆盖自动 meta。"""
+        model, batches = self._toy()
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape(model, batches, n=5, meta={"direction": "my-own", "task": "demo"})
+        t.finish()
+
+        body = json.loads(posted[-1]["body"])
+        assert body["meta"]["direction"] == "my-own"
+        assert body["meta"]["task"] == "demo"
+        assert body["meta"]["normalization"] == "filter"  # 自动键保留
+
+    def test_auto_batches_resolved_from_dataloader(self, monkeypatch):
+        """batches 可传 DataLoader(取前 nbatches 个)。"""
+        torch = pytest.importorskip("torch")
+        model, batches = self._toy()
+        loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(batches[0][0], batches[0][1]), batch_size=8
+        )
+        t, posted = _remote_tracker(monkeypatch)
+        t.log_loss_landscape(model, loader, n=5, nbatches=2)
+        t.finish()
+
+        assert any(p.get("kind") == "landscape" for p in posted)  # 不抛异常即路由成功
+
+    def test_auto_local_mode_routes_to_save_figure(self, monkeypatch):
+        """自动模式本地路由:同样走 save_figure(kind=landscape)。"""
+        torch = pytest.importorskip("torch")
+        model, batches = self._toy()
+        t, _ = _remote_tracker(monkeypatch)
+        calls = []
+        backend = Mock()
+        backend.save_figure.side_effect = (
+            lambda name, kind, body, step, run_id: calls.append((kind, json.loads(body)))
+        )
+        t._mode = "local"
+        t._backend = backend
+
+        t.log_loss_landscape(model, batches, name="loc", n=5)
+        t.finish()
+
+        assert len(calls) == 1
+        kind, body = calls[0]
+        assert kind == "landscape"
+        assert body["n_rows"] == 5

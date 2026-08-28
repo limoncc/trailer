@@ -674,32 +674,85 @@ class Tracker:
     def log_loss_landscape(
         self,
         loss_grid,
+        batches=None,
         *,
+        model_b=None,
+        n: int = 51,
+        nbatches: int = 8,
+        criterion=None,
+        seed: int = 0,
         name: str = "loss_landscape",
         step: int | None = None,
         x_range=(-1.0, 1.0),
         y_range=(-1.0, 1.0),
         meta=None,
     ) -> None:
-        """记录损失景观(2D loss surface)网格，前端 Landscape 面板展示热力图/等高线/3D 曲面。
+        """记录损失景观(2D loss surface),前端 Landscape 面板展示热力图/等高线/3D 曲面。
 
-        z[row][col] = loss(θ* + α·δ + β·η)，α ∈ x_range，β ∈ y_range。
-        多个 step 各记一张即可在前端用滑条回放"景观随训练演化"动画。
+        两种用法:
 
-        ⚠️ 方向 δ/η 必须做 filter 归一化并跳过 bias/BN 参数——
-           BN 的尺度不变性会让未归一化方向呈现假悬崖(垃圾图)；
-           BN running statistics 处理方式见 examples/loss_landscape_demo.py。
+        1. **自动模式(推荐)**:传 torch nn.Module + 数据,自动构造 filter 归一化方向
+           并评估网格(需 torch+numpy,缺失时打印提示并跳过,不阻塞训练循环):
+           >>> t.log_loss_landscape(model, dataloader, n=51, step=epoch)
+           >>> t.log_loss_landscape(model, batches, model_b=ckpt, step=epoch)  # 两 checkpoint 插值
+           内置:方向跳过 bias/BN、冻结 BN running stats、评估后恢复原参数、
+           固定 batch 子集保证帧间可比。
+
+        2. **手动模式**:传现成的 N×N 网格(其他框架 / 离线计算):
+           >>> t.log_loss_landscape(grid, x_range=(-1, 1), y_range=(-1, 1))
+
+        ⚠️ 自动模式已内置 filter 归一化与 bias/BN 跳过;手动模式请自行保证,
+           否则 BN 网络会因尺度不变性产生假悬崖(垃圾图)。
+           配方与 BN 统计陷阱详见 examples/loss_landscape_demo.py。
 
         Args:
-            loss_grid: 二维 list/tuple/np.ndarray，N×M（推荐 51×51），边长上限 250；
-            name: 卡片名（同名按 step 成组）。
-            step: 全局 step（None 自动递增）。
-            x_range / y_range: α/β 轴端点，缺省 (-1, 1)，乱序自动归一。
-            meta: 附加元数据（normalization/direction/seed/split 等），覆盖自动键。
+            loss_grid: nn.Module(自动模式)或二维 list/np.ndarray N×M(手动模式,
+                       推荐 51×51,边长上限 250)
+            batches: 自动模式的 (x, y) 可迭代 / DataLoader(取前 nbatches 个固定子集)
+            model_b: 提供 → δ 取两 checkpoint 插值方向(θ_b − θ_a)
+            n: 自动模式网格分辨率(默认 51)
+            nbatches: 自动模式评估的固定 batch 子集数(默认 8)
+            criterion: 自动模式损失函数(默认 CrossEntropyLoss)
+            seed: 方向随机种子(同 run 内保持一致以保证帧间可比)
+            name: 卡片名(同名按 step 成组)
+            step: 全局 step(None 自动递增)
+            x_range / y_range: α/β 轴端点,缺省 (-1, 1)
+            meta: 附加元数据(normalization/direction/seed 等自动键可被覆盖)
 
         Returns:
-            None。非法输入打印提示不抛异常（不阻塞训练循环）。
+            None。非法输入打印提示不抛异常(不阻塞训练循环)。
         """
+        if hasattr(loss_grid, "parameters"):  # torch nn.Module → 自动计算模式
+            try:
+                from trailer.landscape import (
+                    evaluate_grid,
+                    filter_normalized_directions,
+                    interpolation_directions,
+                    resolve_batches,
+                )
+
+                eval_batches = resolve_batches(batches, nbatches)
+                if model_b is not None:
+                    delta, eta = interpolation_directions(loss_grid, model_b, seed=seed)
+                    auto_meta = {"direction": "interp", "between": "model → model_b"}
+                else:
+                    delta, eta = filter_normalized_directions(loss_grid, seed=seed)
+                    auto_meta = {"direction": "random"}
+                meta = {
+                    "normalization": "filter",
+                    "seed": seed,
+                    "grid": n,
+                    **auto_meta,
+                    **(meta or {}),
+                }
+                loss_grid = evaluate_grid(loss_grid, eval_batches, delta, eta, n=n, criterion=criterion)
+            except ImportError as e:
+                print(f"Trailer: log_loss_landscape 自动模式需要 torch+numpy: {e}")
+                return
+            except Exception as e:
+                print(f"Trailer: log_loss_landscape failed: {e}")
+                return
+
         try:
             data = _pack_landscape(loss_grid, x_range=x_range, y_range=y_range, meta=meta)
         except Exception as e:

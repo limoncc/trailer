@@ -22,106 +22,12 @@ import time
 
 import numpy as np
 
-
-# ---------------------------------------------------------------- 方向构造
-
-def filter_normalized_directions(model, seed: int = 0):
-    """生成一对 filter 归一化的随机方向 (delta, eta)。
-
-    - 形状与参数一致; ndim>=2 的参数按第 0 维(输出通道)逐滤波器归一:
-      d_f ← d_f / ‖d_f‖ · ‖θ_f‖
-    - ndim<2 的参数(bias / BN 的 weight/bias/running_*): 方向置 0(不扰动)
-    """
-    import torch
-
-    g = torch.Generator().manual_seed(seed)
-    delta, eta = [], []
-    with torch.no_grad():
-        for p in model.parameters():
-            if p.ndim < 2:
-                delta.append(torch.zeros_like(p))
-                eta.append(torch.zeros_like(p))
-                continue
-            d = torch.randn(p.shape, generator=g)
-            e = torch.randn(p.shape, generator=g)
-            # 逐滤波器(第 0 维切片)归一化并缩放到权重范数
-            for dst, src in ((delta, d), (eta, e)):
-                norm = src.flatten(1).norm(dim=1)
-                norm = torch.where(norm > 0, norm, torch.ones_like(norm))
-                target = p.flatten(1).norm(dim=1)
-                scaled = src.flatten(1) / norm.unsqueeze(1) * target.unsqueeze(1)
-                dst.append(scaled.reshape(p.shape))
-    return delta, eta
-
-
-def interpolation_pair(model_a, model_b, seed: int = 1):
-    """两 checkpoint 插值方向: delta = θ_b − θ_a（Goodfellow 2014 线性插值主方向），
-    eta 取一个 filter 归一化随机方向作为第二维（构成"插值 × 随机"网格）。"""
-    import torch
-
-    delta, eta = [], []
-    _, rand_e = filter_normalized_directions(model_b, seed=seed)
-    with torch.no_grad():
-        for pa, pb, r in zip(model_a.parameters(), model_b.parameters(), rand_e):
-            delta.append(pb - pa)
-            eta.append(r)
-    return delta, eta
-
-
-def set_params(model, originals, alpha: float, delta, beta: float, eta):
-    """θ = θ* + α·δ + β·η（原地写入, 用完务必 restore_params）。"""
-    import torch
-
-    with torch.no_grad():
-        for p, o, d, e in zip(model.parameters(), originals, delta, eta):
-            p.copy_(o + alpha * d + beta * e)
-
-
-def restore_params(model, originals):
-    import torch
-
-    with torch.no_grad():
-        for p, o in zip(model.parameters(), originals):
-            p.copy_(o)
-
-
-# ---------------------------------------------------------------- 网格评估
-
-def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None):
-    """在固定 batch 子集上评估 N×N 网格平均损失。
-
-    - 固定 batch 子集 + 固定方向 seed → 同 run 的多帧之间可比;
-    - model.eval(): 冻结 BN running statistics(接受远处点统计失配的简化处理;
-      更严格做法是在每个网格点用校准 batch 重算 BN 统计, 成本更高);
-    - 混合精度模型建议在 fp32 权重上构造方向(数值稳定性)。
-    """
-    import torch
-
-    if criterion is None:
-        criterion = torch.nn.CrossEntropyLoss()
-    originals = [p.detach().clone() for p in model.parameters()]
-    grid = np.empty((n, n), dtype=np.float64)
-    was_training = model.training
-    model.eval()  # 冻结 BN running stats
-    with torch.no_grad():
-        for i in range(n):
-            beta = -1.0 + 2.0 * i / (n - 1)
-            for j in range(n):
-                alpha = -1.0 + 2.0 * j / (n - 1)
-                set_params(model, originals, alpha, delta, beta, eta)
-                total, count = 0.0, 0
-                for x, y in batches:
-                    total += float(criterion(model(x), y)) * len(x)
-                    count += len(x)
-                grid[i, j] = total / max(count, 1)
-            print(f"\r  row {i + 1}/{n}", end="", flush=True)
-    print("\r", end="", flush=True)
-    restore_params(model, originals)
-    if was_training:
-        model.train()
-    return grid
-
-
+# 方向构造与网格评估已收进 SDK 工具模块(与 Tracker.log_loss_landscape 自动模式同源)
+from trailer.landscape import (
+    evaluate_grid,
+    filter_normalized_directions,
+    interpolation_directions as interpolation_pair,
+)
 # ---------------------------------------------------------------- 自检
 
 def self_check() -> int:
