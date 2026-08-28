@@ -24,6 +24,7 @@ trailer-ui/.benchmarks/
 .idea/
 .vscode/
 *.swp
+.zcode/
 
 # Runtime data
 artifacts/
