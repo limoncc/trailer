@@ -10,6 +10,7 @@
   import HistogramExplorer from '$lib/charts/HistogramExplorer.svelte';
   import ModelExplorer from '$lib/charts/ModelExplorer.svelte';
   import PCAExplorer from '$lib/charts/PCAExplorer.svelte';
+  import LandscapeExplorer from '$lib/charts/landscape/LandscapeExplorer.svelte';
   import Card from '$lib/components/ui/Card.svelte';
   import MetricPicker from '$lib/components/MetricPicker.svelte';
   import type { MetricRef } from '$lib/utils/explore';
@@ -20,7 +21,7 @@
     points: Array<{ step: number; value: number; idx: number; wall_time?: number }>;
   }
 
-  let tab = $state<'config' | 'metrics' | 'histograms' | 'pca' | 'figures' | 'texts' | 'media' | 'tables' | 'model'>('metrics');
+  let tab = $state<'config' | 'metrics' | 'histograms' | 'pca' | 'landscape' | 'figures' | 'texts' | 'media' | 'tables' | 'model'>('metrics');
   let runId = $state('');
   let runState = $state('');
   let runConfig = $state<Record<string, unknown> | null>(null);
@@ -43,6 +44,7 @@
     metrics: false,
     histograms: false,
     pca: false,
+    landscape: false,
     figures: false,
     texts: false,
     media: false,
@@ -55,6 +57,7 @@
     { k: 'metrics', l: 'Metrics', has: tabData.metrics },
     { k: 'histograms', l: 'Histograms', has: tabData.histograms },
     { k: 'pca', l: 'PCA', has: tabData.pca },
+    { k: 'landscape', l: 'Landscape', has: tabData.landscape },
     { k: 'figures', l: 'Figures', has: tabData.figures },
     { k: 'texts', l: 'Texts', has: tabData.texts },
     { k: 'media', l: 'Media', has: tabData.media },
@@ -74,8 +77,9 @@
         fetch(`/api/v1/runs/${encodeURIComponent(id)}/tables`).then(r => (r.ok ? r.json() : [])),
       ]);
       tabData.histograms = Array.isArray(hist) && hist.length > 0;
-      tabData.figures = Array.isArray(figs) && figs.some((f: any) => f.kind !== 'model' && f.kind !== 'pca');
+      tabData.figures = Array.isArray(figs) && figs.some((f: any) => f.kind !== 'model' && f.kind !== 'pca' && f.kind !== 'landscape');
       tabData.pca = Array.isArray(figs) && figs.some((f: any) => f.kind === 'pca');
+      tabData.landscape = Array.isArray(figs) && figs.some((f: any) => f.kind === 'landscape');
       tabData.model = Array.isArray(figs) && figs.some((f: any) => f.kind === 'model');
       tabData.texts = Array.isArray(texts) && texts.length > 0;
       tabData.media = Array.isArray(media) && media.length > 0;
@@ -410,6 +414,10 @@
     {:else if tab === 'pca'}
       {#key tab}
         <PCAExplorer {runId} />
+      {/key}
+    {:else if tab === 'landscape'}
+      {#key tab}
+        <LandscapeExplorer {runId} />
       {/key}
     {:else if tab === 'figures'}
       <FigureExplorer {runId} />

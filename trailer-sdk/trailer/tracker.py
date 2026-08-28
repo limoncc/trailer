@@ -9,6 +9,7 @@ Usage:
 """
 
 import json
+import math
 import os
 import time
 import threading
@@ -22,6 +23,84 @@ DEFAULT_PCA_COLORS = [
     "#5B8FF9", "#5AD8A6", "#5D7092", "#F6BD16", "#E8684A",
     "#6DC8EC", "#9270CA", "#FF9D4D", "#269A99", "#FF99C3",
 ]
+
+# 损失景观网格边长上限（典型 51×51；防 figures.body 文本体积失控）
+LANDSCAPE_MAX_EDGE = 250
+
+
+def _norm_range(r) -> list[float]:
+    """轴范围归一为 [min, max]；两端相等或非有限值视为无效。"""
+    a, b = float(r[0]), float(r[1])
+    if not (math.isfinite(a) and math.isfinite(b)):
+        raise ValueError(f"x/y_range 需为有限数值，收到 {r!r}")
+    lo, hi = sorted((a, b))
+    if math.isclose(lo, hi):
+        raise ValueError(f"range 两端不能相等: {r!r}")
+    return [lo, hi]
+
+
+def _round_sig6(v: float) -> float:
+    """保留 6 位有效数字（控 JSON 体积，精度对渲染无损）。"""
+    return float(f"{v:.6g}")
+
+
+def _pack_landscape(loss_grid, x_range=(-1.0, 1.0), y_range=(-1.0, 1.0), meta=None) -> dict:
+    """把损失景观二维矩阵打包为 figures(kind='landscape') 的 body dict。
+
+    Args:
+        loss_grid: 二维 list/tuple 或 np.ndarray（行主序：z[row][col]）。
+        x_range / y_range: α/β 轴端点，缺省 (-1, 1)，乱序自动归一。
+        meta: 用户元数据；同名键覆盖自动键。
+
+    Returns:
+        {"v", "n_rows", "n_cols", "x_range", "y_range", "z", "meta"}；
+        meta 自动含 n_rows/n_cols/x_range/y_range。
+
+    Raises:
+        ValueError: 非 2D、行列不齐、任一边长 <2 或 >250、含 NaN/Inf、range 无效。
+    """
+    rows = loss_grid.tolist() if hasattr(loss_grid, "tolist") else loss_grid
+    if not isinstance(rows, (list, tuple)) or len(rows) == 0:
+        raise ValueError("loss_grid 需为二维 N×M 矩阵")
+    n_rows = len(rows)
+    first = rows[0]
+    if not isinstance(first, (list, tuple)) or len(first) == 0:
+        raise ValueError("loss_grid 需为二维 N×M 矩阵（收到一维或空行）")
+    n_cols = len(first)
+    if n_rows < 2 or n_cols < 2:
+        raise ValueError(f"网格至少 2×2，收到 {n_rows}×{n_cols}")
+    if n_rows > LANDSCAPE_MAX_EDGE or n_cols > LANDSCAPE_MAX_EDGE:
+        raise ValueError(
+            f"网格边长超过上限 {LANDSCAPE_MAX_EDGE}，请降采样后再记录（收到 {n_rows}×{n_cols}）"
+        )
+
+    z: list[list[float]] = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, (list, tuple)) or len(row) != n_cols:
+            raise ValueError(f"第 {i} 行长度与首行不一致（{len(row)} != {n_cols}），网格需矩形")
+        out_row = []
+        for j, v in enumerate(row):
+            fv = float(v)
+            if not math.isfinite(fv):
+                raise ValueError(f"网格含非有限值 NaN/Inf（位置 [{i}][{j}]），前端无法解析")
+            out_row.append(_round_sig6(fv))
+        z.append(out_row)
+
+    xr = _norm_range(x_range)
+    yr = _norm_range(y_range)
+    merged = {"n_rows": n_rows, "n_cols": n_cols, "x_range": xr, "y_range": yr}
+    if meta:
+        merged.update(meta)
+
+    return {
+        "v": 1,
+        "n_rows": n_rows,
+        "n_cols": n_cols,
+        "x_range": xr,
+        "y_range": yr,
+        "z": z,
+        "meta": merged,
+    }
 
 
 class Tracker:
@@ -591,6 +670,148 @@ class Tracker:
                 _req.urlopen(req, timeout=30)
             except Exception as exc:
                 print(f"Trailer: log_model failed: {exc}")
+
+    def log_loss_landscape(
+        self,
+        loss_grid,
+        batches=None,
+        *,
+        model_b=None,
+        n: int = 51,
+        nbatches: int = 8,
+        criterion=None,
+        chunk: int | None = None,
+        parallel: str | None = None,
+        mode: str | None = None,
+        seed: int = 0,
+        name: str = "loss_landscape",
+        step: int | None = None,
+        x_range=(-1.0, 1.0),
+        y_range=(-1.0, 1.0),
+        meta=None,
+    ) -> None:
+        """记录损失景观(2D loss surface),前端 Landscape 面板展示热力图/等高线/3D 曲面。
+
+        两种用法:
+
+        1. **自动模式(推荐)**:传 torch nn.Module + 数据,自动构造 filter 归一化方向
+           并评估网格(需 torch+numpy,缺失时打印提示并跳过,不阻塞训练循环):
+           >>> t.log_loss_landscape(model, dataloader, n=51, step=epoch)
+           >>> t.log_loss_landscape(model, batches, model_b=ckpt, step=epoch)  # 两 checkpoint 插值
+           内置:方向跳过 bias/BN、冻结 BN running stats、评估后恢复原参数、
+           固定 batch 子集保证帧间可比。
+
+        2. **手动模式**:传现成的 N×N 网格(其他框架 / 离线计算):
+           >>> t.log_loss_landscape(grid, x_range=(-1, 1), y_range=(-1, 1))
+
+        ⚠️ 自动模式已内置 filter 归一化与 bias/BN 跳过;手动模式请自行保证,
+           否则 BN 网络会因尺度不变性产生假悬崖(垃圾图)。
+           配方与 BN 统计陷阱详见 examples/loss_landscape_demo.py。
+
+        Args:
+            loss_grid: nn.Module(自动模式)或二维 list/np.ndarray N×M(手动模式,
+                       推荐 51×51,边长上限 250)
+            batches: 自动模式的 (x, y) 可迭代 / DataLoader(取前 nbatches 个固定子集)
+            model_b: 提供 → δ 取两 checkpoint 插值方向(θ_b − θ_a)
+            n: 自动模式网格分辨率(默认 51)
+            nbatches: 自动模式评估的固定 batch 子集数(默认 8)
+            criterion: 自动模式损失函数(默认 CrossEntropyLoss)
+            chunk: vector 评估每批并行网格点数——显式给定则跳过自动预算规划(高级用法;
+                   缺省时自动规划,无需设置)
+            parallel: vector 并行档位 "low"/"medium"/"high"/"max"(64MB/256MB/1GB/4GB
+                      参数工作集),显式覆盖自动预算规划;chunk 显式给定时优先
+            mode: "auto"(缺省,零调参)/"vector"/"serial"。auto 探测一次前向的激活
+                  占用,在显存预算(默认 1GB)内选最小可行 chunk 走 vector,放不下转
+                  serial;serial 为逐点 in-place 低显存路径——大模型(LLM)参数零拷贝,
+                  方向自动落 CPU 流式,也适用于 vmap 不兼容的模型(flash-attn/
+                  自定义算子);serial 忽略 chunk/parallel
+            seed: 方向随机种子(同 run 内保持一致以保证帧间可比)
+            name: 卡片名(同名按 step 成组)
+            step: 全局 step(None 自动递增)
+            x_range / y_range: α/β 轴端点,缺省 (-1, 1)
+            meta: 附加元数据(normalization/direction/seed 等自动键可被覆盖)
+
+        Returns:
+            None。非法输入打印提示不抛异常(不阻塞训练循环)。
+        """
+        if hasattr(loss_grid, "parameters"):  # torch nn.Module → 自动计算模式
+            try:
+                from trailer.landscape import (
+                    _directions_spec,
+                    evaluate_grid,
+                    filter_normalized_directions,
+                    interpolation_directions,
+                    plan_evaluation,
+                    resolve_batches,
+                )
+
+                eval_batches = resolve_batches(batches, nbatches)
+                # 零调参:预算规划出生效模式与 chunk(激活占用计入预算),
+                # chunk/parallel/mode 显式给定时作为覆盖项
+                eff_mode, planned_chunk = plan_evaluation(
+                    loss_grid, eval_batches, mode=mode, chunk=chunk, parallel=parallel, n=n,
+                )
+                dir_kwargs = (
+                    dict(zip(("device", "dtype"), _directions_spec(loss_grid)))
+                    if eff_mode == "serial" else {}
+                )
+                if model_b is not None:
+                    delta, eta = interpolation_directions(loss_grid, model_b, seed=seed, **dir_kwargs)
+                    auto_meta = {"direction": "interp", "between": "model → model_b"}
+                else:
+                    delta, eta = filter_normalized_directions(loss_grid, seed=seed, **dir_kwargs)
+                    auto_meta = {"direction": "random"}
+                meta = {
+                    "normalization": "filter",
+                    "seed": seed,
+                    "grid": n,
+                    "mode": eff_mode,
+                    **auto_meta,
+                    **(meta or {}),
+                }
+                loss_grid = evaluate_grid(
+                    loss_grid, eval_batches, delta, eta,
+                    n=n, criterion=criterion, chunk=planned_chunk,
+                    parallel=None, mode=eff_mode,
+                )
+            except ImportError as e:
+                print(f"Trailer: log_loss_landscape 自动模式需要 torch+numpy: {e}")
+                return
+            except Exception as e:
+                print(f"Trailer: log_loss_landscape failed: {e}")
+                return
+
+        try:
+            data = _pack_landscape(loss_grid, x_range=x_range, y_range=y_range, meta=meta)
+        except Exception as e:
+            print(f"Trailer: log_loss_landscape failed: {e}")
+            return
+
+        if step is None:
+            step = self._step
+            self._step += 1
+        self._latest_step = max(self._latest_step, step)
+        self._notify_step(self._latest_step)
+
+        body = json.dumps(data)
+        if self._mode == "local":
+            try:
+                self._backend.save_figure(name, "landscape", body, step, self.run_id)
+            except Exception as e:
+                print(f"Trailer: log_loss_landscape failed: {e}")
+        else:
+            import urllib.request as _req
+            host = self._host or "http://127.0.0.1:5120"
+            payload = {"name": name, "kind": "landscape", "body": body, "step": step}
+            data_b = json.dumps(payload).encode()
+            req = _req.Request(
+                f"{host.rstrip('/')}/api/v1/runs/{self.run_id}/figures",
+                data=data_b, headers=self._auth_headers(), method="POST",
+            )
+            try:
+                _req.urlopen(req, timeout=30)
+            except Exception as exc:
+                print(f"Trailer: log_loss_landscape failed: {exc}")
 
     def log_embedding(
         self,

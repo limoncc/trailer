@@ -42,3 +42,8 @@ include = ["trailer/trailer-server*", "trailer/frontend/build/*", "trailer/front
 [[tool.mypy.overrides]]
 module = "msgpack"
 ignore_missing_imports = true
+
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true

@@ -20,9 +20,12 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      d3-contour:
+        specifier: ^4.0.2
+        version: 4.0.2
       highlight.js:
         specifier: ^11.11.1
-        version: 11.11.1
+        version: 11.12.0
       leafer-ui:
         specifier: ^2.2.6
         version: 2.2.6
@@ -75,6 +78,9 @@ importers:
       '@tanstack/table-core':
         specifier: ^8.21.3
         version: 8.21.3
+      '@types/d3-contour':
+        specifier: ^3.0.6
+        version: 3.0.6
       '@types/marked':
         specifier: ^6.0.0
         version: 6.0.0
@@ -1420,8 +1426,8 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  highlight.js@11.11.1:
-    resolution: {integrity: sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w==}
+  highlight.js@11.12.0:
+    resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
     engines: {node: '>=12.0.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -3445,7 +3451,7 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  highlight.js@11.11.1: {}
+  highlight.js@11.12.0: {}
 
   html-encoding-sniffer@6.0.0:
     dependencies:
