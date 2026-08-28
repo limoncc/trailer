@@ -88,15 +88,34 @@ def interpolation_directions(model_a, model_b, seed: int = 1, device=None, dtype
     return delta, eta
 
 
-def _evaluate_grid_serial(model, batches, delta, eta, n: int = 51, criterion=None):
-    """串行参考实现(逐网格点前向)。torch<2.0 无 torch.func 时的 fallback,
-    也是向量化实现的等价性测试参照。"""
+def _evaluate_grid_lowmem(model, batches, delta, eta, n: int = 51, criterion=None):
+    """低显存串行评估:逐网格点 in-place 扰动,不物化任何整模型参数副本。
+
+    大模型(LLM)路径,也是 torch<2.0(无 torch.func)的回退实现,与向量化版等价。
+    - 扰动直接 p.add_ 到原参数上;每个网格点评估完立即从 CPU 备份精确还原
+      (每点都从严格 θ* 出发,半精度零漂移),异常时 finally 兜底恢复
+    - GPU 峰值 = 模型 + 最大单层方向暂存 + 激活;方向可存 CPU(逐层流式上卡)、
+      可为半精度,经 .to(参数 device/dtype) 统一暂存
+    - 传输量:方向在 CPU 时每点 ≈ 3×模型字节(方向 2 + 备份还原 1),
+      方向同设备时仅 ≈ 1×(备份还原);大模型建议 n=21 而非 51
+    - loss 按 batch 内样本数加权平均;model.eval() 冻结 BN,结束恢复训练状态
+    """
     import numpy as np
     import torch
 
     if criterion is None:
         criterion = torch.nn.CrossEntropyLoss()
-    originals = [p.detach().clone() for p in model.parameters()]
+    params = list(model.parameters())
+    device = params[0].device
+
+    # 仅备份会被扰动的参数(ndim≥2 且方向非零);备份在 CPU → GPU 零参数副本。
+    # copy=True 必须显式:CPU 张量 .to("cpu") 默认返回自身(别名),会致扰动跨点累积
+    backups = {}
+    for idx, (p, d, e) in enumerate(zip(params, delta, eta)):
+        if p.ndim < 2 or not (bool(d.any()) or bool(e.any())):
+            continue
+        backups[idx] = p.detach().to("cpu", copy=True)
+
     was_training = model.training
     model.eval()
     grid = np.empty((n, n), dtype=np.float64)
@@ -106,18 +125,23 @@ def _evaluate_grid_serial(model, batches, delta, eta, n: int = 51, criterion=Non
                 beta = -1.0 + 2.0 * i / (n - 1)
                 for j in range(n):
                     alpha = -1.0 + 2.0 * j / (n - 1)
-                    for p, o, d, e in zip(model.parameters(), originals, delta, eta):
-                        p.copy_(o + alpha * d + beta * e)      # θ = θ* + α·δ + β·η
+                    for p, d, e in zip(params, delta, eta):
+                        if p.ndim < 2:
+                            continue
+                        p.add_(d.to(device=p.device, dtype=p.dtype), alpha=alpha)   # θ += α·δ
+                        p.add_(e.to(device=p.device, dtype=p.dtype), alpha=beta)    # θ += β·η
                     total = 0.0
                     count = 0
                     for x, y in batches:
                         total += float(criterion(model(x), y)) * len(x)
                         count += len(x)
                     grid[i, j] = total / max(count, 1)
+                    for idx, backup in backups.items():                              # 还原 θ*
+                        params[idx].copy_(backup.to(params[idx].device))
     finally:
         with torch.no_grad():
-            for p, o in zip(model.parameters(), originals):
-                p.copy_(o)
+            for idx, backup in backups.items():
+                params[idx].copy_(backup.to(params[idx].device))
         if was_training:
             model.train()
     return grid
@@ -168,31 +192,39 @@ def _resolve_chunk(P: int, bytes_per_point: int, chunk: int | None = None, paral
     return max(1, min(chunk, P))
 
 
-def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk: int | None = None, parallel: str | None = None):
-    """向量化网格评估:z[row][col] = loss(θ* + α·δ + β·η)(row→β, col→α, 端点 ±1)。
+def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk: int | None = None, parallel: str | None = None, mode: str | None = None):
+    """网格评估:z[row][col] = loss(θ* + α·δ + β·η)(row→β, col→α, 端点 ±1)。
 
-    基于 torch.func(functional_call + vmap)把同一 chunk 内的网格点合并成批量前向,
-    无逐点参数拷贝——相比串行循环快 1~2 个数量级,GPU 上收益最大。
-    torch<2.0 自动回退串行实现;结果与串行版等价(有测试保证)。
+    - mode="vector"(小模型缺省):基于 torch.func(functional_call + vmap)把同一
+      chunk 内的网格点合并成批量前向,快 1~2 个数量级,GPU 上收益最大
+    - mode="serial"(大模型 auto 判定 / 显式指定):逐点 in-place 扰动
+      (见 _evaluate_grid_lowmem)——参数零拷贝,任何 nn.Module 可跑
+      (vmap 不兼容 flash-attn/自定义算子的模型请用它)
+    - torch<2.0 自动回退串行实现;结果两路等价(有测试保证)
 
     - loss 按 batch 内样本数加权平均(等价于拼接后取均值)
     - model.eval() 冻结 BN running stats;结束恢复原参数与训练状态(try/finally)
     - 返回 numpy 数组,可直接交给 Tracker.log_loss_landscape
 
     Args:
-        chunk: 每批并行评估的网格点数。None → 由 parallel 档位(或默认 auto)推算;
-               显存紧张可调小(如 64),小模型可调大。
-        parallel: 并行档位 "low" / "medium" / "high" / "max"——映射不同的扰动参数
-                  工作集显存预算(64MB/256MB/1GB/4GB),按自己设备能力选择。
+        chunk: vector 模式每批并行评估的网格点数。None → 由 parallel 档位
+               (或默认 auto)推算;显存紧张可调小(如 64),小模型可调大。
+        parallel: vector 模式并行档位 "low" / "medium" / "high" / "max"——映射不同
+                  的扰动参数工作集显存预算(64MB/256MB/1GB/4GB),按设备能力选择。
                   chunk 显式给定时优先于 parallel;两者都缺省则按 ~300MB 自适应。
+        mode: "auto"(缺省)/ "vector" / "serial"。auto 按 AUTO_SERIAL_THRESHOLD
+              (512MB 模型字节)判定;serial 忽略 chunk/parallel。
     """
     import numpy as np
     import torch
 
+    mode = resolve_mode(model, mode)
     try:
         from torch.func import functional_call, vmap
-    except ImportError:  # torch < 2.0
-        return _evaluate_grid_serial(model, batches, delta, eta, n=n, criterion=criterion)
+    except ImportError:  # torch < 2.0 → 串行路径(不依赖 torch.func)
+        mode = "serial"
+    if mode == "serial":
+        return _evaluate_grid_lowmem(model, batches, delta, eta, n=n, criterion=criterion)
 
     if criterion is None:
         criterion = torch.nn.CrossEntropyLoss()

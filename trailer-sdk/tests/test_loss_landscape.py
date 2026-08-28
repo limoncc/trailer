@@ -350,13 +350,13 @@ class TestEvaluateGridVectorized:
         batches = [(x[:16], y[:16]), (x[16:], y[16:])]
         return np, torch, model, batches
 
-    def test_matches_serial_reference(self):
+    def test_matches_lowmem_reference(self):
         np, torch, model, batches = self._toy()
-        from trailer.landscape import _evaluate_grid_serial, evaluate_grid, filter_normalized_directions
+        from trailer.landscape import _evaluate_grid_lowmem, evaluate_grid, filter_normalized_directions
 
         delta, eta = filter_normalized_directions(model, seed=3)
         fast = evaluate_grid(model, batches, delta, eta, n=9)
-        ref = _evaluate_grid_serial(model, batches, delta, eta, n=9)
+        ref = _evaluate_grid_lowmem(model, batches, delta, eta, n=9)
         assert np.allclose(fast, ref, atol=1e-4)
 
     def test_chunk_size_does_not_change_result(self):
@@ -465,6 +465,102 @@ class TestResolveMode:
 
         with pytest.raises(ValueError):
             resolve_mode(self._model(), "turbo")
+
+
+class TestEvaluateGridLowMemory:
+    """低显存串行路径:in-place 扰动 + CPU 备份 bit-exact 恢复,参数零拷贝。
+
+    大模型(LLM)目标:不物化整模型副本,方向可放 CPU 逐层流式、可半精度。
+    """
+
+    def _toy(self):
+        np = pytest.importorskip("numpy")
+        torch = pytest.importorskip("torch")
+        torch.manual_seed(0)
+        model = torch.nn.Sequential(
+            torch.nn.Flatten(), torch.nn.Linear(16, 8), torch.nn.ReLU(), torch.nn.Linear(8, 2)
+        )
+        x = torch.randn(32, 16)
+        y = torch.randint(0, 2, (32,))
+        batches = [(x[:16], y[:16]), (x[16:], y[16:])]
+        return np, torch, model, batches
+
+    def test_matches_vectorized_result(self):
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        serial = evaluate_grid(model, batches, delta, eta, n=9, mode="serial")
+        vector = evaluate_grid(model, batches, delta, eta, n=9, mode="vector")
+        assert np.allclose(serial, vector, atol=1e-4)
+
+    def test_params_restored_bit_exact(self):
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        base = [p.detach().clone() for p in model.parameters()]
+        delta, eta = filter_normalized_directions(model, seed=5)
+        evaluate_grid(model, batches, delta, eta, n=5, mode="serial")
+        for p, b in zip(model.parameters(), base):
+            assert torch.equal(p, b)   # bit-exact:训练循环参数零漂移
+
+    def test_training_flag_restored(self):
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=5)
+        model.train()
+        evaluate_grid(model, batches, delta, eta, n=3, mode="serial")
+        assert model.training
+        model.eval()
+        evaluate_grid(model, batches, delta, eta, n=3, mode="serial")
+        assert not model.training
+
+    def test_cpu_half_precision_directions_streaming(self):
+        """方向放 CPU + 半精度(大模型 offload 场景)→ 暂存路径可用且结果接近。"""
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        ref = evaluate_grid(model, batches, delta, eta, n=7, mode="serial")
+
+        d16, e16 = filter_normalized_directions(
+            model, seed=3, device=torch.device("cpu"), dtype=torch.float16
+        )
+        out = evaluate_grid(model, batches, d16, e16, n=7, mode="serial")
+        assert np.isfinite(out).all()
+        assert np.allclose(out, ref, atol=5e-2)   # 半精度方向噪声量级
+
+    def test_torch_lt_2_fallback_routes_to_serial(self, monkeypatch):
+        import sys
+
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        explicit = evaluate_grid(model, batches, delta, eta, n=5, mode="serial")
+        monkeypatch.setitem(sys.modules, "torch.func", None)   # 模拟 torch<2.0
+        grid = evaluate_grid(model, batches, delta, eta, n=5)
+        assert np.array_equal(grid, explicit)                  # 同一实现,逐位一致
+
+    def test_auto_routes_big_model_to_serial(self, monkeypatch):
+        import trailer.landscape as ls
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        monkeypatch.setattr(ls, "AUTO_SERIAL_THRESHOLD", 1)    # 阈值缩到 1 字节
+        delta, eta = filter_normalized_directions(model, seed=3)
+        grid = evaluate_grid(model, batches, delta, eta, n=7, mode="auto")
+        explicit = evaluate_grid(model, batches, delta, eta, n=7, mode="serial")
+        assert np.array_equal(grid, explicit)
+
+    def test_invalid_mode_raises(self):
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        with pytest.raises(ValueError):
+            evaluate_grid(model, batches, delta, eta, n=5, mode="turbo")
 
 
 class TestDirectionConstruction:
