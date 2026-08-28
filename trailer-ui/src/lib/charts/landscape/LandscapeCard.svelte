@@ -4,8 +4,10 @@
   import LandscapeSurface from './LandscapeSurface.svelte';
   import {
     parseFigureToLandscape,
-    buildContourLevels,
+    makeLandscapeScaler,
+    buildContourLevelsScaled,
     COLORMAP_NAMES,
+    type LandscapeScale,
   } from './landscape';
   import { buildContourRings } from './contour';
   import { rollBallPath } from './surface';
@@ -33,6 +35,7 @@
   let view = $state<ViewMode>('both'); // 默认等高线+热力图叠加
   let wireframe = $state(false);
   let cmap = $state('coolwarm');
+  let zscale = $state<LandscapeScale>('log'); // 默认对数:碗底细节可见,墙不压扁色阶
   let rollSpeed = $state(1); // 滚球速度倍率
   let surfView = $state<'front' | 'side' | 'top' | 'reset'>('reset');
   const ROLL_BASE_MS = 4000;
@@ -68,6 +71,7 @@
 
   $effect(() => {
     void rollToken;
+    void zscale; // 刻度切换会重建 3D 曲面,顺带重放滚球
     if (view === 'surf' && current && surfaceChart) surfaceChart.playRoll(ROLL_BASE_MS / rollSpeed);
   });
 
@@ -99,9 +103,10 @@
     selectedIndex = Math.round(ratio * (group.rows.length - 1));
   }
 
-  // Contour 模式：阈值 + 环数据随当前帧派生
+  // Contour 模式：阈值 + 环数据随当前帧派生（等高线分级随值域缩放联动）
   const CONTOUR_COUNT = 8;
-  const levels = $derived(current ? buildContourLevels(current.zmin, current.zmax, CONTOUR_COUNT) : []);
+  const scaler = $derived(current ? makeLandscapeScaler(current.zmin, current.zmax, zscale) : null);
+  const levels = $derived(scaler ? buildContourLevelsScaled(scaler, CONTOUR_COUNT) : []);
   const rings = $derived(
     current && levels.length > 0 ? buildContourRings(current.z, current.nRows, current.nCols, levels, current.xs, current.ys) : [],
   );
@@ -244,6 +249,15 @@
           >▦</button>
         {/if}
         <select
+          bind:value={zscale}
+          aria-label="Z scale"
+          title="loss 刻度：log 放大碗底细节，lin 常规线性"
+          class="px-0.5 py-0.5 border border-border rounded-md bg-background text-muted-foreground"
+        >
+          <option value="log">log</option>
+          <option value="linear">lin</option>
+        </select>
+        <select
           bind:value={cmap}
           aria-label="Colormap"
           title="配色"
@@ -263,6 +277,7 @@
           keepView
           {wireframe}
           {cmap}
+          scale={zscale}
         />
       {:else}
         <LandscapeHeatmap
@@ -272,6 +287,7 @@
           contourRings={view === 'contour' || view === 'both' ? rings : []}
           fillHeat={view !== 'contour'}
           {cmap}
+          scale={zscale}
           {ballPath}
           {rollToken}
           ballDuration={ROLL_BASE_MS / rollSpeed}

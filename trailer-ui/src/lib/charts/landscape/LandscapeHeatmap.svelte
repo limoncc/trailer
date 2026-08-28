@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { colormap, type ParsedLandscape } from './landscape';
+  import { colormap, makeLandscapeScaler, type LandscapeScale, type ParsedLandscape } from './landscape';
 
   interface Props {
     data: ParsedLandscape | null;
@@ -13,6 +13,8 @@
     fillHeat?: boolean;
     /** 配色方案名（见 landscape.ts COLORMAP_NAMES） */
     cmap?: string;
+    /** 值域缩放：log 放大碗底细节（配色用，tooltip 始终显示原始 loss） */
+    scale?: LandscapeScale;
     /** 小球滚落路径 (α, β, loss)（由 rollBallPath 产出） */
     ballPath?: [number, number, number][];
     /** 递增令牌：变化即重放滚球 */
@@ -28,6 +30,7 @@
     contourRings = [],
     fillHeat = true,
     cmap = 'coolwarm',
+    scale = 'linear',
     ballPath = [],
     rollToken = 0,
     ballDuration = 4000,
@@ -110,6 +113,7 @@
 
     if (!data) return;
     const d = data;
+    const scaler = makeLandscapeScaler(d.zmin, d.zmax, scale);
 
     // ---- 热力图主体：逐格 ImageData → 拉伸到绘图区（平滑 = 连续色彩场）----
     // fillHeat=false 时跳过底色，只画等高线（纯等高线模式）
@@ -117,7 +121,7 @@
       const img = ctx.createImageData(d.nCols, d.nRows);
       for (let r = 0; r < d.nRows; r++) {
         for (let c = 0; c < d.nCols; c++) {
-          const t = d.zmax > d.zmin ? (d.z[r * d.nCols + c] - d.zmin) / (d.zmax - d.zmin) : 0;
+          const t = scaler.toT(d.z[r * d.nCols + c]);
           const [cr, cg, cb] = colormap(t, cmap);
           const o = (r * d.nCols + c) * 4;
           img.data[o] = cr; img.data[o + 1] = cg; img.data[o + 2] = cb; img.data[o + 3] = 255;
@@ -249,9 +253,9 @@
     hover = { a, b, loss: d.z[r * d.nCols + c], mx, my };
   }
 
-  // 数据/等高线/主题/配色/底色开关变化 → 重绘
+  // 数据/等高线/主题/配色/底色/值域缩放变化 → 重绘
   $effect(() => {
-    void data; void contourLevels; void contourRings; void dark; void cmap; void fillHeat;
+    void data; void contourLevels; void contourRings; void dark; void cmap; void fillHeat; void scale;
     draw();
   });
 

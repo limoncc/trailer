@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { LandscapeViewer, SURFACE_THEME, type SurfaceHoverInfo } from './landscape-viewer';
   import { rollBallPath } from './surface';
-  import type { ParsedLandscape } from './landscape';
+  import type { LandscapeScale, ParsedLandscape } from './landscape';
 
   interface Props {
     data: ParsedLandscape | null;
@@ -12,6 +12,8 @@
     wireframe?: boolean;
     /** 配色方案名（默认 coolwarm） */
     cmap?: string;
+    /** 值域缩放：log 放大碗底细节（高度+配色，hover 始终显示原始 loss） */
+    scale?: LandscapeScale;
     showHover?: boolean;
   }
 
@@ -21,6 +23,7 @@
     keepView = true,
     wireframe = false,
     cmap = 'coolwarm',
+    scale = 'linear',
     showHover = true,
   }: Props = $props();
 
@@ -49,7 +52,7 @@
     return () => mo.disconnect();
   });
 
-  // 唯一的创建/数据 effect：依赖 (container, data, cmap, wireframe)。
+  // 唯一的创建/数据 effect：依赖 (container, data, cmap, wireframe, scale)。
   // 之前拆成两个 effect 双重 setData,第二个的 clearBall 会清掉父组件刚 playBall 的小球。
   // initialized 为普通变量(非响应式)：仅表达"是否已做过首次相机复位"。
   let initialized = false;
@@ -59,6 +62,7 @@
       viewer = new LandscapeViewer(container, {
         wireframe,
         cmap,
+        scale,
         backgroundColor: dark ? SURFACE_THEME.dark.bg : SURFACE_THEME.light.bg,
         gridColor: dark ? SURFACE_THEME.dark.grid : SURFACE_THEME.light.grid,
         axisColor: dark ? SURFACE_THEME.dark.axis : SURFACE_THEME.light.axis,
@@ -66,7 +70,7 @@
       });
     }
     viewer.setWireframe(wireframe);
-    viewer.setData(data, { keepView: initialized, cmap });
+    viewer.setData(data, { keepView: initialized, cmap, scale });
     initialized = true;
   });
 
