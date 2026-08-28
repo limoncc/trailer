@@ -74,6 +74,8 @@ def main() -> int:
     ap.add_argument("--grid", type=int, default=51, help="网格分辨率(默认 51)")
     ap.add_argument("--epochs", type=int, default=6, help="训练 epoch 数(默认 6)")
     ap.add_argument("--seed", type=int, default=0, help="方向随机 seed")
+    ap.add_argument("--mode", choices=["auto", "vector", "serial"], default="auto",
+                    help="评估模式: auto 按模型规模判定;serial=逐点 in-place 低显存路径(大模型/LLM)")
     ap.add_argument("--self-check", action="store_true", help="只做方向数学自检")
     ap.add_argument("--db", default="trailer.db", help="本地 SQLite 路径(默认 trailer.db)")
     args = ap.parse_args()
@@ -137,7 +139,7 @@ def main() -> int:
         if epoch in snapshot_epochs:
             print(f"evaluating landscape @ epoch {epoch} ({args.grid}x{args.grid})...")
             t0 = time.time()
-            grid = evaluate_grid(model, eval_batches, delta, eta, n=args.grid)
+            grid = evaluate_grid(model, eval_batches, delta, eta, n=args.grid, mode=args.mode)
             print(f"  done in {time.time() - t0:.1f}s, loss range [{grid.min():.4f}, {grid.max():.4f}]")
             t.log_loss_landscape(grid, name="landscape", step=epoch, meta={
                 "normalization": "filter",
