@@ -69,6 +69,14 @@ def self_check() -> int:
 
 # ---------------------------------------------------------------- 主流程
 
+def restore_params(model, originals):
+    """把快照前的参数原位写回(演示在记录间隙共享同一模型)。"""
+    import torch
+    with torch.no_grad():
+        for p, o in zip(model.parameters(), originals):
+            p.copy_(o)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--grid", type=int, default=51, help="网格分辨率(默认 51)")
