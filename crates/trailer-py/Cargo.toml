@@ -1,6 +1,6 @@
 [package]
 name = "trailer-py"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license.workspace = true
 description = "Trailer: PyO3 bridge (WIP — not yet linked to core)"
