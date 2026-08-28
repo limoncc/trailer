@@ -10,7 +10,7 @@ The ultimate trailer for your deep learning experiments — combining TensorBoar
 
 - ⚡ **High-performance Rust core** — LTTB downsampling, batched ingestion, 100k-entry ring buffer (P99 < 100µs)
 - 📊 **Every data type you need** — scalars, text, figures, tables, media, histograms, embeddings, PCA, and model graphs
-- 🏔️ **Loss landscape visualization** — filter-normalized 2D loss surfaces as heatmap / contour / interactive 3D, with training-evolution playback
+- 🏔️ **Loss landscape visualization** — filter-normalized 2D loss surfaces as heatmap / contour / interactive 3D, with training-evolution playback, log/linear color scale and a gradient-descent ball animation
 - 🚀 **One-command local mode** — `trailer up` starts the full dashboard — zero config, no HTTP overhead, data lands locally
 - 🔬 **Cross-project Explore** — line, scatter, and parallel-coordinates charts across runs — saved and shareable
 - 🗄️ **Flexible storage** — SQLite (default), PostgreSQL, or TensorBoard-style file mode
