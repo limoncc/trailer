@@ -34,7 +34,8 @@ def filter_normalized_directions(model, seed: int = 0):
     """
     import torch
 
-    g = torch.Generator().manual_seed(seed)
+    device = next(model.parameters()).device
+    g = torch.Generator(device=device.type).manual_seed(seed)
     delta, eta = [], []
     with torch.no_grad():
         for p in model.parameters():
@@ -45,7 +46,7 @@ def filter_normalized_directions(model, seed: int = 0):
                 continue
             pair = []
             for _ in range(2):
-                d = torch.randn(p.shape, generator=g)
+                d = torch.randn(p.shape, generator=g, device=device)
                 d = d.flatten(1) / d.flatten(1).norm(dim=1, keepdim=True)      # ‖d_f‖=1
                 scale = p.flatten(1).norm(dim=1, keepdim=True)                  # ‖θ_f‖
                 pair.append(d.reshape(p.shape) * scale.reshape(-1, *([1] * (p.ndim - 1))))
@@ -68,13 +69,9 @@ def interpolation_directions(model_a, model_b, seed: int = 1):
     return delta, eta
 
 
-def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None):
-    """在固定 batches 上评估网格:z[row][col] = loss(θ* + α·δ + β·η)。
-
-    - row → β、col → α,端点 ±1;loss 按 batch 内样本数加权平均
-    - model.eval() 冻结 BN running stats;结束恢复原参数与训练状态(try/finally)
-    - 返回 numpy 数组,可直接交给 Tracker.log_loss_landscape
-    """
+def _evaluate_grid_serial(model, batches, delta, eta, n: int = 51, criterion=None):
+    """串行参考实现(逐网格点前向)。torch<2.0 无 torch.func 时的 fallback,
+    也是向量化实现的等价性测试参照。"""
     import numpy as np
     import torch
 
@@ -102,6 +99,78 @@ def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None):
         with torch.no_grad():
             for p, o in zip(model.parameters(), originals):
                 p.copy_(o)
+        if was_training:
+            model.train()
+    return grid
+
+
+def evaluate_grid(model, batches, delta, eta, n: int = 51, criterion=None, chunk: int | None = None):
+    """向量化网格评估:z[row][col] = loss(θ* + α·δ + β·η)(row→β, col→α, 端点 ±1)。
+
+    基于 torch.func(functional_call + vmap)把同一 chunk 内的网格点合并成批量前向,
+    无逐点参数拷贝——相比串行循环快 1~2 个数量级,GPU 上收益最大。
+    torch<2.0 自动回退串行实现;结果与串行版等价(有测试保证)。
+
+    - loss 按 batch 内样本数加权平均(等价于拼接后取均值)
+    - model.eval() 冻结 BN running stats;结束恢复原参数与训练状态(try/finally)
+    - 返回 numpy 数组,可直接交给 Tracker.log_loss_landscape
+
+    Args:
+        chunk: 每批并行评估的网格点数。None → 按参数量自动(工作集预算 ~300MB);
+               显存紧张可调小(如 64),小模型可调大。
+    """
+    import numpy as np
+    import torch
+
+    try:
+        from torch.func import functional_call, vmap
+    except ImportError:  # torch < 2.0
+        return _evaluate_grid_serial(model, batches, delta, eta, n=n, criterion=criterion)
+
+    if criterion is None:
+        criterion = torch.nn.CrossEntropyLoss()
+    batches = list(batches)
+
+    named = list(model.named_parameters())
+    names = [k for k, _ in named]
+    base = [p.detach() for _, p in named]
+    deltas = dict(zip(names, delta))
+    etas = dict(zip(names, eta))
+    device = base[0].device
+
+    # 固定评估子集拼接为单个 batch(loss 的样本加权均值 == 拼接后均值)
+    xs = torch.cat([x.to(device) for x, _ in batches])
+    ys = torch.cat([y.to(device) for _, y in batches])
+
+    # 行主序展开:flat k = i*n + j → β_i(行), α_j(列)
+    alphas = torch.linspace(-1.0, 1.0, n, device=device).repeat(n)
+    betas = torch.linspace(-1.0, 1.0, n, device=device).repeat_interleave(n)
+    P = n * n
+
+    if chunk is None:
+        numel = sum(p.numel() for p in base)
+        bytes_per_point = max(numel * base[0].element_size(), 1)
+        chunk = max(8, min(P, int(3e8 // bytes_per_point)))   # 扰动参数工作集预算 ~300MB
+    chunk = max(1, min(chunk, P))
+
+    was_training = model.training
+    model.eval()
+    grid = np.empty((n, n), dtype=np.float64)
+    try:
+        with torch.no_grad():
+            def loss_at(alpha, beta):
+                pert = {
+                    k: base[i] + alpha * deltas[k] + beta * etas[k]
+                    for i, k in enumerate(names)
+                }
+                return criterion(functional_call(model, pert, (xs,)), ys)
+
+            flat = torch.empty(P, dtype=torch.float32, device=device)
+            for s in range(0, P, chunk):
+                e = min(s + chunk, P)
+                flat[s:e] = vmap(loss_at)(alphas[s:e], betas[s:e])
+            grid = flat.cpu().to(torch.float64).numpy().reshape(n, n)
+    finally:
         if was_training:
             model.train()
     return grid

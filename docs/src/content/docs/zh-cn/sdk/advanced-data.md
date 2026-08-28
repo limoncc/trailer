@@ -71,11 +71,12 @@ t.log_pca(vectors, name="embeddings", step=step)
 
 可视化权重附近的 2D 损失曲面——热力图、等高线、可交互 3D 曲面。每个 step 记录一张网格,Landscape 标签页即可回放"景观随训练演化"。
 
-**自动模式(PyTorch,推荐)**——直接传模型:SDK 自动构造 filter 归一化方向(跳过 bias/BN)、在固定 batch 子集上评估网格、恢复原参数并记录。需要训练环境装有 `torch`(缺失时友好跳过,绝不阻塞训练):
+**自动模式(PyTorch,推荐)**——直接传模型:SDK 自动构造 filter 归一化方向(跳过 bias/BN)、在固定 batch 子集上评估网格、恢复原参数并记录。需要训练环境装有 `torch`(缺失时友好跳过,绝不阻塞训练)。网格基于 **`torch.func` 向量化**(`vmap`+`functional_call`,按参数量分 chunk)——比逐点循环快 1~2 个数量级,CUDA / MPS / CPU 均可,自动跟随模型设备:
 
 ```python
 t.log_loss_landscape(model, train_loader, n=51, step=epoch)       # 随机方向
 t.log_loss_landscape(model, loader, model_b=ckpt, step=epoch)     # 两 checkpoint 插值
+t.log_loss_landscape(model, loader, n=51, chunk=128)              # 显存紧张时调小 chunk
 ```
 
 **手动模式(其他框架 / 离线计算)**——传现成网格:

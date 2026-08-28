@@ -71,11 +71,12 @@ t.log_pca(vectors, name="embeddings", step=step)
 
 Visualize the 2D loss surface around your weights — heatmap, contour lines, and an interactive 3D surface. Log one grid per step and the Landscape tab replays how the landscape evolves during training.
 
-**Auto mode (PyTorch, recommended)** — pass the model; the SDK builds filter-normalized directions (skipping bias/BN), evaluates the grid on a fixed batch subset, restores your parameters and records it. Requires `torch` in the training environment (missing → friendly skip, never blocks training):
+**Auto mode (PyTorch, recommended)** — pass the model; the SDK builds filter-normalized directions (skipping bias/BN), evaluates the grid on a fixed batch subset, restores your parameters and records it. Requires `torch` in the training environment (missing → friendly skip, never blocks training). The grid is evaluated with **`torch.func` vectorization** (`vmap` + `functional_call`, chunked by parameter count) — orders of magnitude faster than a per-point loop, and it runs on CUDA / MPS / CPU with the model's device:
 
 ```python
 t.log_loss_landscape(model, train_loader, n=51, step=epoch)       # random directions
 t.log_loss_landscape(model, loader, model_b=ckpt, step=epoch)     # two-checkpoint interpolation
+t.log_loss_landscape(model, loader, n=51, chunk=128)              # smaller chunks if VRAM-tight
 ```
 
 **Manual mode (any framework / offline)** — pass a pre-computed grid:

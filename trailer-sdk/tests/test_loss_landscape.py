@@ -333,3 +333,37 @@ class TestLogLossLandscapeAuto:
         kind, body = calls[0]
         assert kind == "landscape"
         assert body["n_rows"] == 5
+
+
+class TestEvaluateGridVectorized:
+    """向量化实现与串行参考实现等价(chunk 大小无关)。"""
+
+    def _toy(self):
+        np = pytest.importorskip("numpy")
+        torch = pytest.importorskip("torch")
+        torch.manual_seed(0)
+        model = torch.nn.Sequential(
+            torch.nn.Flatten(), torch.nn.Linear(16, 8), torch.nn.ReLU(), torch.nn.Linear(8, 2)
+        )
+        x = torch.randn(32, 16)
+        y = torch.randint(0, 2, (32,))
+        batches = [(x[:16], y[:16]), (x[16:], y[16:])]
+        return np, torch, model, batches
+
+    def test_matches_serial_reference(self):
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import _evaluate_grid_serial, evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        fast = evaluate_grid(model, batches, delta, eta, n=9)
+        ref = _evaluate_grid_serial(model, batches, delta, eta, n=9)
+        assert np.allclose(fast, ref, atol=1e-4)
+
+    def test_chunk_size_does_not_change_result(self):
+        np, torch, model, batches = self._toy()
+        from trailer.landscape import evaluate_grid, filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(model, seed=3)
+        whole = evaluate_grid(model, batches, delta, eta, n=7)
+        chunked = evaluate_grid(model, batches, delta, eta, n=7, chunk=2)
+        assert np.allclose(whole, chunked, atol=1e-6)
