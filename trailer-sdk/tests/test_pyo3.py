@@ -47,8 +47,9 @@ def test_log_batch_rejects_invalid_msgpack(tracker):
 
 def test_tracker_version():
     """Verify the compiled module reports the right version."""
+    import trailer
     import trailer.trailer
-    assert trailer.trailer.__version__ == "0.1.0"
+    assert trailer.trailer.__version__ == trailer.__version__
 
 
 def test_rusttracker_class_exists():

@@ -21,3 +21,7 @@ export { default as ModelGraph } from './ModelGraph.svelte';
 export { default as PCA3DChart } from './PCA3DChart.svelte';
 export { default as PCACard } from './PCACard.svelte';
 export { default as PCAExplorer } from './PCAExplorer.svelte';
+export { default as LandscapeHeatmap } from './landscape/LandscapeHeatmap.svelte';
+export { default as LandscapeSurface } from './landscape/LandscapeSurface.svelte';
+export { default as LandscapeCard } from './landscape/LandscapeCard.svelte';
+export { default as LandscapeExplorer } from './landscape/LandscapeExplorer.svelte';
