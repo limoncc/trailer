@@ -27,44 +27,63 @@ def resolve_batches(batches, nbatches: int = 8):
     return out
 
 
-def filter_normalized_directions(model, seed: int = 0):
+def filter_normalized_directions(model, seed: int = 0, device=None, dtype=None):
     """随机方向 δ/η:filter 归一化(逐输出通道 d_f ← d_f/‖d_f‖·‖θ_f‖),跳过 bias/BN。
 
     返回 (delta, eta):两个与 model.parameters() 一一对齐的方向列表。
+
+    Args:
+        device: 方向张量存放设备,None = 跟随模型参数。
+                大模型低显存模式传 torch.device("cpu"),评估时逐层流式上卡。
+        dtype:  方向存储 dtype,None = fp32(向后兼容)。
+                低显存模式可传模型 dtype(如 float16)省一半显存;
+                数值在 fp32 下完成 filter 归一化后再 cast,精度无损感知。
     """
     import torch
 
-    device = next(model.parameters()).device
+    if device is None:
+        device = next(model.parameters()).device
     g = torch.Generator(device=device.type).manual_seed(seed)
     delta, eta = [], []
     with torch.no_grad():
         for p in model.parameters():
             if p.ndim < 2:
                 # bias / BatchNorm 的 weight·bias / LayerNorm 等:方向置零(不扰动)
-                delta.append(torch.zeros_like(p))
-                eta.append(torch.zeros_like(p))
+                zero = torch.zeros(p.shape, device=device, dtype=dtype or p.dtype)
+                delta.append(zero)
+                eta.append(zero.clone())
                 continue
             pair = []
             for _ in range(2):
-                d = torch.randn(p.shape, generator=g, device=device)
+                d = torch.randn(p.shape, generator=g, device=device)            # fp32 构造
                 d = d.flatten(1) / d.flatten(1).norm(dim=1, keepdim=True)      # ‖d_f‖=1
                 scale = p.flatten(1).norm(dim=1, keepdim=True)                  # ‖θ_f‖
-                pair.append(d.reshape(p.shape) * scale.reshape(-1, *([1] * (p.ndim - 1))))
+                out = d.reshape(p.shape) * scale.reshape(-1, *([1] * (p.ndim - 1)))
+                pair.append(out if dtype is None else out.to(dtype))
             delta.append(pair[0])
             eta.append(pair[1])
     return delta, eta
 
 
-def interpolation_directions(model_a, model_b, seed: int = 1):
+def interpolation_directions(model_a, model_b, seed: int = 1, device=None, dtype=None):
     """两 checkpoint 插值:δ = θ_b − θ_a(Goodfellow 2014 线性插值主方向),
-    η 取 filter 归一化随机方向,构成"插值 × 随机"网格。"""
+    η 取 filter 归一化随机方向,构成"插值 × 随机"网格。
+
+    device/dtype 语义同 filter_normalized_directions;δ 逐层算完即搬走,
+    GPU 瞬时增量只有最大单层张量。
+    """
     import torch
 
-    _, eta_rand = filter_normalized_directions(model_b, seed=seed)
+    _, eta_rand = filter_normalized_directions(model_b, seed=seed, device=device, dtype=dtype)
+    if device is None:
+        device = next(model_a.parameters()).device
     delta, eta = [], []
     with torch.no_grad():
         for pa, pb, e in zip(model_a.parameters(), model_b.parameters(), eta_rand):
-            delta.append(pb - pa)
+            d = (pb - pa).to(device=device)
+            if dtype is not None:
+                d = d.to(dtype)
+            delta.append(d)
             eta.append(e)
     return delta, eta
 

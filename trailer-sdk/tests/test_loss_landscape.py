@@ -465,3 +465,59 @@ class TestResolveMode:
 
         with pytest.raises(ValueError):
             resolve_mode(self._model(), "turbo")
+
+
+class TestDirectionConstruction:
+    """方向构造的 device/dtype 参数:大模型低显存模式下方向放 CPU、存半精度。"""
+
+    def _model(self):
+        torch = pytest.importorskip("torch")
+        torch.manual_seed(0)
+        return torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.ReLU(), torch.nn.Linear(8, 3))
+
+    def test_default_dirs_follow_model_fp32(self):
+        torch = pytest.importorskip("torch")
+        from trailer.landscape import filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(self._model(), seed=0)
+        assert all(d.device.type == "cpu" for d in delta + eta)   # 模型在 CPU
+        assert all(d.dtype == torch.float32 for d in delta + eta) # 缺省 fp32(向后兼容)
+
+    def test_device_param_accepted(self):
+        torch = pytest.importorskip("torch")
+        from trailer.landscape import filter_normalized_directions
+
+        delta, eta = filter_normalized_directions(
+            self._model(), seed=0, device=torch.device("cpu")
+        )
+        assert all(d.device.type == "cpu" for d in delta + eta)
+
+    def test_dtype_param_half_precision_keeps_filter_norm(self):
+        torch = pytest.importorskip("torch")
+        from trailer.landscape import filter_normalized_directions
+
+        model = self._model()
+        delta, eta = filter_normalized_directions(model, seed=0, dtype=torch.float16)
+        assert all(d.dtype == torch.float16 for d in delta + eta)
+        # fp32 构造后 cast:每 filter 幅值仍近似匹配 ‖θ_f‖(filter 归一化本质)
+        for p, d in zip(model.parameters(), delta):
+            if p.ndim < 2:
+                continue
+            assert torch.allclose(
+                d.float().flatten(1).norm(dim=1),
+                p.float().flatten(1).norm(dim=1),
+                rtol=1e-2,
+            )
+
+    def test_interp_device_dtype(self):
+        torch = pytest.importorskip("torch")
+        from trailer.landscape import interpolation_directions
+
+        a, b = self._model(), self._model()
+        with torch.no_grad():
+            for p in b.parameters():     # 制造两 checkpoint 差异
+                p.add_(0.1)
+        delta, eta = interpolation_directions(a, b, seed=2, dtype=torch.float16)
+        assert all(d.dtype == torch.float16 for d in delta + eta)
+        for pa, pb, d in zip(a.parameters(), b.parameters(), delta):
+            assert torch.allclose(d.float(), (pb - pa).float(), rtol=1e-2, atol=1e-2)
