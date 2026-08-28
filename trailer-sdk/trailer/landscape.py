@@ -133,6 +133,9 @@ def _evaluate_grid_lowmem(model, batches, delta, eta, n: int = 51, criterion=Non
                     total = 0.0
                     count = 0
                     for x, y in batches:
+                        # batch 可能还在 CPU(DataLoader 直传),前向前搬到模型设备
+                        x = x.to(device, non_blocking=True)
+                        y = y.to(device, non_blocking=True)
                         total += float(criterion(model(x), y)) * len(x)
                         count += len(x)
                     grid[i, j] = total / max(count, 1)
