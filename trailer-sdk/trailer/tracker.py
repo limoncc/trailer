@@ -630,26 +630,12 @@ class Tracker:
         self._latest_step = max(self._latest_step, step)
         self._notify_step(self._latest_step)
 
-        from trailer.model import extract_graph, save_graph as _sg
+        from trailer.model import build_model_graph, save_graph as _sg
         import json, tempfile, os
 
-        if trace:
-            from trailer.model import trace_edges, attach_io, remap_edges
-            import torch
-            x = torch.randn(*input_shape)
-            edges, io_map = trace_edges(model, x)
-            graph = extract_graph(
-                model, name=name, merge_repeats=True, edges=edges,
-                input_spec=f"{input_shape}",
-            )
-            graph["edges"] = remap_edges(graph["tree"], edges)
-            attach_io(graph["tree"], io_map)
-            graph["meta"]["trace_mode"] = "hooks"
-        else:
-            graph = extract_graph(
-                model, name=name, merge_repeats=True,
-                input_spec=f"tensor {input_shape}",
-            )
+        graph = build_model_graph(
+            model, name=name, input_shape=input_shape, trace=trace,
+        )
 
         body_str = json.dumps(graph)
         if self._mode == "local":
