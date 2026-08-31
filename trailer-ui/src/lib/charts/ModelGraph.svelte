@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, Network, Search, Download } from 'lucide-svelte';
-  import { layoutGraph, displayName, subLabel, ioLabel, edgeWidth, type LayoutResult } from './model/layout';
+  import { layoutGraph, displayName, subLabel, ioLabel, edgeWidth, headerFitsRow, type LayoutResult } from './model/layout';
   import { canvasMeasure as tw, FONT_STACK } from './model/measure';
   import { ancestorsOf, enforceBudget, computeFrame, easeOutCubic } from './model/interactions';
   import { colorFor as kindColor, guessKind, KIND_LEGEND } from './model/kinds';
@@ -349,8 +349,13 @@
 
       let name = displayName(n);
       if (expanded) {
+        // 标题行:名称 + 副标(class · 参数量)。盒宽足够时同行(副标偏置到名称
+        // 之后);放不下就换到第二行,不为凑整行把盒子撑宽(收起宽子节点后
+        // 会留大片空白)。headerFitsRow 带 20px 门限,同行排布也不贴边框。
+        let sub = subLabel(n);
+        let fits = headerFitsRow(b.w, tw(name, 13, 600), tw(sub, 10.5));
         tag(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 13, fontWeight: 600 }), 'label');
-        tag(new R.Text({ x: b.x + 12 + tw(name, 13, 600) + 10, y: b.y + 9, text: subLabel(n), fill: P.subText, fontSize: 10.5 }), 'sub');
+        tag(new R.Text({ x: fits ? b.x + 12 + tw(name, 13, 600) + 10 : b.x + 12, y: b.y + (fits ? 9 : 25), text: sub, fill: P.subText, fontSize: 10.5 }), 'sub');
         tag(new R.Text({ x: b.x + b.w - 22, y: b.y + 7, text: '−', fill: col.stroke, fontSize: 14, fontWeight: 600 }), 'sign');
       } else if (isContainer(n)) {
         tag(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 12.5, fontWeight: 600 }), 'label');

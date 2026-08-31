@@ -25,7 +25,7 @@ export function canvasMeasure(text: string, size: number, weight = 400): number 
   const c = getCtx();
   if (!c) return text.length * size * 0.62;
   c.font = `${weight} ${size}px ${FONT_STACK}`;
-  // +10%/+6px 安全余量:抵消 leafer 渲染与测量之间的字体差异(否则长名/收起
-  // 状态下文字会溢出盒子)
-  return c.measureText(text).width * 1.1 + 6;
+  // +10%/+12px 安全余量:leafer 的文本渲染宽度略大于 canvas 测量(字体回退与
+  // hinting 差异),长 shape 字符串(如 IO 行)否则会溢出盒子右边框
+  return c.measureText(text).width * 1.1 + 12;
 }
