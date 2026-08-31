@@ -320,6 +320,18 @@ def _fingerprint(module: nn.Module) -> str:
 
 # ---------------------------------------------------------------- core walk
 
+def _dtype_of(module: nn.Module) -> Optional[str]:
+    """Majority dtype over the module's own (direct) parameters, e.g. 'float32'."""
+    counts: dict[str, int] = {}
+    for _, p in module.named_parameters(recurse=False):
+        d = str(getattr(p, "dtype", "")).replace("torch.", "")
+        if d:
+            counts[d] = counts.get(d, 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
 def _build_node(module: nn.Module, name: str, path: str, merge_repeats: bool) -> dict:
     total = sum(p.numel() for p in module.parameters())
     trainable = sum(p.numel() for p in module.parameters() if getattr(p, "requires_grad", True))
@@ -357,9 +369,15 @@ def _build_node(module: nn.Module, name: str, path: str, merge_repeats: bool) ->
     if hint:
         node["io_hint"] = hint
 
+    dtype = _dtype_of(module)
+    if dtype:
+        node["dtype"] = dtype
+
     if direct:
         node["param_breakdown"] = [
-            {"label": pname, "shape": list(getattr(p, "shape", ())), "value": p.numel(), "fmt": _fmt_params(p.numel())}
+            {"label": pname, "shape": list(getattr(p, "shape", ())), "value": p.numel(),
+             "fmt": _fmt_params(p.numel()),
+             "dtype": str(getattr(p, "dtype", "")).replace("torch.", "")}
             for pname, p in direct[:MAX_BREAKDOWN]
         ]
         if len(direct) > MAX_BREAKDOWN:

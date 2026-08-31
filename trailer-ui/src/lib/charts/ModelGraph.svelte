@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Button from '$lib/components/ui/Button.svelte';
-  import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, MousePointerClick, Network, Search } from 'lucide-svelte';
+  import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, Network, Search } from 'lucide-svelte';
   import { layoutGraph, displayName, subLabel, ioLabel, type LayoutResult } from './model/layout';
   import { canvasMeasure as tw } from './model/measure';
   import { ancestorsOf, enforceBudget, computeFrame, easeOutCubic } from './model/interactions';
   import ModelNodeFinder from './ModelNodeFinder.svelte';
+  import Inspector from './Inspector.svelte';
 
   interface Props {
     spec: { meta?: any; tree?: any; edges?: any[] };
@@ -418,15 +419,8 @@
     if (!n) return;
     selectedId = id;
 
-    let info: any = { name: n.name, id: n.id, class: n.class, params: n.params, repeat: n.repeat, io: n.io, io_hint: n.io_hint, attrs: n.attrs, children: n.children, param_breakdown: n.param_breakdown, moe_routing: n.moe_routing };
+    let info: any = { name: n.name, id: n.id, class: n.class, kind: n.kind, dtype: n.dtype, params: n.params, repeat: n.repeat, io: n.io, io_hint: n.io_hint, attrs: n.attrs, children: n.children, param_breakdown: n.param_breakdown, moe_routing: n.moe_routing };
     selectedInfo = info;
-  }
-
-  function fmtP(v: number) {
-    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
-    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
-    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
-    return String(v);
   }
 
   // --- Toolbar ---
@@ -603,101 +597,9 @@
 
     <!-- Detail panel -->
     <div class="shrink-0 border-l border-border overflow-y-auto bg-background" style="width:{sidebarWidth}px">
-      <!-- Model Summary -->
-      {#if spec?.meta}
-      <div class="px-4 pt-4 pb-3">
-        <h3 class="font-semibold text-sm mb-1">{spec.meta.name || 'Model'}</h3>
-        <span class="inline-flex text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">{spec.meta.class || ''}</span>
-        <div class="space-y-1.5 text-xs">
-          <div class="flex justify-between"><span class="text-muted-foreground">Total params</span><span class="font-mono font-medium">{spec.meta.total_params_fmt || '?'}</span></div>
-          <div class="flex justify-between"><span class="text-muted-foreground">Trace mode</span><span class="font-mono">{spec.meta.trace_mode || 'static'}</span></div>
-          {#if spec.meta.input_spec}<div class="flex justify-between gap-2"><span class="text-muted-foreground shrink-0">Input</span><span class="font-mono text-right text-[10px] break-all">{spec.meta.input_spec}</span></div>{/if}
-          {#if spec.meta.output_spec}<div class="flex justify-between gap-2"><span class="text-muted-foreground shrink-0">Output</span><span class="font-mono text-right text-[10px] break-all">{spec.meta.output_spec}</span></div>{/if}
-          {#if spec.edges}<div class="flex justify-between"><span class="text-muted-foreground">Edges</span><span class="font-mono">{spec.edges.length}</span></div>{/if}
-        </div>
-      </div>
-      <hr class="border-t border-border mx-4" />
-      {/if}
-
-      {#if selectedInfo}
-      <div class="px-4 pt-4 pb-2">
-        <div class="flex items-center justify-between mb-1 flex-wrap gap-1">
-          <h3 class="font-semibold text-sm">{selectedInfo.name}</h3>
-          {#if selectedInfo.repeat}
-            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">×{selectedInfo.repeat.count}</span>
-          {/if}
-        </div>
-        <p class="text-[10px] font-mono text-muted-foreground break-all">{selectedInfo.id}</p>
-      </div>
-      <hr class="border-t border-border mx-4" />
-      <div class="p-4 space-y-2 text-xs">
-        <div class="flex justify-between"><span class="text-muted-foreground">Class</span><span class="font-mono">{selectedInfo.class}</span></div>
-        {#if selectedInfo.moe_routing}
-          <div class="flex justify-between gap-2">
-            <span class="text-muted-foreground shrink-0">MoE routing</span>
-            <span class="font-mono text-right text-violet-600 dark:text-violet-400">{selectedInfo.moe_routing.label} · {selectedInfo.moe_routing.router}</span>
-          </div>
-        {/if}
-        {#if selectedInfo.params}
-        <div class="flex justify-between">
-          <span class="text-muted-foreground">Params</span>
-          <span class="font-mono text-right">{selectedInfo.repeat ? selectedInfo.repeat.group_fmt + ' (×' + selectedInfo.repeat.count + ')' : selectedInfo.params.fmt}</span>
-        </div>
-        {/if}
-        {#if selectedInfo.io}
-          <div class="flex justify-between gap-2"><span class="text-muted-foreground shrink-0">Input</span><span class="font-mono text-right break-all">{selectedInfo.io.in.join(', ')}</span></div>
-          <div class="flex justify-between gap-2"><span class="text-muted-foreground shrink-0">Output</span><span class="font-mono text-right break-all">{selectedInfo.io.out.join(', ')}</span></div>
-        {:else if selectedInfo.io_hint}
-          <div class="flex justify-between gap-2"><span class="text-muted-foreground shrink-0">Input</span><span class="font-mono text-right">{selectedInfo.io_hint.in}</span></div>
-          <div class="flex justify-between gap-2"><span class="text-muted-foreground shrink-0">Output</span><span class="font-mono text-right">{selectedInfo.io_hint.out}</span></div>
-        {/if}
-        {#if selectedInfo.attrs}
-          <div class="flex justify-between gap-2">
-            <span class="text-muted-foreground shrink-0">Attrs</span>
-            <span class="font-mono text-right break-all">{Object.entries(selectedInfo.attrs).filter(([k])=>k!=='_args').map(([k,v])=>k+'='+v).join(', ') || selectedInfo.attrs._args}</span>
-          </div>
-        {/if}
-      </div>
-      {#if selectedInfo.children?.length}
-      <hr class="border-t border-border mx-4" />
-      <div class="p-4">
-        <div class="text-xs font-semibold mb-2 text-foreground/80">Sub-module param share</div>
-        <div class="space-y-2">
-          {#each [...selectedInfo.children].sort((a:any,b:any)=> (b.params?.total||0) - (a.params?.total||0)).slice(0,10) as child}
-            {@const pct = selectedInfo.params?.total > 0 ? Math.round(((child.repeat ? child.repeat.group_params : child.params?.total) || 0) / selectedInfo.params.total * 1000) / 10 : 0}
-            <div>
-              <div class="flex justify-between text-[10px] font-mono"><span>{child.name}{child.repeat ? ' ×' + child.repeat.count : ''}</span><span>{pct}%</span></div>
-              <div class="h-1 bg-muted rounded-full overflow-hidden"><div class="h-full rounded-full bg-violet-500 transition-all" style="width:{Math.min(pct,100)}%"></div></div>
-            </div>
-          {/each}
-        </div>
-      </div>
-      {:else if selectedInfo.param_breakdown?.length}
-      <hr class="border-t border-border mx-4" />
-      <div class="p-4">
-        <div class="text-xs font-semibold mb-2 text-foreground/80">Param breakdown</div>
-        <div class="space-y-2">
-          {#each selectedInfo.param_breakdown as p}
-            {@const pct = (selectedInfo.params?.self || 1) > 0 ? Math.round((p.value || 0) / Math.max(selectedInfo.params?.self, 1) * 1000) / 10 : 0}
-            <div>
-              <div class="flex justify-between text-[10px] font-mono"><span>{p.label}{p.shape?.length ? ' (' + p.shape.join('×') + ')' : ''}</span><span>{p.fmt}</span></div>
-              <div class="h-1 bg-muted rounded-full overflow-hidden"><div class="h-full rounded-full bg-blue-500 transition-all" style="width:{Math.min(pct,100)}%"></div></div>
-            </div>
-          {/each}
-        </div>
-      </div>
-      {/if}
-    {/if}
-    {#if !selectedInfo}
-    <div class="flex items-center justify-center gap-2 text-xs text-muted-foreground p-6 text-center">
-      <div class="flex flex-col items-center gap-2">
-        <div class="w-10 h-10 rounded-full bg-muted/60 flex items-center justify-center"><MousePointerClick class="w-5 h-5 text-muted-foreground/60" /></div>
-        <p class="leading-relaxed">Click any module<br />to view details</p>
-      </div>
+      <Inspector spec={spec} selected={selectedInfo} onjump={reveal} />
     </div>
-    {/if}
   </div>
-</div>
 </div>
 
 <style>
