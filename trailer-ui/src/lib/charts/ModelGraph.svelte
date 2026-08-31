@@ -2,21 +2,23 @@
   import { onMount } from 'svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, MousePointerClick, Network } from 'lucide-svelte';
+  import { layoutGraph, displayName, subLabel, ioLabel, type LayoutResult } from './model/layout';
+  import { canvasMeasure as tw } from './model/measure';
 
   interface Props {
     spec: { meta?: any; tree?: any; edges?: any[] };
   }
   let { spec }: Props = $props();
 
-  // --- Global state (matches viewer.html) ---
+  // --- Global state ---
   let container: HTMLDivElement;
   let leafer: any = null, contentGroup: any = null;
   let graphReady = $state(false);
   let initErr = $state('');
   let sidebarWidth = $state(380);
-  let darkMode = $state(false);
+  let darkMode = $state(typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
 
-  // Watch dark mode — re-render graph when it changes
+  // Watch dark mode — redraw the graph with the new palette when it changes
   $effect(() => {
     const isDark = document.documentElement.classList.contains('dark');
     if (isDark === darkMode) return;
@@ -52,17 +54,10 @@
   let nodeById: Record<string, any> = {};
   let parentOf: Record<string, string> = {};
   let collapsedSet = new Set<string>();
-  let boxes: Record<string, any> = {};
+  let layout: LayoutResult | null = null;
+  let layoutGen = 0;
   let selectedId: string | null = $state(null);
-
-  const L = { headerH: 30, leafH: 44, leafH3: 58, collapsedH: 34, padX: 18, padBottom: 16, gap: 34, minLeafW: 96, ioH: 30 };
-
-  // --- Text width estimation ---
-  function tw(s: string, size: number) {
-    let w = 0;
-    for (let i = 0; i < s.length; i++) w += s.charCodeAt(i) > 255 ? size : size * 0.62;
-    return w;
-  }
+  let selectedInfo: any = $state(null);
 
   // --- Data loading ---
   function indexTree(n: any, parent: any) {
@@ -82,22 +77,33 @@
     }
   }
 
+  /** async layout (ELK runs in a worker) + draw; the generation counter makes
+   *  rapid collapse/expand toggles race-safe */
+  async function relayout(): Promise<void> {
+    if (!graphData) return;
+    const gen = ++layoutGen;
+    try {
+      const r = await layoutGraph(graphData, collapsedSet);
+      if (gen !== layoutGen) return;
+      layout = r;
+      if (leafer && contentGroup) renderGraph();
+    } catch (err: any) {
+      console.error('[model-graph] layout failed', err);
+    }
+  }
+
   function loadGraph(g: any) {
     graphData = g; nodeById = {}; parentOf = {}; selectedId = null;
     indexTree(g.tree, null);
     defaultCollapse();
     if (leafer && contentGroup) {
-      renderGraph();
-      setTimeout(fitView, 60);
-      showDetail(g.tree.id);
+      relayout().then(() => { setTimeout(fitView, 60); showDetail(g.tree.id); });
     }
   }
 
   // --- Colors (light/dark aware) ---
-  function cL() { return darkMode; }
-
   function colorsFor(n: any, depth: number) {
-    const isDark = cL();
+    const isDark = darkMode;
     const c = (n.class || '').toLowerCase(), name = (n.name || '').toLowerCase();
     function pick(lFill: string, lStroke: string, lLabel: string, dFill: string, dStroke: string, dLabel: string) {
       return isDark ? { fill: dFill, stroke: dStroke, label: dLabel } : { fill: lFill, stroke: lStroke, label: lLabel };
@@ -139,73 +145,6 @@
     canvasBg: darkMode ? '#0f172a' : '#fafafa',
   });
 
-  // --- Display helpers ---
-  function displayName(n: any) {
-    let s = n.name || '';
-    if (n.repeat) s += '  ×' + n.repeat.count;
-    return s;
-  }
-  function subLabel(n: any) {
-    let s = n.variant || n.class || '';
-    if (n.moe_experts) s += ' · MoE×' + n.moe_experts;
-    if (n.params && n.params.total > 0) s += ' · ' + (n.repeat ? n.repeat.group_fmt : n.params.fmt);
-    return s;
-  }
-  function ioLabel(n: any) {
-    if (n.io && n.io.in && n.io.in.length && n.io.out && n.io.out.length)
-      return n.io.in[0].replace(/ \w+$/, '') + ' → ' + n.io.out[0].replace(/ \w+$/, '');
-    if (n.io_hint) return n.io_hint.in + ' → ' + n.io_hint.out;
-    return null;
-  }
-
-  // --- Layout ---
-  function measure(n: any): { w: number; h: number } {
-    let nameW = tw(displayName(n), 13) + 30;
-    let subW = tw(subLabel(n), 11) + 30;
-    let io = ioLabel(n);
-    let ioW = io ? tw(io, 10) + 30 : 0;
-    if (!isContainer(n) || collapsedSet.has(n.id)) {
-      let badgeW = n.badge ? tw(n.badge, 9) + 16 : 0;
-      if (n.op) ioW = 0;
-      let w = Math.max(L.minLeafW, nameW, subW, ioW, badgeW);
-      let h = isContainer(n) ? L.collapsedH + 14 : (io ? L.leafH3 : L.leafH);
-      if (n.badge) h += 16;
-      if (n.op) h = Math.max(h, 54);
-      return { w, h };
-    }
-    let innerW = 0, innerH = 0;
-    (n.children || []).forEach((c: any, i: number) => {
-      let s = measure(c);
-      c.__size = s;
-      innerW = Math.max(innerW, s.w);
-      innerH += s.h + (i > 0 ? L.gap : 0);
-    });
-    return { w: Math.max(innerW + L.padX * 2, nameW + 40, subW + 40), h: L.headerH + 8 + innerH + L.padBottom };
-  }
-
-  function place(n: any, cx: number, top: number, depth: number) {
-    let s = n.__size;
-    boxes[n.id] = { x: cx - s.w / 2, y: top, w: s.w, h: s.h, node: n, depth };
-    if (isContainer(n) && !collapsedSet.has(n.id)) {
-      let y = top + L.headerH + 8;
-      (n.children || []).forEach((c: any) => {
-        place(c, cx, y, depth + 1);
-        y += c.__size.h + L.gap;
-      });
-    }
-  }
-
-  // --- Edge lifting ---
-  function visRep(id: string): string | null {
-    let cur = id;
-    while (cur && !boxes[cur]) {
-      let idx = cur.lastIndexOf('.');
-      if (idx < 0) return null;
-      cur = cur.substring(0, idx);
-    }
-    return cur;
-  }
-
   function edgeStyle(kind: string) {
     if (kind === 'routing') return { color: '#d946ef', width: 1.9, dash: [6, 4] as number[] | null, side: 'right' as const };
     if (kind === 'residual') return { color: '#f59e0b', width: 1.6, dash: null, side: 'right' as const };
@@ -214,12 +153,13 @@
     return { color: '#64748b', width: 1.7, dash: null, side: 'center' as const };
   }
 
-  // --- Rendering ---
+  // --- Rendering (consumes layout geometry; leafer only draws) ---
   function drawArrow(x: number, y: number, color: string, dir: string) {
     if (!contentGroup || !leafer) return;
     const R = getLeaferUI();
     let pts: Array<{ x: number; y: number }>;
     if (dir === 'down') pts = [{ x, y }, { x: x - 4.5, y: y - 9 }, { x: x + 4.5, y: y - 9 }];
+    else if (dir === 'up') pts = [{ x, y }, { x: x - 4.5, y: y + 9 }, { x: x + 4.5, y: y + 9 }];
     else if (dir === 'left') pts = [{ x, y }, { x: x + 9, y: y - 4.5 }, { x: x + 9, y: y + 4.5 }];
     else pts = [{ x, y }, { x: x - 9, y: y - 4.5 }, { x: x - 9, y: y + 4.5 }];
     contentGroup.add(new R.Polygon({ points: pts, fill: color }));
@@ -230,17 +170,12 @@
   }
 
   function renderGraph() {
-    if (!graphData || !contentGroup) return;
+    if (!layout || !graphData || !contentGroup) return;
     const R = getLeaferUI();
     if (!R) return;
 
     const P = PAL();
-    boxes = {};
-    let root = graphData.tree;
-    let s = measure(root); root.__size = s;
-    place(root, 0, 0, 0);
-
-    // Clear
+    const boxes = layout.boxes;
     while (contentGroup.children?.length > 0) contentGroup.children[0].remove();
 
     let elements: any[] = [];
@@ -264,7 +199,7 @@
       let name = displayName(n);
       if (expanded) {
         contentGroup.add(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 13, fontWeight: 600 }));
-        contentGroup.add(new R.Text({ x: b.x + 12 + tw(name, 13) + 10, y: b.y + 9, text: subLabel(n), fill: P.subText, fontSize: 10.5 }));
+        contentGroup.add(new R.Text({ x: b.x + 12 + tw(name, 13, 600) + 10, y: b.y + 9, text: subLabel(n), fill: P.subText, fontSize: 10.5 }));
         contentGroup.add(new R.Text({ x: b.x + b.w - 22, y: b.y + 7, text: '−', fill: col.stroke, fontSize: 14, fontWeight: 600 }));
       } else if (isContainer(n)) {
         contentGroup.add(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 12.5, fontWeight: 600 }));
@@ -292,88 +227,27 @@
       }
     }
 
-    // Edges
-    let drawn: Record<string, any> = {};
-    let edgeList: Array<{ s: string; t: string; kind: string; shape?: string }> = [];
-
-    function edgePri(k: string) { return k === 'routing' ? 3 : ((k === 'residual' || k === 'loop') ? 2 : 1); }
-
-    function addEdge(s: string | null, t: string | null, kind: string, shape?: string) {
-      if (!s || !t || s === t) return;
-      let key = s + '|' + t, pri = edgePri(kind);
-      if (drawn[key]) {
-        if (pri > drawn[key].pri) {
-          drawn[key].kind = kind; drawn[key].pri = pri;
-          for (let i = 0; i < edgeList.length; i++)
-            if (edgeList[i].s === s && edgeList[i].t === t) { edgeList[i] = { s, t, kind, shape }; break; }
-        }
-        return;
-      }
-      drawn[key] = { kind, pri };
-      edgeList.push({ s, t, kind, shape });
-    }
-
-    (graphData.edges || []).forEach((e: any) => addEdge(visRep(e.source), visRep(e.target), e.kind, e.shape));
-
-    // Order chains inside expanded containers
-    for (const id of Object.keys(boxes)) {
-      let n = boxes[id].node;
-      if (!isContainer(n) || collapsedSet.has(id)) continue;
-      for (let i = 0; i < n.children.length - 1; i++) {
-        let a = n.children[i].id, b = n.children[i + 1].id;
-        if (!boxes[a] || !boxes[b]) continue;
-        let key = a + '|' + b;
-        if (drawn[key]) continue;
-        drawn[key] = true;
-        edgeList.push({ s: a, t: b, kind: 'order' });
-      }
-    }
-
-    // Draw edges — weaker kinds first so routing (highest priority) renders
-    // on top of order/residual lines sharing the same corridor
-    for (const e of [...edgeList].sort((a, b) => edgePri(a.kind) - edgePri(b.kind))) {
-      let sb = boxes[e.s], tb = boxes[e.t];
-      if (!sb || !tb) continue;
-      let st = edgeStyle(e.kind);
-      let scx = sb.x + sb.w / 2, tcx = tb.x + tb.w / 2;
-      let pathStr: string;
-      let downward = tb.y >= sb.y + sb.h - 4;
-
-      if (st.side === 'center' && downward) {
-        let y1 = sb.y + sb.h, y2 = tb.y - 2;
-        let ym = (y1 + y2) / 2;
-        pathStr = 'M ' + scx + ' ' + y1 + ' L ' + scx + ' ' + ym + ' L ' + tcx + ' ' + ym + ' L ' + tcx + ' ' + y2;
-        drawArrow(tcx, y2, st.color, 'down');
-      } else {
-        let right = st.side !== 'left';
-        let x1 = right ? sb.x + sb.w : sb.x;
-        let x2 = right ? tb.x + tb.w : tb.x;
-        let ya = sb.y + sb.h / 2, yb = tb.y + tb.h / 2;
-        let ext = (right ? 1 : -1) * (46 + Math.abs(e.s.length - e.t.length) * 2);
-        let xm = x1 + ext;
-        pathStr = 'M ' + x1 + ' ' + ya + ' L ' + xm + ' ' + ya + ' L ' + xm + ' ' + yb + ' L ' + x2 + ' ' + yb;
-        drawArrow(x2 + (right ? 4 : -4), yb, st.color, right ? 'left' : 'right');
-      }
-      let path = new R.Path({ path: pathStr, stroke: st.color, strokeWidth: st.width, fill: null });
+    // Edges — geometry comes straight from the ELK layout
+    for (const route of layout.routes) {
+      let st = edgeStyle(route.kind);
+      let path = new R.Path({ path: route.path, stroke: st.color, strokeWidth: st.width, fill: null });
       if (st.dash) path.dashPattern = st.dash;
       contentGroup.add(path);
+      drawArrow(route.ex, route.ey, st.color, route.arrowDir);
 
-      if (e.kind === 'routing' && e.shape) {
-        let lx: number, ly: number;
-        if (st.side === 'center' && downward) { lx = (scx + tcx) / 2; ly = (sb.y + sb.h + tb.y - 2) / 2; }
-        else { lx = scx + (right ? 1 : -1) * (46 + Math.abs(e.s.length - e.t.length) * 2); ly = (sb.y + sb.h / 2 + tb.y + tb.h / 2) / 2; }
-        let lw = tw(e.shape, 8.5) + 10, lh = 14;
-        contentGroup.add(new R.Rect({ x: lx - lw / 2, y: ly - lh / 2, width: lw, height: lh, fill: P.badgeBg, stroke: st.color, strokeWidth: 0.8, cornerRadius: 7 }));
-        contentGroup.add(new R.Text({ x: lx, y: ly - 4.5, text: e.shape, fill: P.badgeText, fontSize: 8.5, textAlign: 'center' }));
+      if (route.kind === 'routing' && route.shape) {
+        let lw = tw(route.shape, 8.5) + 10, lh = 14;
+        contentGroup.add(new R.Rect({ x: route.mx - lw / 2, y: route.my - lh / 2, width: lw, height: lh, fill: P.badgeBg, stroke: st.color, strokeWidth: 0.8, cornerRadius: 7 }));
+        contentGroup.add(new R.Text({ x: route.mx, y: route.my - 4.5, text: route.shape, fill: P.badgeText, fontSize: 8.5, textAlign: 'center' }));
       }
     }
 
     // IO pills
     if (graphData.meta) {
-      let rb = boxes[root.id];
+      let rb = boxes[graphData.tree.id];
       if (rb) {
-        let inText = graphData.meta.input_spec || (root.io ? root.io.in.join('  ') : null);
-        let outText = graphData.meta.output_spec || (root.io ? root.io.out.join('  ') : null);
+        let inText = graphData.meta.input_spec || (graphData.tree.io ? graphData.tree.io.in.join('  ') : null);
+        let outText = graphData.meta.output_spec || (graphData.tree.io ? graphData.tree.io.out.join('  ') : null);
         if (inText) drawIoPill('INPUT  ' + inText, rb.x + rb.w / 2, rb.y - 64, P.ioPillInStroke, P.ioPillInBg);
         if (outText) drawIoPill('OUTPUT  ' + outText, rb.x + rb.w / 2, rb.y + rb.h + 30, '#f59e0b', '#fef3c7');
         if (inText) {
@@ -388,8 +262,9 @@
     }
 
     function drawIoPill(text: string, cx: number, top: number, stroke: string, fill: string) {
-      let w = tw(text, 11) + 34;
-      contentGroup.add(new R.Rect({ x: cx - w / 2, y: top, width: w, height: L.ioH, fill, stroke, strokeWidth: 1.4, cornerRadius: L.ioH / 2 }));
+      const ioH = 30;
+      let w = tw(text, 11, 600) + 34;
+      contentGroup.add(new R.Rect({ x: cx - w / 2, y: top, width: w, height: ioH, fill, stroke, strokeWidth: 1.4, cornerRadius: ioH / 2 }));
       contentGroup.add(new R.Text({ x: cx, y: top + 8, text, fill: stroke, fontSize: 11, fontWeight: 600, textAlign: 'center' }));
     }
 
@@ -401,8 +276,7 @@
         if (!isContainer(n)) return;
         if (collapsedSet.has(el.__id)) collapsedSet.delete(el.__id);
         else collapsedSet.add(el.__id);
-        renderGraph();
-        if (selectedId) highlight(selectedId);
+        relayout();
       });
     }
     if (selectedId) highlight(selectedId);
@@ -410,10 +284,10 @@
 
   function highlight(id: string) {
     selectedId = id;
-    if (!contentGroup) return;
+    if (!contentGroup || !layout) return;
     for (const ch of contentGroup.children) {
       if (!ch.__id) continue;
-      let b = boxes[ch.__id];
+      let b = layout.boxes[ch.__id];
       if (!b) continue;
       let col = colorsFor(b.node, b.depth);
       if (ch.__id === id) { ch.stroke = '#c2622d'; ch.strokeWidth = 2.5; }
@@ -422,8 +296,6 @@
   }
 
   // --- Detail panel ---
-  let selectedInfo: any = $state(null);
-
   function showDetail(id: string) {
     let n = nodeById[id];
     if (!n) return;
@@ -441,12 +313,12 @@
   }
 
   // --- Toolbar ---
-  function expandAll() { collapsedSet.clear(); renderGraph(); setTimeout(fitView, 30); }
+  function expandAll() { collapsedSet.clear(); relayout().then(() => setTimeout(fitView, 30)); }
   function collapseAll() {
     for (const id of Object.keys(nodeById)) {
       if (isContainer(nodeById[id]) && id !== (graphData?.tree?.id)) collapsedSet.add(id);
     }
-    renderGraph(); setTimeout(fitView, 30);
+    relayout().then(() => setTimeout(fitView, 30));
   }
   function expandOneLevel() {
     let toOpen: string[] = [];
@@ -457,18 +329,13 @@
       if (visible) toOpen.push(id);
     });
     toOpen.forEach((id) => collapsedSet.delete(id));
-    renderGraph(); setTimeout(fitView, 30);
+    relayout().then(() => setTimeout(fitView, 30));
   }
 
   function fitView() {
-    if (!contentGroup || !leafer) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const id of Object.keys(boxes)) {
-      let b = boxes[id];
-      minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
-      maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
-    }
-    minY -= 70; maxY += 66; minX -= 70; maxX += 70;
+    if (!layout || !contentGroup || !leafer) return;
+    const b = layout.bounds;
+    let minX = b.minX - 70, minY = b.minY - 70, maxX = b.maxX + 70, maxY = b.maxY + 66;
     let vw = container?.clientWidth || 800, vh = container?.clientHeight || 500;
     let cw = maxX - minX, ch = maxY - minY;
     if (cw <= 0 || ch <= 0) return;
