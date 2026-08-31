@@ -128,10 +128,35 @@ PyTorch model structure via the mviz engine:
 import torch.nn as nn
 
 model = nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 1))
-t.log_model(model, name="my-net", step=step)
+t.log_model(model, name="my-net", step=step)          # static structure
+
+t.log_model(model, name="my-net-traced", step=step,
+            input_shape=(1, 10), trace=True)            # one forward pass
 ```
 
-The Model tab renders the computational graph with layer shapes and data flow edges.
+The Model tab renders the graph with an ELK layered layout (top levels read
+left-to-right, block internals stack top-to-bottom). What you get:
+
+- **Module tree** with parameter counts, per-param dtype, and structural
+  fingerprint folding — identical consecutive siblings collapse into one
+  `×N` node (double-click to expand the representative).
+- **Semantic `kind` per node** (embedding / attention / mlp / moe / norm /
+  linear / conv / head / act) driving colors, legend and the inspector chip.
+  `meta.format_version: 2` marks documents that carry kinds, dtypes and
+  repeat `signature` hashes (additive; older figures still render).
+- **MoE routing**: router→experts dashed edges labelled `top-k/N`, a synthetic
+  Σ combine node, and the shared-expert branch. Works for ModuleList expert
+  pools and fused-experts weights (with or without a `num_experts` attr), in
+  both static and traced mode.
+- **Trace mode** (`trace=True`) attaches real I/O shapes per module; edge
+  stroke width then scales with the flowing tensor size, and the inspector
+  shows dimension labels matched against module attrs (e.g. `512 in_features`).
+
+Interactions: click to inspect, double-click to expand/collapse, `Expand` /
+`Collapse` / `Expand 1 level` bulk actions, `/` to search by path or class,
+`E`/`C` expand/collapse selection, `0` fit, breadcrumb trail, canvas export
+to SVG / PNG / JSON. Expansions are capped at 300 visible modules — the
+least recently opened containers re-collapse automatically.
 
 ## Configuration capture
 

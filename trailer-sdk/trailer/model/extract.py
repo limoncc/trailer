@@ -182,7 +182,7 @@ def _make_moe_expert_node(module: nn.Module, path: str, ne: int) -> dict:
         "id": f"{path}.expert",
         "name": "expert",
         "class": type(module).__name__.replace("Experts", "Expert"),
-        "kind": "container",
+        "kind": "moe",
         "params": {"total": per, "trainable": per, "self": per, "fmt": _fmt_params(per)},
         "children": children,
         "repeat": {
@@ -190,6 +190,7 @@ def _make_moe_expert_node(module: nn.Module, path: str, ne: int) -> dict:
             "names": [f"expert.{i}" for i in range(ne)],
             "group_params": total,
             "group_fmt": _fmt_params(total),
+            "signature": _fingerprint(module),
         },
     }
 
@@ -252,6 +253,7 @@ def _make_moe_block_node(module: nn.Module, name: str, path: str, info: dict,
     expert_node = _build_node(info["template"], "expert", f"{path}.expert", merge_repeats)
     expert_node["id"] = f"{path}.expert"
     expert_node["name"] = "expert"
+    expert_node["kind"] = "moe"
     expert_node["moe_experts"] = majority
     per = expert_node["params"]["total"]
     expert_node["repeat"] = {
@@ -259,6 +261,7 @@ def _make_moe_block_node(module: nn.Module, name: str, path: str, info: dict,
         "names": [f"expert.{i}" for i in range(majority)],
         "group_params": per * majority,
         "group_fmt": _fmt_params(per * majority),
+        "signature": _fingerprint(info["template"]),
     }
 
     if not uniques:
@@ -273,7 +276,7 @@ def _make_moe_block_node(module: nn.Module, name: str, path: str, info: dict,
             "id": f"{path}.{info['pool_name']}",
             "name": info["pool_name"],
             "class": type(pool).__name__,
-            "kind": "container",
+            "kind": "moe",
             "moe_experts": ne,
             "params": {"total": pool_total, "trainable": pool_total, "self": 0,
                        "fmt": _fmt_params(pool_total)},
@@ -294,7 +297,7 @@ def _make_moe_block_node(module: nn.Module, name: str, path: str, info: dict,
         "id": path,
         "name": name,
         "class": type(module).__name__,
-        "kind": "container",
+        "kind": "moe",
         "params": {"total": total, "trainable": trainable, "self": self_params,
                    "fmt": _fmt_params(total)},
         "children": children,
@@ -330,6 +333,39 @@ def _dtype_of(module: nn.Module) -> Optional[str]:
     if not counts:
         return None
     return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+_KIND_ACT_WORDS = ('gelu', 'relu', 'silu', 'swiglu', 'tanh', 'sigmoid', 'softmax',
+                   'dropout', 'pool', 'identity', 'flatten')
+
+
+def _classify(module: nn.Module, name: str, is_container: bool, moe_experts: int = 0) -> str:
+    """Semantic kind for the viewer — one source for color, chip and collapse
+    defaults. Match order matters (e.g. MultiheadAttention before 'head');
+    named containers (AttnBlock / MlpBlock / ...) get semantic kinds too."""
+    cls = type(module).__name__.lower()
+    nm = (name or '').lower()
+    if 'embed' in cls or 'embed' in nm:
+        return 'embedding'
+    if 'attention' in cls or 'attn' in cls or 'attn' in nm:
+        return 'attention'
+    if 'moe' in cls or 'moe' in nm or 'router' in cls or cls.endswith('gate') or 'experts' in nm:
+        return 'moe'
+    if 'norm' in cls:
+        return 'norm'
+    if 'conv' in cls:
+        return 'conv'
+    if 'mlp' in cls or 'mlp' in nm or 'feedforward' in cls or 'feedforward' in nm:
+        return 'mlp'
+    if nm.endswith('head') or nm in ('classifier', 'fc', 'score'):
+        return 'head'
+    if is_container:
+        return 'moe' if moe_experts else 'container'
+    if any(k in cls for k in _KIND_ACT_WORDS):
+        return 'act'
+    if isinstance(module, nn.Linear):
+        return 'linear'
+    return 'module'
 
 
 def _build_node(module: nn.Module, name: str, path: str, merge_repeats: bool) -> dict:
@@ -388,7 +424,7 @@ def _build_node(module: nn.Module, name: str, path: str, merge_repeats: bool) ->
     # ---- MoE fused experts: expand into virtual 'expert xN' leaves ----
     ne = _detect_moe_experts(module)
     if ne:
-        node["kind"] = "container"
+        node["kind"] = "moe"
         node["params"]["self"] = 0
         node["children"] = [_make_moe_expert_node(module, path, ne)]
         node["moe_experts"] = ne
@@ -401,6 +437,7 @@ def _build_node(module: nn.Module, name: str, path: str, merge_repeats: bool) ->
 
     children_raw = [(cname, child) for cname, child in module.named_children()]
     if not children_raw:
+        node["kind"] = _classify(module, name, False)
         return node
 
     child_nodes: list[dict] = []
@@ -427,6 +464,8 @@ def _build_node(module: nn.Module, name: str, path: str, merge_repeats: bool) ->
                 # params shown = one instance; also record group total
                 cnode["repeat"]["group_params"] = cnode["params"]["total"] * count
                 cnode["repeat"]["group_fmt"] = _fmt_params(cnode["params"]["total"] * count)
+                if cname.isdigit():
+                    cnode["repeat"]["signature"] = fp
             child_nodes.append(cnode)
             i = j
     else:
@@ -436,6 +475,7 @@ def _build_node(module: nn.Module, name: str, path: str, merge_repeats: bool) ->
     node["children"] = child_nodes
     if isinstance(module, nn.Sequential):
         node["sequential"] = True
+    node["kind"] = _classify(module, name, True, int(node.get("moe_experts") or 0))
     return node
 
 
@@ -571,7 +611,7 @@ def extract_graph(
         "total_params": total,
         "total_params_fmt": _fmt_params(total),
         "trace_mode": "hooks" if edges else "static",
-        "format_version": 1,
+        "format_version": 2,
     }
     if input_spec:
         meta["input_spec"] = input_spec

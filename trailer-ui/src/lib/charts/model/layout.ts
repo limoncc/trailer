@@ -124,6 +124,24 @@ export function subLabel(n: GraphNode): string {
   return s;
 }
 
+/** stroke width for main-flow edges: grows logarithmically with the traced
+ *  output tensor size (borrowed from modelmap §19), capped */
+export function edgeWidth(node?: GraphNode): number {
+  const out = node?.io?.out?.[0];
+  if (!out) return 1.2;
+  const dims: number[] = [];
+  const close = out.indexOf(')');
+  if (out.startsWith('(') && close > 0) {
+    for (const part of out.slice(1, close).split(',')) {
+      const v = Number(part.trim());
+      if (!Number.isNaN(v)) dims.push(v);
+    }
+  }
+  const numel = dims.reduce((a, b) => a * b, 1);
+  if (!numel || !Number.isFinite(numel)) return 1.2;
+  return Math.min(2.8, 1.1 + Math.max(0, (Math.log10(numel) - 3.5) * 0.45));
+}
+
 export function ioLabel(n: GraphNode): string | null {
   if (n.io && n.io.in && n.io.in.length && n.io.out && n.io.out.length)
     return n.io.in[0].replace(/ \w+$/, '') + ' → ' + n.io.out[0].replace(/ \w+$/, '');
