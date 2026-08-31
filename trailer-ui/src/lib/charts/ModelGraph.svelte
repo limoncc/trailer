@@ -32,14 +32,15 @@
     const canvas = container?.querySelector('canvas');
     if (canvas) canvas.style.background = d ? '#1a1a2e' : '#fafafa';
     for (const ch of contentGroup.children) {
-      const t = ch.__t as string | undefined;
+      const t = ch.data?.mmRole as string | undefined;
       if (!t) continue;
-      const box = ch.__box ? layout.boxes[ch.__box] : null;
+      const boxId = ch.data?.mmBox as string | undefined;
+      const box = boxId ? layout.boxes[boxId] : null;
       const col = box ? colorsFor(box.node, box.depth) : null;
       if (t === 'box' || t === 'sign') {
         if (t === 'box' && box) {
           ch.fill = col!.fill;
-          if (selectedId && (ch.__id === selectedId || ancestorsOf(selectedId).includes(ch.__id))) continue; // highlight reapplies below
+          if (selectedId && (ch.data.mmId === selectedId || ancestorsOf(selectedId).includes(ch.data.mmId))) continue; // highlight reapplies below
           ch.stroke = col!.stroke;
         } else if (t === 'sign' && box) ch.fill = col!.stroke;
       } else if (t === 'label') ch.fill = col?.label ?? ch.fill;
@@ -52,16 +53,16 @@
       else if (t === 'routingLabelBox') { ch.fill = P.badgeBg; ch.stroke = P.badgeStroke; }
       else if (t === 'routingLabelText') ch.fill = P.badgeText;
       else if (t === 'pillBox' || t === 'pillText' || t === 'pillLine') {
-        const c = ch.__pill === 'in' ? P.ioPillInStroke : '#f59e0b';
-        const f = ch.__pill === 'in' ? P.ioPillInBg : P.ioPillOutBg;
+        const c = ch.data.mmPill === 'in' ? P.ioPillInStroke : '#f59e0b';
+        const f = ch.data.mmPill === 'in' ? P.ioPillInBg : P.ioPillOutBg;
         if (t === 'pillLine') ch.stroke = c;
         else if (t === 'pillText') ch.fill = c;
         else { ch.fill = f; ch.stroke = c; }
       } else if (t === 'edge') {
-        const st = edgeStyle(ch.__kind);
+        const st = edgeStyle(ch.data.mmKind);
         ch.stroke = st.color;
       } else if (t === 'edgeArrow') {
-        ch.fill = edgeStyle(ch.__kind).color;
+        ch.fill = edgeStyle(ch.data.mmKind).color;
       }
     }
     if (selectedId) highlight(selectedId);
@@ -304,7 +305,7 @@
     else if (dir === 'left') pts = [{ x, y }, { x: x + 9, y: y - 4.5 }, { x: x + 9, y: y + 4.5 }];
     else pts = [{ x, y }, { x: x - 9, y: y - 4.5 }, { x: x - 9, y: y + 4.5 }];
     let poly = new R.Polygon({ points: pts, fill: color });
-    if (kind) { poly.__t = 'edgeArrow'; poly.__kind = kind; }
+    if (kind) { poly.data.mmRole = 'edgeArrow'; poly.data.mmKind = kind; }
     contentGroup.add(poly);
   }
 
@@ -337,11 +338,13 @@
         cornerRadius: expanded ? 8 : 5,
       });
       contentGroup.add(rect);
-      rect.__id = id; rect.__t = 'box'; elements.push(rect);
+      rect.data.mmId = id; rect.data.mmRole = 'box'; elements.push(rect);
 
-      // tag every themed element so theme switches update attributes in place
-      // (leafer's part-render repaints only the changed regions)
-      const tag = (el: any, t: string) => { el.__t = t; el.__box = id; contentGroup.add(el); };
+      // tag every themed element via el.data — leafer reserves `__`-prefixed
+      // props for internals (a custom `__box` crashed its Text Layouter) — so
+      // theme switches update attributes in place (part-render repaints only
+      // the changed regions)
+      const tag = (el: any, t: string) => { el.data.mmRole = t; el.data.mmBox = id; contentGroup.add(el); };
 
       let name = displayName(n);
       if (expanded) {
@@ -384,17 +387,17 @@
       }
       let path = new R.Path({ path: route.path, stroke: st.color, strokeWidth: width, fill: null });
       if (st.dash) path.dashPattern = st.dash;
-      path.__t = 'edge'; path.__kind = route.kind;
+      path.data.mmRole = 'edge'; path.data.mmKind = route.kind;
       contentGroup.add(path);
       drawArrow(route.ex, route.ey, st.color, route.arrowDir, route.kind);
 
       if (route.kind === 'routing' && route.shape) {
         let lw = tw(route.shape, 8.5) + 10, lh = 14;
         let lblRect = new R.Rect({ x: route.mx - lw / 2, y: route.my - lh / 2, width: lw, height: lh, fill: P.badgeBg, stroke: st.color, strokeWidth: 0.8, cornerRadius: 7 });
-        lblRect.__t = 'routingLabelBox';
+        lblRect.data.mmRole = 'routingLabelBox';
         contentGroup.add(lblRect);
         let lblText = new R.Text({ x: route.mx, y: route.my - 4.5, text: route.shape, fill: P.badgeText, fontSize: 8.5, textAlign: 'center' });
-        lblText.__t = 'routingLabelText';
+        lblText.data.mmRole = 'routingLabelText';
         contentGroup.add(lblText);
       }
     }
@@ -409,13 +412,13 @@
         if (outText) drawIoPill('OUTPUT  ' + outText, rb.x + rb.w / 2, rb.y + rb.h + 30, '#f59e0b', '#fef3c7', 'out');
         if (inText) {
           let line = new R.Path({ path: 'M ' + (rb.x + rb.w / 2) + ' ' + (rb.y - 34) + ' L ' + (rb.x + rb.w / 2) + ' ' + (rb.y - 3), stroke: P.ioPillInStroke, strokeWidth: 1.7, fill: null });
-          line.__t = 'pillLine'; line.__pill = 'in';
+          line.data.mmRole = 'pillLine'; line.data.mmPill = 'in';
           contentGroup.add(line);
           drawArrow(rb.x + rb.w / 2, rb.y - 2, P.ioPillInStroke, 'down');
         }
         if (outText) {
           let line = new R.Path({ path: 'M ' + (rb.x + rb.w / 2) + ' ' + (rb.y + rb.h) + ' L ' + (rb.x + rb.w / 2) + ' ' + (rb.y + rb.h + 27), stroke: '#f59e0b', strokeWidth: 1.7, fill: null });
-          line.__t = 'pillLine'; line.__pill = 'out';
+          line.data.mmRole = 'pillLine'; line.data.mmPill = 'out';
           contentGroup.add(line);
           drawArrow(rb.x + rb.w / 2, rb.y + rb.h + 28, '#f59e0b', 'down');
         }
@@ -426,21 +429,21 @@
       const ioH = 30;
       let w = tw(text, 11, 600) + 34;
       let rect = new R.Rect({ x: cx - w / 2, y: top, width: w, height: ioH, fill, stroke, strokeWidth: 1.4, cornerRadius: ioH / 2 });
-      rect.__t = 'pillBox'; rect.__pill = pill;
+      rect.data.mmRole = 'pillBox'; rect.data.mmPill = pill;
       contentGroup.add(rect);
       let label = new R.Text({ x: cx, y: top + 8, text, fill: stroke, fontSize: 11, fontWeight: 600, textAlign: 'center' });
-      label.__t = 'pillText'; label.__pill = pill;
+      label.data.mmRole = 'pillText'; label.data.mmPill = pill;
       contentGroup.add(label);
     }
 
     // Interactions
     for (const el of elements) {
-      el.on(R.PointerEvent.TAP, () => { showDetail(el.__id); highlight(el.__id); });
+      el.on(R.PointerEvent.TAP, () => { showDetail(el.data.mmId); highlight(el.data.mmId); });
       el.on(R.PointerEvent.DOUBLE_TAP, () => {
-        let n = nodeById[el.__id];
+        let n = nodeById[el.data.mmId];
         if (!isContainer(n)) return;
-        if (collapsedSet.has(el.__id)) openContainer(el.__id);
-        else closeContainer(el.__id);
+        if (collapsedSet.has(el.data.mmId)) openContainer(el.data.mmId);
+        else closeContainer(el.data.mmId);
       });
     }
     if (selectedId) highlight(selectedId);
@@ -451,12 +454,13 @@
     if (!contentGroup || !layout) return;
     const ancSet = new Set(id ? ancestorsOf(id) : []);
     for (const ch of contentGroup.children) {
-      if (!ch.__id) continue;
-      let b = layout.boxes[ch.__id];
+      const cid = ch.data?.mmId;
+      if (!cid) continue;
+      let b = layout.boxes[cid];
       if (!b) continue;
       let col = colorsFor(b.node, b.depth);
-      if (ch.__id === id) { ch.stroke = '#c2622d'; ch.strokeWidth = 2.5; }
-      else if (ancSet.has(ch.__id)) { ch.stroke = '#c2622d'; ch.strokeWidth = 1.8; }
+      if (cid === id) { ch.stroke = '#c2622d'; ch.strokeWidth = 2.5; }
+      else if (ancSet.has(cid)) { ch.stroke = '#c2622d'; ch.strokeWidth = 1.8; }
       else { ch.stroke = col.stroke; ch.strokeWidth = b.depth === 0 ? 2 : 1.2; }
     }
   }
