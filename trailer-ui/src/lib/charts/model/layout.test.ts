@@ -148,6 +148,22 @@ describe('layoutGraph', () => {
     expect(r.boxes['root'].w).toBeGreaterThanOrEqual(stackNeed(tree));
     expect(r.boxes['root'].w).toBeLessThan(rowNeed(tree));
   });
+
+  // 容器标题的宽度钳制会把子容器撑到比 ELK 原始宽度更宽;父容器必须随之
+  // 加宽,否则子盒会穿出父盒右边框(用户导出的 SVG 实锤:attn 盒伸出 root)。
+  it('keeps an expanded child container fully inside its parent after header widening', async () => {
+    const inner = { ...container('root.block', [leaf('root.block.x'), leaf('root.block.y')]), class: 'MultiHeadAttention', params: { total: 66048, trainable: 66048, self: 0, fmt: '66.0K' } };
+    const spec = { meta: { name: 'm' }, tree: container('root', [inner]), edges: [] };
+    const r = await layoutGraph(spec as any, new Set(), { measure, elk });
+    const parent = r.boxes['root'];
+    const child = r.boxes['root.block'];
+    expect(parent).toBeTruthy();
+    expect(child).toBeTruthy();
+    // 子盒(被标题宽度撑宽后)必须完整落在父盒内,右侧留出 padding
+    expect(child.x + child.w + 18).toBeLessThanOrEqual(parent.x + parent.w);
+    // 标题钳制确实生效(否则该用例无意义)
+    expect(child.w).toBeGreaterThan(180);
+  });
 });
 
 describe('headerFitsRow', () => {
