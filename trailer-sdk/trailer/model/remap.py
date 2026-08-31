@@ -38,13 +38,22 @@ def remap_edges(tree: dict, edges: list[dict]) -> list[dict]:
                     break
         return nid
 
+    # dedup by endpoint pair; when a semantic edge collides with a weaker one
+    # (a traced tensor edge may share endpoints with an injected routing edge)
+    # the higher-priority kind wins instead of first-seen
+    pri = {"routing": 3, "residual": 2}
     seen: dict[tuple[str, str], dict] = {}
     for e in edges:
         s, t = resolve(e["source"]), resolve(e["target"])
         if s == t:
             continue
         key = (s, t)
-        if key in seen:
+        prev = seen.get(key)
+        if prev is not None:
+            if pri.get(e.get("kind"), 1) > pri.get(prev.get("kind"), 1):
+                prev["kind"] = e["kind"]
+                if e.get("shape"):
+                    prev["shape"] = e["shape"]
             continue
         ne = dict(e)
         crossed = (s != e["source"]) or (t != e["target"])

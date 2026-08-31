@@ -329,8 +329,9 @@
       }
     }
 
-    // Draw edges
-    for (const e of edgeList) {
+    // Draw edges — weaker kinds first so routing (highest priority) renders
+    // on top of order/residual lines sharing the same corridor
+    for (const e of [...edgeList].sort((a, b) => edgePri(a.kind) - edgePri(b.kind))) {
       let sb = boxes[e.s], tb = boxes[e.t];
       if (!sb || !tb) continue;
       let st = edgeStyle(e.kind);
@@ -428,7 +429,7 @@
     if (!n) return;
     selectedId = id;
 
-    let info: any = { name: n.name, id: n.id, class: n.class, params: n.params, repeat: n.repeat, io: n.io, io_hint: n.io_hint, attrs: n.attrs, children: n.children, param_breakdown: n.param_breakdown };
+    let info: any = { name: n.name, id: n.id, class: n.class, params: n.params, repeat: n.repeat, io: n.io, io_hint: n.io_hint, attrs: n.attrs, children: n.children, param_breakdown: n.param_breakdown, moe_routing: n.moe_routing };
     selectedInfo = info;
   }
 
@@ -553,6 +554,7 @@
         <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style="background:{f};border:1px solid {s}"></span>{l}</span>
       {/each}
       <span class="flex items-center gap-1"><span style="color:#f59e0b;">╮</span>Residual</span>
+      <span class="flex items-center gap-1"><span style="color:#d946ec;">╌╌</span>Routing</span>
     </div>
     <div class="flex items-center gap-3 font-mono text-[10px]"><span>Click → Select</span><span>·</span><span>Dbl-click → Collapse</span><span>·</span><span>Scroll · Drag</span></div>
   </div>
@@ -620,6 +622,12 @@
       <hr class="border-t border-border mx-4" />
       <div class="p-4 space-y-2 text-xs">
         <div class="flex justify-between"><span class="text-muted-foreground">Class</span><span class="font-mono">{selectedInfo.class}</span></div>
+        {#if selectedInfo.moe_routing}
+          <div class="flex justify-between gap-2">
+            <span class="text-muted-foreground shrink-0">MoE routing</span>
+            <span class="font-mono text-right text-violet-600 dark:text-violet-400">{selectedInfo.moe_routing.label} · {selectedInfo.moe_routing.router}</span>
+          </div>
+        {/if}
         {#if selectedInfo.params}
         <div class="flex justify-between">
           <span class="text-muted-foreground">Params</span>
