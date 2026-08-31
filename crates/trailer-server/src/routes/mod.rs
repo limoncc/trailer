@@ -225,6 +225,15 @@ pub fn router() -> Router<AppState> {
             "/api/v1/admin/users/{id}/password",
             axum::routing::put(admin_set_password),
         )
+        .route("/api/v1/version", axum::routing::get(get_version))
+}
+
+/// GET /api/v1/version — 服务端版本号。编译时注入(CARGO_PKG_*),与发布同步的唯一事实来源。
+pub async fn get_version() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "name": env!("CARGO_PKG_NAME"),
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
 }
 pub async fn ingest_metrics(
     State(state): State<AppState>,
@@ -2729,6 +2738,7 @@ mod tests {
             .route("/api/v1/tokens/{token}", delete(delete_token_handler))
             .route("/api/v1/auth/login", post(auth_login))
             .route("/api/v1/auth/register", post(auth_register))
+            .route("/api/v1/version", get(get_version))
             .with_state(state)
     }
 
@@ -3951,5 +3961,21 @@ mod tests {
             StatusCode::UNAUTHORIZED,
             "deleted token invalid"
         );
+    }
+
+    #[tokio::test]
+    async fn version_endpoint_reports_package_version() {
+        let app = test_app().await;
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/version")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "version endpoint is public");
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["name"], env!("CARGO_PKG_NAME"));
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
     }
 }

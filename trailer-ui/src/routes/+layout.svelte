@@ -7,6 +7,7 @@
   import { applyCustomTheme, loadCustomTheme, saveCustomTheme, loadThemeState, applyThemeState } from '$lib/theme-builder/color';
   import { FlaskConical, FileText, Microscope, Moon, Sun, Trash2, Zap, Leaf, BookOpen, Eclipse } from 'lucide-svelte';
   import { initAuthFetch } from '$lib/utils/authFetch';
+  import { fetchServerVersion, type ServerVersion } from '$lib/utils/version';
   import { createAuthReadyPromise, signalAuthReady, authReady } from '$lib/utils/auth';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { getProjects, getOwners, getUser, setProjects, setOwners, setUser } from '$lib/projectsStore.svelte';
@@ -110,11 +111,16 @@
     document.documentElement.classList.toggle('dark', stored === 'dark' || stored === 'cyber' || stored === 'midnight');
   });
 
-  onMount(() => { loadUserTheme(); });
+  onMount(() => {
+    loadUserTheme();
+    fetchServerVersion().then((v) => (appVersion = v));
+  });
   let sidebarWidth = $state(224);
   let dragging = $state(false);
   let confirmDelete = $state<string | null>(null);
   let deleteError = $state('');
+  let appVersion = $state<ServerVersion | null>(null);
+  let showVersionInfo = $state(false);
 
   /** 当前用户对该项目是否有管理权(admin 或项目 owner)。 */
   function canManage(project: string): boolean {
@@ -366,8 +372,12 @@
       </div>
 
       <!-- Copyright -->
-      <div class="border-t border-border px-2 py-2 text-center text-[10px] text-muted-foreground">
-        © {new Date().getFullYear()} Trailer · <a href="mailto:limoncc@icloud.com" class="underline hover:text-foreground">limoncc@icloud.com</a>
+      <div class="border-t border-border px-2 py-2 text-center text-[10px] text-muted-foreground flex flex-col gap-1">
+        <div>© {new Date().getFullYear()} Trailer · <a href="mailto:limoncc@icloud.com" class="underline hover:text-foreground">limoncc@icloud.com</a></div>
+        {#if appVersion}
+          <button onclick={() => showVersionInfo = true} title="About Trailer"
+            class="font-mono hover:text-foreground underline decoration-dotted underline-offset-2 cursor-pointer">v{appVersion.version}</button>
+        {/if}
       </div>
   </aside>
 
@@ -384,6 +394,20 @@
         <button onclick={() => confirmDelete = null} class="px-3 py-1 text-xs border border-border rounded-md">Cancel</button>
         <button onclick={deleteProject} disabled={!!deleteError}
           class="px-3 py-1 text-xs bg-destructive text-destructive-foreground rounded-md disabled:opacity-30">Delete</button>
+      </div>
+    </div>
+  {/if}
+
+  {#if showVersionInfo && appVersion}
+    <div class="fixed inset-0 bg-black/30 z-40" role="presentation" onclick={() => showVersionInfo = false} onkeydown={(e) => { if (e.key === 'Escape') showVersionInfo = false; }}></div>
+    <div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-card border border-border rounded-xl shadow-xl p-6 w-80">
+      <h3 class="text-sm font-semibold mb-3">About Trailer</h3>
+      <div class="space-y-1.5 text-xs">
+        <div class="flex justify-between"><span class="text-muted-foreground">Service</span><span class="font-mono">{appVersion.name}</span></div>
+        <div class="flex justify-between"><span class="text-muted-foreground">Version</span><span class="font-mono">v{appVersion.version}</span></div>
+      </div>
+      <div class="flex justify-end mt-4">
+        <button onclick={() => showVersionInfo = false} class="px-3 py-1 text-xs border border-border rounded-md">Close</button>
       </div>
     </div>
   {/if}
