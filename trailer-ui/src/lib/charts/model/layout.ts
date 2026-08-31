@@ -149,6 +149,12 @@ export function ioLabel(n: GraphNode): string | null {
   return null;
 }
 
+/** 展开容器标题「名称 + 副标」同行判定:12 左距 + 名称宽 + 10 间隔 + 副标宽
+ *  + 20 门限 ≤ 盒宽。放不下时绘制端把副标换到第二行(不撑宽盒子)。 */
+export function headerFitsRow(boxW: number, nameW: number, subW: number): boolean {
+  return 12 + nameW + 10 + subW + 20 <= boxW;
+}
+
 // --- tree helpers (node ids are dot paths) ---
 
 function parentId(id: string): string | null {
@@ -238,12 +244,14 @@ export function prepareEdges(
 
 // --- sizes ---
 
+/** 叶子绘制时每段文本各自居中/贴左占一行:左留 12、右留 w-(x+tw)≥12,
+ *  故宽度 = 最宽文本段 + 24 边距。各段取 max 而不是求和(它们是行,不是列) */
 function leafSize(n: GraphNode, m: Measurer): { w: number; h: number } {
-  const nameW = m(displayName(n), 13, 600) + 30;
-  const subW = m(subLabel(n), 10.5) + 30;
+  const nameW = m(displayName(n), 12) + 24;
+  const subW = m(subLabel(n), 10) + 24;
   const io = ioLabel(n);
-  const ioW = io ? m(io, 9.5) + 30 : 0;
-  const badgeW = n.badge ? m(n.badge, 9) + 16 : 0;
+  const ioW = io ? m(io, 9.5) + 24 : 0;
+  const badgeW = n.badge ? m(n.badge, 9) + 28 : 0;
   const w = Math.max(MIN_LEAF_W, nameW, subW, n.op ? 0 : ioW, badgeW);
   let h = io ? LEAF_H3 : LEAF_H;
   if (n.badge) h += 16;
@@ -251,17 +259,24 @@ function leafSize(n: GraphNode, m: Measurer): { w: number; h: number } {
   return { w, h };
 }
 
+/** 收起容器与展开盒子同规格:名称左对齐、副标第二行,段 + 左右边距 */
 function collapsedSize(n: GraphNode, m: Measurer): { w: number; h: number } {
-  const nameW = m(displayName(n), 12.5, 600) + 30;
-  const subW = m(subLabel(n), 10) + 30;
-  const badgeW = n.badge ? m(n.badge, 9) + 16 : 0;
+  const nameW = m(displayName(n), 12.5) + 24;
+  const subW = m(subLabel(n), 10) + 24;
+  const badgeW = n.badge ? m(n.badge, 9) + 28 : 0;
   return { w: Math.max(MIN_LEAF_W, nameW, subW, badgeW), h: COLLAPSED_H + 14 + (n.badge ? 16 : 0) };
+}
+
+/** 展开容器标题区所需宽度:名称与副标同行放不下时副标换到第二行(绘制端
+ *  条件换行),所以只需容纳较宽的一行,不按整行宽度撑盒——否则收起宽子
+ *  节点后盒子右侧留下大片空白 */
+function headerStackWidth(n: GraphNode, m: Measurer): number {
+  return Math.max(m(displayName(n), 13, 600), m(subLabel(n), 10.5)) + 46;
 }
 
 /** minimum compound size keeps the header row readable */
 function minSize(n: GraphNode, m: Measurer): string {
-  const headerW = m(displayName(n), 13, 600) + m(subLabel(n), 10.5) + 30 + 40;
-  return `(${Math.ceil(Math.max(headerW, MIN_LEAF_W + 40))}, 96)`;
+  return `(${Math.ceil(Math.max(headerStackWidth(n, m), MIN_LEAF_W + 40))}, 96)`;
 }
 
 // --- ELK plumbing ---
@@ -434,6 +449,15 @@ export async function layoutGraph(
   };
   for (const [id, { x, y, s }] of absMap) {
     boxes[id] = { id, x: x - offX, y: y - offY, w: s.width ?? 0, h: s.height ?? 0, node: nodeById[id], depth: depthOf(id) };
+  }
+
+  // ELK layered ignores elk.nodeSize.minimum for compound nodes, and the tree
+  // box is synthesised from the children's bounding box anyway — clamp every
+  // expanded container (root included) so the header fits at least in wrapped
+  // form; the drawing layer wraps the sub-label when the one-line row is wider
+  for (const b of Object.values(boxes)) {
+    if (!isExpanded(b.id, nodeById, collapsed)) continue;
+    b.w = Math.max(b.w, headerStackWidth(b.node, m));
   }
 
   // collect routed edges at every hierarchy level

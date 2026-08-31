@@ -60,7 +60,9 @@
     {/if}
 
     {#if selectedSpec}
-      <ModelGraph spec={selectedSpec} />
+      {#key selectedModelName}
+        <ModelGraph spec={selectedSpec} />
+      {/key}
     {:else}
       <p class="text-center text-muted-foreground py-4 text-sm">Invalid model spec</p>
     {/if}
