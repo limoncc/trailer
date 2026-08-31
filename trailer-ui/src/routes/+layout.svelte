@@ -7,7 +7,7 @@
   import { applyCustomTheme, loadCustomTheme, saveCustomTheme, loadThemeState, applyThemeState } from '$lib/theme-builder/color';
   import { FlaskConical, FileText, Microscope, Moon, Sun, Trash2, Zap, Leaf, BookOpen, Eclipse } from 'lucide-svelte';
   import { initAuthFetch } from '$lib/utils/authFetch';
-  import { fetchServerVersion, type ServerVersion } from '$lib/utils/version';
+  import { fetchServerVersion, UI_VERSION, type ServerVersion } from '$lib/utils/version';
   import { createAuthReadyPromise, signalAuthReady, authReady } from '$lib/utils/auth';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { getProjects, getOwners, getUser, setProjects, setOwners, setUser } from '$lib/projectsStore.svelte';
@@ -372,12 +372,12 @@
       </div>
 
       <!-- Copyright -->
-      <div class="border-t border-border px-2 py-2 text-center text-[10px] text-muted-foreground flex flex-col gap-1">
-        <div>© {new Date().getFullYear()} Trailer · <a href="mailto:limoncc@icloud.com" class="underline hover:text-foreground">limoncc@icloud.com</a></div>
+      <div class="border-t border-border px-2 py-2 text-center text-[10px] text-muted-foreground">
         {#if appVersion}
           <button onclick={() => showVersionInfo = true} title="About Trailer"
-            class="font-mono hover:text-foreground underline decoration-dotted underline-offset-2 cursor-pointer">v{appVersion.version}</button>
+            class="font-mono underline decoration-dotted underline-offset-2 hover:text-foreground cursor-pointer">v{appVersion.version}</button>{' '}
         {/if}
+        © {new Date().getFullYear()} Trailer · <a href="mailto:limoncc@icloud.com" class="underline hover:text-foreground">limoncc@icloud.com</a>
       </div>
   </aside>
 
@@ -404,7 +404,8 @@
       <h3 class="text-sm font-semibold mb-3">About Trailer</h3>
       <div class="space-y-1.5 text-xs">
         <div class="flex justify-between"><span class="text-muted-foreground">Service</span><span class="font-mono">{appVersion.name}</span></div>
-        <div class="flex justify-between"><span class="text-muted-foreground">Version</span><span class="font-mono">v{appVersion.version}</span></div>
+        <div class="flex justify-between"><span class="text-muted-foreground">Server</span><span class="font-mono">v{appVersion.version}</span></div>
+        <div class="flex justify-between"><span class="text-muted-foreground">UI</span><span class="font-mono">v{UI_VERSION}</span></div>
       </div>
       <div class="flex justify-end mt-4">
         <button onclick={() => showVersionInfo = false} class="px-3 py-1 text-xs border border-border rounded-md">Close</button>

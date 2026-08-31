@@ -38,3 +38,11 @@ describe('fetchServerVersion', () => {
     await expect(fetchServerVersion()).resolves.toBeNull();
   });
 });
+
+describe('UI_VERSION', () => {
+  it('注入自 package.json 版本,与发布同步', async () => {
+    const { UI_VERSION } = await import('./version');
+    const pkg = (await import('../../../package.json')) as { default: { version: string } };
+    expect(UI_VERSION).toBe(pkg.default.version);
+  });
+});
