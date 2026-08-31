@@ -3,7 +3,7 @@
   import Button from '$lib/components/ui/Button.svelte';
   import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, Network, Search, Download } from 'lucide-svelte';
   import { layoutGraph, displayName, subLabel, ioLabel, edgeWidth, type LayoutResult } from './model/layout';
-  import { canvasMeasure as tw } from './model/measure';
+  import { canvasMeasure as tw, FONT_STACK } from './model/measure';
   import { ancestorsOf, enforceBudget, computeFrame, easeOutCubic } from './model/interactions';
   import { colorFor as kindColor, guessKind, KIND_LEGEND } from './model/kinds';
   import { downloadSvg, downloadPng, downloadJson } from './model/export';
@@ -343,8 +343,9 @@
       // tag every themed element via el.data — leafer reserves `__`-prefixed
       // props for internals (a custom `__box` crashed its Text Layouter) — so
       // theme switches update attributes in place (part-render repaints only
-      // the changed regions)
-      const tag = (el: any, t: string) => { el.data.mmRole = t; el.data.mmBox = id; contentGroup.add(el); };
+      // the changed regions). fontFamily 与 canvasMeasure 保持同一字体栈,
+      // 避免测量/渲染宽度不一致导致文字溢出盒子
+      const tag = (el: any, t: string) => { el.data.mmRole = t; el.data.mmBox = id; el.fontFamily = FONT_STACK; contentGroup.add(el); };
 
       let name = displayName(n);
       if (expanded) {
@@ -396,7 +397,7 @@
         let lblRect = new R.Rect({ x: route.mx - lw / 2, y: route.my - lh / 2, width: lw, height: lh, fill: P.badgeBg, stroke: st.color, strokeWidth: 0.8, cornerRadius: 7 });
         lblRect.data.mmRole = 'routingLabelBox';
         contentGroup.add(lblRect);
-        let lblText = new R.Text({ x: route.mx, y: route.my - 4.5, text: route.shape, fill: P.badgeText, fontSize: 8.5, textAlign: 'center' });
+        let lblText = new R.Text({ x: route.mx, y: route.my - 4.5, text: route.shape, fill: P.badgeText, fontSize: 8.5, textAlign: 'center', fontFamily: FONT_STACK });
         lblText.data.mmRole = 'routingLabelText';
         contentGroup.add(lblText);
       }
@@ -431,7 +432,7 @@
       let rect = new R.Rect({ x: cx - w / 2, y: top, width: w, height: ioH, fill, stroke, strokeWidth: 1.4, cornerRadius: ioH / 2 });
       rect.data.mmRole = 'pillBox'; rect.data.mmPill = pill;
       contentGroup.add(rect);
-      let label = new R.Text({ x: cx, y: top + 8, text, fill: stroke, fontSize: 11, fontWeight: 600, textAlign: 'center' });
+      let label = new R.Text({ x: cx, y: top + 8, text, fill: stroke, fontSize: 11, fontWeight: 600, textAlign: 'center', fontFamily: FONT_STACK });
       label.data.mmRole = 'pillText'; label.data.mmPill = pill;
       contentGroup.add(label);
     }
@@ -660,7 +661,7 @@
 
     <!-- Detail panel -->
     <div class="shrink-0 border-l border-border overflow-y-auto bg-background" style="width:{sidebarWidth}px">
-      <Inspector spec={spec} selected={selectedInfo} onjump={reveal} />
+      <Inspector spec={spec} selected={selectedInfo} onjump={reveal} dark={darkMode} />
     </div>
   </div>
 </div>

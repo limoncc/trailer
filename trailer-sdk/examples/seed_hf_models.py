@@ -33,7 +33,7 @@ def find_deepseek_snapshot():
     return snaps[0] if snaps and os.path.exists(os.path.join(snaps[0], "config.json")) else None
 
 
-def extract(path, input_shape):
+def extract(path, input_shape, display_name=None):
     model, cfg = load_meta_model(path)
     # meta 权重默认 fp32,部分算子(如 _grouped_mm)要求 bf16——meta 上改 dtype 零成本
     import torch
@@ -43,11 +43,12 @@ def extract(path, input_shape):
             model.to(torch.bfloat16)
     except StopIteration:
         pass
+    name = display_name or os.path.basename(path.rstrip("/"))
     graph = build_model_graph(
-        model, name=os.path.basename(path.rstrip("/")),
+        model, name=name,
         input_shape=input_shape, trace=True,  # FakeTensor 符号追踪,零真实计算
         input_spec=hf_input_spec(cfg), output_spec=hf_output_spec(cfg),
-        extra_meta={"source": f"transformers config-only: {os.path.basename(path.rstrip('/'))}"},
+        extra_meta={"source": f"transformers config-only: {name}"},
     )
     annotate_layer_badges(graph, model, cfg)
     return graph, cfg
@@ -71,7 +72,7 @@ def main():
             print(f"跳过 {name}: 本地未找到")
             continue
         try:
-            graph, cfg = extract(resolved, shape)
+            graph, cfg = extract(resolved, shape, display_name=name)
         except Exception as exc:  # noqa: BLE001
             print(f"✗ {name}: {exc}")
             continue

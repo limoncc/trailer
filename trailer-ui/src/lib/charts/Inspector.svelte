@@ -1,6 +1,8 @@
 <script lang="ts">
   import { MousePointerClick } from 'lucide-svelte';
   import { displayName } from './model/layout';
+  import { colorFor, guessKind } from './model/kinds';
+  import { squarify } from './model/treemap';
   import {
     fmtInt,
     fmtPct,
@@ -15,8 +17,9 @@
     spec: { meta?: any; tree?: any; edges?: any[] };
     selected: any; // selectedInfo, or null → model summary
     onjump?: (id: string) => void;
+    dark?: boolean;
   }
-  let { spec, selected, onjump }: Props = $props();
+  let { spec, selected, onjump, dark = false }: Props = $props();
 
   const total = $derived(spec?.meta?.total_params ?? 0);
 
@@ -57,16 +60,57 @@
       .slice(0, 10);
   });
 
+  const childValue = (child: any) =>
+    (child.repeat ? child.repeat.group_params : child.params?.total) || 0;
+
   const childPct = (child: any, parentTotal: number) => {
     if (!parentTotal) return 0;
-    const v = (child.repeat ? child.repeat.group_params : child.params?.total) || 0;
-    return Math.round((v / parentTotal) * 1000) / 10;
+    return Math.round((childValue(child) / parentTotal) * 1000) / 10;
   };
+
+  /** parameters-by-child treemap(面积 ∝ 参数量,点击跳转) */
+  const TRE_W = 300;
+  const TRE_H = 150;
+  const treemapRects = $derived.by(() => {
+    const parent = selected ?? spec?.tree;
+    const parentTotal = parent?.params?.total || 0;
+    const items = topChildren.map((c) => ({ id: c.id, label: displayName(c), value: childValue(c) }));
+    const byId = new Map(topChildren.map((c) => [c.id, c]));
+    return squarify(items, TRE_W, TRE_H).map((r) => {
+      const node = byId.get(r.id);
+      return {
+        ...r,
+        node,
+        pct: node ? childPct(node, parentTotal) : 0,
+        fill: colorFor(node?.kind || guessKind(node ?? {}), dark).fill,
+      };
+    });
+  });
 
   function jump(id: string) {
     onjump?.(id);
   }
 </script>
+
+{#snippet paramTreemap(parentTotal)}
+  <div class="p-4">
+    <div class="text-xs font-semibold mb-2 text-foreground/80">Parameters by child</div>
+    <div class="relative w-full h-[150px] rounded-md overflow-hidden border border-border/60">
+      {#each treemapRects as r (r.id)}
+        <button
+          class="absolute overflow-hidden text-left border border-border/70 hover:border-violet-500 transition-colors group"
+          style="left:{(r.x / TRE_W) * 100}%; top:{(r.y / TRE_H) * 100}%; width:{(r.w / TRE_W) * 100}%; height:{(r.h / TRE_H) * 100}%; background:{r.fill}{dark ? 'cc' : 'aa'}"
+          title={`${r.node?.name} · ${fmtInt(childValue(r.node ?? { params: { total: 0 } }))} params · ${r.pct}%`}
+          onclick={() => jump(r.id)}
+        >
+          <span class="block text-[9px] leading-tight font-mono px-1 pt-0.5 truncate">{r.node?.name}{r.node?.repeat ? ` ×${r.node.repeat.count}` : ''}</span>
+          <span class="block text-[9px] leading-tight font-mono px-1 text-muted-foreground group-hover:text-violet-600 truncate">{r.node?.params?.fmt}</span>
+        </button>
+      {/each}
+    </div>
+    <p class="text-[10px] text-muted-foreground mt-1">parameters by child · click to select</p>
+  </div>
+{/snippet}
 
 {#if !selected}
   <!-- Model summary (nothing selected) -->
@@ -93,8 +137,8 @@
       </div>
     </div>
     {#if (spec?.tree?.children ?? []).length}
-      <hr class="border-t border-border mx-4" />
-      <div class="p-4">
+      {@render paramTreemap(spec.tree.params?.total)}
+      <div class="p-4 pt-0">
         <div class="text-xs font-semibold mb-2 text-foreground/80">Sub-module param share</div>
         <div class="space-y-2">
           {#each topChildren as child (child.id)}
@@ -234,8 +278,8 @@
   {/if}
 
   {#if (selected.children ?? []).length}
-    <hr class="border-t border-border mx-4" />
-    <div class="p-4">
+    {@render paramTreemap(selected.params?.total)}
+    <div class="p-4 pt-0">
       <div class="text-xs font-semibold mb-2 text-foreground/80">Sub-module param share</div>
       <div class="space-y-2">
         {#each topChildren as child (child.id)}
