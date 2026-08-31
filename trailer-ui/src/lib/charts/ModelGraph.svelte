@@ -87,9 +87,14 @@
     return () => observer.disconnect();
   });
 
+  // 以下图数据容器由 leafer 手动渲染,非响应式是刻意设计;不要改成 $state
+  // svelte-ignore non_reactive_update
   let graphData: any = null;
+  // svelte-ignore non_reactive_update
   let nodeById: Record<string, any> = {};
+  // svelte-ignore non_reactive_update
   let parentOf: Record<string, string> = {};
+  // svelte-ignore non_reactive_update
   let collapsedSet = new Set<string>();
   let layout: LayoutResult | null = null;
   let layoutGen = 0;
