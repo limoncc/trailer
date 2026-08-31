@@ -134,8 +134,8 @@ t.log_model(model, name="my-net-traced", step=step,
             input_shape=(1, 10), trace=True)            # one forward pass
 ```
 
-The Model tab renders the graph with an ELK layered layout (top levels read
-left-to-right, block internals stack top-to-bottom). What you get:
+The Model tab renders the graph with an ELK layered layout flowing **top-to-bottom**
+at every level. What you get:
 
 - **Module tree** with parameter counts, per-param dtype, and structural
   fingerprint folding — identical consecutive siblings collapse into one
@@ -148,9 +148,27 @@ left-to-right, block internals stack top-to-bottom). What you get:
   Σ combine node, and the shared-expert branch. Works for ModuleList expert
   pools and fused-experts weights (with or without a `num_experts` attr), in
   both static and traced mode.
-- **Trace mode** (`trace=True`) attaches real I/O shapes per module; edge
-  stroke width then scales with the flowing tensor size, and the inspector
-  shows dimension labels matched against module attrs (e.g. `512 in_features`).
+- **Trace mode** (`trace=True`) runs a **FakeTensorMode symbolic trace by
+  default** — the model's Python control flow executes but tensors are fake:
+  zero real compute, works on meta/config-only models without weights. You
+  still get real per-module I/O shapes (with batch/dtype), out-of-module
+  residual edges (`aten::add` discovered via dispatch tracing), and edge
+  stroke width scaled by tensor size. `meta.trace_mode` reads `"fake"`
+  (symbolic) or `"hooks"` (fell back to a real forward when the fake pass
+  fails, e.g. data-dependent control flow). The inspector shows dimension
+  labels matched against module attrs (e.g. `512 in_features`).
+
+Work with HuggingFace models directly — config-only meta loading, no weight
+download, no real forward (`examples/seed_hf_models.py`):
+
+```python
+from trailer.model.hf import load_meta_model
+from trailer.model import build_model_graph
+
+model, cfg = load_meta_model("Qwen/Qwen3.5-0.8B")   # meta device skeleton
+g = build_model_graph(model, name="Qwen3.5-0.8B",
+                      input_shape=(2, 128), trace=True)
+```
 
 Interactions: click to inspect, double-click to expand/collapse, `Expand` /
 `Collapse` / `Expand 1 level` bulk actions, `/` to search by path or class,
