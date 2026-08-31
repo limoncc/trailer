@@ -460,6 +460,24 @@ export async function layoutGraph(
     b.w = Math.max(b.w, headerStackWidth(b.node, m));
   }
 
+  // Containment: the header clamp above widens a container beyond the width
+  // ELK used when it sized the parent, so the child box would stick out of its
+  // parent's right border (e.g. an expanded attention block protruding from the
+  // root). Walk bottom-up and widen every expanded container to hold its
+  // children's final right edges + right padding.
+  const byDepth = Object.values(boxes)
+    .filter((b) => isExpanded(b.id, nodeById, collapsed))
+    .sort((a, b) => b.depth - a.depth);
+  for (const b of byDepth) {
+    let need = b.w;
+    for (const kid of b.node.children ?? []) {
+      const kb = boxes[kid.id];
+      if (!kb) continue;
+      need = Math.max(need, kb.x + kb.w - b.x + PAD_X);
+    }
+    if (need > b.w) b.w = need;
+  }
+
   // collect routed edges at every hierarchy level
   const routes: EdgeRoute[] = [];
   const routeEdges = (elkEdges: ElkShape['edges'], containerAbs: { x: number; y: number }) => {
