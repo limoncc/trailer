@@ -42,7 +42,7 @@
 <div class="absolute top-3 left-3 z-20 w-80 rounded-lg border border-border bg-background shadow-lg">
   <div class="flex items-center gap-2 px-3 py-2 border-b border-border">
     <Search class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-    <!-- svelte-ignore a11y_no_autofocus -->
+    <!-- svelte-ignore a11y_autofocus -->
     <input
       bind:this={inputEl}
       bind:value={query}
