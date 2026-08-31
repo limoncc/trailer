@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Button from '$lib/components/ui/Button.svelte';
-  import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, Network, Search } from 'lucide-svelte';
-  import { layoutGraph, displayName, subLabel, ioLabel, type LayoutResult } from './model/layout';
+  import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, Network, Search, Download } from 'lucide-svelte';
+  import { layoutGraph, displayName, subLabel, ioLabel, edgeWidth, type LayoutResult } from './model/layout';
   import { canvasMeasure as tw } from './model/measure';
   import { ancestorsOf, enforceBudget, computeFrame, easeOutCubic } from './model/interactions';
+  import { colorFor as kindColor, guessKind, KIND_LEGEND } from './model/kinds';
+  import { downloadSvg, downloadPng, downloadJson } from './model/export';
   import ModelNodeFinder from './ModelNodeFinder.svelte';
   import Inspector from './Inspector.svelte';
 
@@ -21,32 +23,63 @@
   let sidebarWidth = $state(380);
   let darkMode = $state(typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
 
-  // Watch dark mode — redraw the graph with the new palette when it changes
+  // Watch dark mode — update themed element attributes in place (leafer's
+  // part-render only repaints the changed regions — no scene rebuild)
+  function applyTheme(d: boolean) {
+    darkMode = d;
+    if (!contentGroup || !layout) return;
+    const P = PAL();
+    const canvas = container?.querySelector('canvas');
+    if (canvas) canvas.style.background = d ? '#1a1a2e' : '#fafafa';
+    for (const ch of contentGroup.children) {
+      const t = ch.__t as string | undefined;
+      if (!t) continue;
+      const box = ch.__box ? layout.boxes[ch.__box] : null;
+      const col = box ? colorsFor(box.node, box.depth) : null;
+      if (t === 'box' || t === 'sign') {
+        if (t === 'box' && box) {
+          ch.fill = col!.fill;
+          if (selectedId && (ch.__id === selectedId || ancestorsOf(selectedId).includes(ch.__id))) continue; // highlight reapplies below
+          ch.stroke = col!.stroke;
+        } else if (t === 'sign' && box) ch.fill = col!.stroke;
+      } else if (t === 'label') ch.fill = col?.label ?? ch.fill;
+      else if (t === 'sub') ch.fill = P.subText;
+      else if (t === 'io') ch.fill = P.ioText;
+      else if (t === 'opBox') { ch.fill = P.opBg; ch.stroke = P.opStroke; }
+      else if (t === 'opText') ch.fill = P.opText;
+      else if (t === 'badgeBox') { ch.fill = P.badgeBg; ch.stroke = P.badgeStroke; }
+      else if (t === 'badgeText') ch.fill = P.badgeText;
+      else if (t === 'routingLabelBox') { ch.fill = P.badgeBg; ch.stroke = P.badgeStroke; }
+      else if (t === 'routingLabelText') ch.fill = P.badgeText;
+      else if (t === 'pillBox' || t === 'pillText' || t === 'pillLine') {
+        const c = ch.__pill === 'in' ? P.ioPillInStroke : '#f59e0b';
+        const f = ch.__pill === 'in' ? P.ioPillInBg : P.ioPillOutBg;
+        if (t === 'pillLine') ch.stroke = c;
+        else if (t === 'pillText') ch.fill = c;
+        else { ch.fill = f; ch.stroke = c; }
+      } else if (t === 'edge') {
+        const st = edgeStyle(ch.__kind);
+        ch.stroke = st.color;
+      } else if (t === 'edgeArrow') {
+        ch.fill = edgeStyle(ch.__kind).color;
+      }
+    }
+    if (selectedId) highlight(selectedId);
+  }
+
   $effect(() => {
     const isDark = document.documentElement.classList.contains('dark');
     if (isDark === darkMode) return;
-    darkMode = isDark;
-    if (leafer && graphReady) {
-      const canvas = container?.querySelector('canvas');
-      if (canvas) canvas.style.background = isDark ? '#1a1a2e' : '#fafafa';
-      renderGraph(); // re-render all Leafer elements with new colors
-      if (selectedId) highlight(selectedId);
-      setTimeout(fitView, 30);
-    }
+    applyTheme(isDark);
+    setTimeout(fitView, 30);
   });
   // Track class changes on <html>
   $effect(() => {
     const observer = new MutationObserver(() => {
       const d = document.documentElement.classList.contains('dark');
       if (d !== darkMode) {
-        darkMode = d;
-        if (leafer && graphReady) {
-          const canvas = container?.querySelector('canvas');
-          if (canvas) canvas.style.background = d ? '#1a1a2e' : '#fafafa';
-          renderGraph();
-          if (selectedId) highlight(selectedId);
-          setTimeout(fitView, 30);
-        }
+        applyTheme(d);
+        setTimeout(fitView, 30);
       }
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
@@ -64,6 +97,7 @@
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let toastMsg = $state('');
   let finderOpen = $state(false);
+  let exportOpen = $state(false);
   let selectedId: string | null = $state(null);
   let selectedInfo: any = $state(null);
 
@@ -218,28 +252,18 @@
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // --- Colors (light/dark aware) ---
+  // --- Colors: one source is the SDK's node.kind (format v2); figures logged
+  // before kinds existed fall back to class-name guessing ---
   function colorsFor(n: any, depth: number) {
-    const isDark = darkMode;
-    const c = (n.class || '').toLowerCase(), name = (n.name || '').toLowerCase();
-    function pick(lFill: string, lStroke: string, lLabel: string, dFill: string, dStroke: string, dLabel: string) {
-      return isDark ? { fill: dFill, stroke: dStroke, label: dLabel } : { fill: lFill, stroke: lStroke, label: lLabel };
+    const kind: string = n.kind || guessKind(n);
+    const pal = kindColor(kind, darkMode);
+    if ((kind === 'container' || kind === 'module') && depth > 0) {
+      // nested containers keep the alternating near-white fills
+      return darkMode
+        ? { fill: depth % 2 === 1 ? '#1e293b' : '#0f172a', stroke: pal.stroke, label: pal.label }
+        : { fill: depth % 2 === 1 ? '#f8fafc' : '#ffffff', stroke: pal.stroke, label: pal.label };
     }
-    if (c.indexOf('embed') >= 0) return pick('#dbeafe', '#3b82f6', '#1e40af', '#1e3a5f', '#60a5fa', '#93c5fd');
-    if (c.indexOf('attention') >= 0 || c.indexOf('attn') >= 0 || name.indexOf('attn') >= 0) return pick('#f3e8ff', '#8b5cf6', '#5b21b6', '#3b1f6e', '#a78bfa', '#c4b5fd');
-    if (c.indexOf('norm') >= 0) return pick('#ccfbf1', '#14b8a6', '#0f766e', '#134e4a', '#2dd4bf', '#5eead4');
-    if (c.indexOf('conv') >= 0) return pick('#dcfce7', '#22c55e', '#166534', '#14532d', '#4ade80', '#86efac');
-    if (name.indexOf('head') >= 0 || name === 'classifier' || name === 'fc') return pick('#fef3c7', '#f59e0b', '#92400e', '#78350f', '#fbbf24', '#fcd34d');
-    if (c.indexOf('mlp') >= 0 || c.indexOf('feedforward') >= 0 || c === 'linear' || name.indexOf('mlp') >= 0) return pick('#fce7f3', '#ec4899', '#9d174d', '#831843', '#f472b6', '#f9a8d4');
-    if (c.indexOf('gelu') >= 0 || c.indexOf('relu') >= 0 || c.indexOf('silu') >= 0 || c.indexOf('swiglu') >= 0 || c.indexOf('act') >= 0 ||
-        c.indexOf('dropout') >= 0 || c.indexOf('pool') >= 0 || c.indexOf('identity') >= 0 || c.indexOf('flatten') >= 0)
-      return pick('#f1f5f9', '#94a3b8', '#64748b', '#1e293b', '#64748b', '#94a3b8');
-    if (isContainer(n)) {
-      if (depth === 0) return pick('#ffffff', '#cbd5e1', '#475569', '#0f172a', '#334155', '#94a3b8');
-      return pick(depth % 2 === 1 ? '#f8fafc' : '#ffffff', '#94a3b8', '#475569',
-                  depth % 2 === 1 ? '#1e293b' : '#0f172a', '#475569', '#94a3b8');
-    }
-    return pick('#ffffff', '#cbd5e1', '#64748b', '#0f172a', '#334155', '#94a3b8');
+    return { fill: pal.fill, stroke: pal.stroke, label: pal.label };
   }
 
   // --- Theme palette ---
@@ -271,7 +295,7 @@
   }
 
   // --- Rendering (consumes layout geometry; leafer only draws) ---
-  function drawArrow(x: number, y: number, color: string, dir: string) {
+  function drawArrow(x: number, y: number, color: string, dir: string, kind?: string) {
     if (!contentGroup || !leafer) return;
     const R = getLeaferUI();
     let pts: Array<{ x: number; y: number }>;
@@ -279,7 +303,9 @@
     else if (dir === 'up') pts = [{ x, y }, { x: x - 4.5, y: y + 9 }, { x: x + 4.5, y: y + 9 }];
     else if (dir === 'left') pts = [{ x, y }, { x: x + 9, y: y - 4.5 }, { x: x + 9, y: y + 4.5 }];
     else pts = [{ x, y }, { x: x - 9, y: y - 4.5 }, { x: x - 9, y: y + 4.5 }];
-    contentGroup.add(new R.Polygon({ points: pts, fill: color }));
+    let poly = new R.Polygon({ points: pts, fill: color });
+    if (kind) { poly.__t = 'edgeArrow'; poly.__kind = kind; }
+    contentGroup.add(poly);
   }
 
   function getLeaferUI() {
@@ -311,51 +337,65 @@
         cornerRadius: expanded ? 8 : 5,
       });
       contentGroup.add(rect);
-      rect.__id = id; elements.push(rect);
+      rect.__id = id; rect.__t = 'box'; elements.push(rect);
+
+      // tag every themed element so theme switches update attributes in place
+      // (leafer's part-render repaints only the changed regions)
+      const tag = (el: any, t: string) => { el.__t = t; el.__box = id; contentGroup.add(el); };
 
       let name = displayName(n);
       if (expanded) {
-        contentGroup.add(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 13, fontWeight: 600 }));
-        contentGroup.add(new R.Text({ x: b.x + 12 + tw(name, 13, 600) + 10, y: b.y + 9, text: subLabel(n), fill: P.subText, fontSize: 10.5 }));
-        contentGroup.add(new R.Text({ x: b.x + b.w - 22, y: b.y + 7, text: '−', fill: col.stroke, fontSize: 14, fontWeight: 600 }));
+        tag(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 13, fontWeight: 600 }), 'label');
+        tag(new R.Text({ x: b.x + 12 + tw(name, 13, 600) + 10, y: b.y + 9, text: subLabel(n), fill: P.subText, fontSize: 10.5 }), 'sub');
+        tag(new R.Text({ x: b.x + b.w - 22, y: b.y + 7, text: '−', fill: col.stroke, fontSize: 14, fontWeight: 600 }), 'sign');
       } else if (isContainer(n)) {
-        contentGroup.add(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 12.5, fontWeight: 600 }));
-        contentGroup.add(new R.Text({ x: b.x + 12, y: b.y + 26, text: subLabel(n), fill: P.subText, fontSize: 10 }));
-        contentGroup.add(new R.Text({ x: b.x + b.w - 22, y: b.y + 7, text: '+', fill: col.stroke, fontSize: 14, fontWeight: 600 }));
+        tag(new R.Text({ x: b.x + 12, y: b.y + 7, text: name, fill: col.label, fontSize: 12.5, fontWeight: 600 }), 'label');
+        tag(new R.Text({ x: b.x + 12, y: b.y + 26, text: subLabel(n), fill: P.subText, fontSize: 10 }), 'sub');
+        tag(new R.Text({ x: b.x + b.w - 22, y: b.y + 7, text: '+', fill: col.stroke, fontSize: 14, fontWeight: 600 }), 'sign');
       } else {
         let io = ioLabel(n);
         if (n.op) {
           let cr = 13, ccx = b.x + b.w / 2, ccy = b.y + b.h / 2 + 2;
-          contentGroup.add(new R.Rect({ x: ccx - cr, y: ccy - cr, width: cr * 2, height: cr * 2, cornerRadius: cr, fill: P.opBg, stroke: P.opStroke, strokeWidth: 1.4 }));
-          contentGroup.add(new R.Text({ x: ccx, y: ccy - 9, text: n.op, fill: P.opText, fontSize: 17, fontWeight: 700, textAlign: 'center' }));
-          contentGroup.add(new R.Text({ x: b.x + b.w / 2, y: b.y + b.h - 6, text: name, fill: col.label, fontSize: 11.5, fontWeight: 600, textAlign: 'center' }));
+          tag(new R.Rect({ x: ccx - cr, y: ccy - cr, width: cr * 2, height: cr * 2, cornerRadius: cr, fill: P.opBg, stroke: P.opStroke, strokeWidth: 1.4 }), 'opBox');
+          tag(new R.Text({ x: ccx, y: ccy - 9, text: n.op, fill: P.opText, fontSize: 17, fontWeight: 700, textAlign: 'center' }), 'opText');
+          tag(new R.Text({ x: b.x + b.w / 2, y: b.y + b.h - 6, text: name, fill: col.label, fontSize: 11.5, fontWeight: 600, textAlign: 'center' }), 'label');
         } else {
-          contentGroup.add(new R.Text({ x: b.x + b.w / 2, y: b.y + 8, text: name, fill: col.label, fontSize: 12, fontWeight: 600, textAlign: 'center' }));
-          contentGroup.add(new R.Text({ x: b.x + b.w / 2, y: b.y + 25, text: subLabel(n), fill: P.subText, fontSize: 10, textAlign: 'center' }));
-          if (io) contentGroup.add(new R.Text({ x: b.x + b.w / 2, y: b.y + 40, text: io, fill: P.ioText, fontSize: 9.5, textAlign: 'center' }));
+          tag(new R.Text({ x: b.x + b.w / 2, y: b.y + 8, text: name, fill: col.label, fontSize: 12, fontWeight: 600, textAlign: 'center' }), 'label');
+          tag(new R.Text({ x: b.x + b.w / 2, y: b.y + 25, text: subLabel(n), fill: P.subText, fontSize: 10, textAlign: 'center' }), 'sub');
+          if (io) tag(new R.Text({ x: b.x + b.w / 2, y: b.y + 40, text: io, fill: P.ioText, fontSize: 9.5, textAlign: 'center' }), 'io');
         }
         if (n.badge) {
           let bw = tw(n.badge, 9) + 12, bh = 14;
           let bx = b.x + b.w / 2 - bw / 2, by = b.y + b.h - (n.op ? 6 : 15);
           if (n.op) by = b.y + 3;
-          contentGroup.add(new R.Rect({ x: bx, y: by, width: bw, height: bh, fill: P.badgeBg, stroke: P.badgeStroke, strokeWidth: 1, cornerRadius: 7 }));
-          contentGroup.add(new R.Text({ x: bx + bw / 2, y: by + 3, text: n.badge, fill: P.badgeText, fontSize: 9, textAlign: 'center' }));
+          tag(new R.Rect({ x: bx, y: by, width: bw, height: bh, fill: P.badgeBg, stroke: P.badgeStroke, strokeWidth: 1, cornerRadius: 7 }), 'badgeBox');
+          tag(new R.Text({ x: bx + bw / 2, y: by + 3, text: n.badge, fill: P.badgeText, fontSize: 9, textAlign: 'center' }), 'badgeText');
         }
       }
     }
 
-    // Edges — geometry comes straight from the ELK layout
+    // Edges — geometry comes straight from the ELK layout; main-flow edges
+    // widen logarithmically with the traced tensor size
     for (const route of layout.routes) {
       let st = edgeStyle(route.kind);
-      let path = new R.Path({ path: route.path, stroke: st.color, strokeWidth: st.width, fill: null });
+      let width = st.width;
+      if (route.kind === 'tensor' || route.kind === 'loop' || route.kind === 'order' || route.kind === 'seq') {
+        width = Math.max(st.width, edgeWidth(layout.boxes[route.source]?.node));
+      }
+      let path = new R.Path({ path: route.path, stroke: st.color, strokeWidth: width, fill: null });
       if (st.dash) path.dashPattern = st.dash;
+      path.__t = 'edge'; path.__kind = route.kind;
       contentGroup.add(path);
-      drawArrow(route.ex, route.ey, st.color, route.arrowDir);
+      drawArrow(route.ex, route.ey, st.color, route.arrowDir, route.kind);
 
       if (route.kind === 'routing' && route.shape) {
         let lw = tw(route.shape, 8.5) + 10, lh = 14;
-        contentGroup.add(new R.Rect({ x: route.mx - lw / 2, y: route.my - lh / 2, width: lw, height: lh, fill: P.badgeBg, stroke: st.color, strokeWidth: 0.8, cornerRadius: 7 }));
-        contentGroup.add(new R.Text({ x: route.mx, y: route.my - 4.5, text: route.shape, fill: P.badgeText, fontSize: 8.5, textAlign: 'center' }));
+        let lblRect = new R.Rect({ x: route.mx - lw / 2, y: route.my - lh / 2, width: lw, height: lh, fill: P.badgeBg, stroke: st.color, strokeWidth: 0.8, cornerRadius: 7 });
+        lblRect.__t = 'routingLabelBox';
+        contentGroup.add(lblRect);
+        let lblText = new R.Text({ x: route.mx, y: route.my - 4.5, text: route.shape, fill: P.badgeText, fontSize: 8.5, textAlign: 'center' });
+        lblText.__t = 'routingLabelText';
+        contentGroup.add(lblText);
       }
     }
 
@@ -365,24 +405,32 @@
       if (rb) {
         let inText = graphData.meta.input_spec || (graphData.tree.io ? graphData.tree.io.in.join('  ') : null);
         let outText = graphData.meta.output_spec || (graphData.tree.io ? graphData.tree.io.out.join('  ') : null);
-        if (inText) drawIoPill('INPUT  ' + inText, rb.x + rb.w / 2, rb.y - 64, P.ioPillInStroke, P.ioPillInBg);
-        if (outText) drawIoPill('OUTPUT  ' + outText, rb.x + rb.w / 2, rb.y + rb.h + 30, '#f59e0b', '#fef3c7');
+        if (inText) drawIoPill('INPUT  ' + inText, rb.x + rb.w / 2, rb.y - 64, P.ioPillInStroke, P.ioPillInBg, 'in');
+        if (outText) drawIoPill('OUTPUT  ' + outText, rb.x + rb.w / 2, rb.y + rb.h + 30, '#f59e0b', '#fef3c7', 'out');
         if (inText) {
-          contentGroup.add(new R.Path({ path: 'M ' + (rb.x + rb.w / 2) + ' ' + (rb.y - 34) + ' L ' + (rb.x + rb.w / 2) + ' ' + (rb.y - 3), stroke: P.ioPillInStroke, strokeWidth: 1.7, fill: null }));
+          let line = new R.Path({ path: 'M ' + (rb.x + rb.w / 2) + ' ' + (rb.y - 34) + ' L ' + (rb.x + rb.w / 2) + ' ' + (rb.y - 3), stroke: P.ioPillInStroke, strokeWidth: 1.7, fill: null });
+          line.__t = 'pillLine'; line.__pill = 'in';
+          contentGroup.add(line);
           drawArrow(rb.x + rb.w / 2, rb.y - 2, P.ioPillInStroke, 'down');
         }
         if (outText) {
-          contentGroup.add(new R.Path({ path: 'M ' + (rb.x + rb.w / 2) + ' ' + (rb.y + rb.h) + ' L ' + (rb.x + rb.w / 2) + ' ' + (rb.y + rb.h + 27), stroke: '#f59e0b', strokeWidth: 1.7, fill: null }));
+          let line = new R.Path({ path: 'M ' + (rb.x + rb.w / 2) + ' ' + (rb.y + rb.h) + ' L ' + (rb.x + rb.w / 2) + ' ' + (rb.y + rb.h + 27), stroke: '#f59e0b', strokeWidth: 1.7, fill: null });
+          line.__t = 'pillLine'; line.__pill = 'out';
+          contentGroup.add(line);
           drawArrow(rb.x + rb.w / 2, rb.y + rb.h + 28, '#f59e0b', 'down');
         }
       }
     }
 
-    function drawIoPill(text: string, cx: number, top: number, stroke: string, fill: string) {
+    function drawIoPill(text: string, cx: number, top: number, stroke: string, fill: string, pill: 'in' | 'out') {
       const ioH = 30;
       let w = tw(text, 11, 600) + 34;
-      contentGroup.add(new R.Rect({ x: cx - w / 2, y: top, width: w, height: ioH, fill, stroke, strokeWidth: 1.4, cornerRadius: ioH / 2 }));
-      contentGroup.add(new R.Text({ x: cx, y: top + 8, text, fill: stroke, fontSize: 11, fontWeight: 600, textAlign: 'center' }));
+      let rect = new R.Rect({ x: cx - w / 2, y: top, width: w, height: ioH, fill, stroke, strokeWidth: 1.4, cornerRadius: ioH / 2 });
+      rect.__t = 'pillBox'; rect.__pill = pill;
+      contentGroup.add(rect);
+      let label = new R.Text({ x: cx, y: top + 8, text, fill: stroke, fontSize: 11, fontWeight: 600, textAlign: 'center' });
+      label.__t = 'pillText'; label.__pill = pill;
+      contentGroup.add(label);
     }
 
     // Interactions
@@ -525,6 +573,16 @@
     </div>
     <div class="flex-1"></div>
     <Button variant="outline" size="sm" onclick={() => (finderOpen = true)}><Search class="w-3.5 h-3.5" />Search</Button>
+    <div class="relative">
+      <Button variant="outline" size="sm" onclick={() => (exportOpen = !exportOpen)}><Download class="w-3.5 h-3.5" />Export</Button>
+      {#if exportOpen}
+        <div class="absolute right-0 top-full mt-1 z-30 w-36 rounded-md border border-border bg-background shadow-lg py-1 text-xs">
+          <button class="w-full text-left px-3 py-1.5 hover:bg-muted/60" onclick={() => { exportOpen = false; if (layout) downloadSvg(layout, spec, darkMode); }}>SVG</button>
+          <button class="w-full text-left px-3 py-1.5 hover:bg-muted/60" onclick={() => { exportOpen = false; if (layout) downloadPng(layout, spec, darkMode); }}>PNG (2×)</button>
+          <button class="w-full text-left px-3 py-1.5 hover:bg-muted/60" onclick={() => { exportOpen = false; downloadJson(spec); }}>JSON</button>
+        </div>
+      {/if}
+    </div>
     <Button variant="outline" size="sm" onclick={expandAll}><ChevronsDownUp class="w-3.5 h-3.5" />Expand</Button>
     <Button variant="outline" size="sm" onclick={collapseAll}><ChevronsUpDown class="w-3.5 h-3.5" />Collapse</Button>
     <Button variant="outline" size="sm" onclick={expandOneLevel}><ChevronDown class="w-3.5 h-3.5" />Expand 1 level</Button>
@@ -535,8 +593,9 @@
   {#if graphReady}
   <div class="flex items-center justify-between px-4 py-1.5 text-[11px] text-muted-foreground bg-muted/10 border-b border-border">
     <div class="flex items-center gap-3 flex-wrap">
-      {#each [['#dbeafe','#3b82f6','Embed'],['#f3e8ff','#8b5cf6','Attn'],['#fce7f3','#ec4899','MLP'],['#ccfbf1','#14b8a6','Norm'],['#dcfce7','#22c55e','Conv'],['#fef3c7','#f59e0b','Head']] as [f,s,l]}
-        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style="background:{f};border:1px solid {s}"></span>{l}</span>
+      {#each KIND_LEGEND as e}
+        {@const pal = kindColor(e.kind, darkMode)}
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style="background:{pal.fill};border:1px solid {pal.stroke}"></span>{e.label}</span>
       {/each}
       <span class="flex items-center gap-1"><span style="color:#f59e0b;">╮</span>Residual</span>
       <span class="flex items-center gap-1"><span style="color:#d946ec;">╌╌</span>Routing</span>

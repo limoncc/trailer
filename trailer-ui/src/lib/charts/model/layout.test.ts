@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import ELK from 'elkjs/lib/elk.bundled.js';
-import { layoutGraph, prepareEdges } from './layout';
+import { layoutGraph, prepareEdges, edgeWidth } from './layout';
 import type { GraphNode, Measurer } from './layout';
 
 /** Deterministic fake measurer: width tracks char count × size. */
@@ -159,6 +159,21 @@ describe('prepareEdges', () => {
     expect(keys).toContain('root.b|root.c');
     // explicit routing edge wins the shared pair
     expect(out.find((e) => pair(e) === 'root.b|root.c')!.kind).toBe('routing');
+  });
+});
+
+describe('edgeWidth', () => {
+  it('defaults to the base width without traced output', () => {
+    expect(edgeWidth(undefined)).toBe(1.2);
+    expect(edgeWidth({ id: 'x', name: 'x' })).toBe(1.2);
+  });
+  it('grows logarithmically with tensor size and caps at 2.8', () => {
+    expect(edgeWidth({ id: 'x', name: 'x', io: { out: ['(2, 8) float32'], in: [] } })).toBeCloseTo(1.1, 5);
+    const w16k = edgeWidth({ id: 'x', name: 'x', io: { out: ['(4, 4096) float32'], in: [] } });
+    expect(w16k).toBeGreaterThan(1.2);
+    expect(w16k).toBeLessThan(2.8);
+    const huge = edgeWidth({ id: 'x', name: 'x', io: { out: ['(4096, 4096) float32'], in: [] } });
+    expect(huge).toBeCloseTo(2.8, 1);
   });
 });
 
