@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import ELK from 'elkjs/lib/elk.bundled.js';
-import { layoutGraph, prepareEdges, edgeWidth } from './layout';
+import { layoutGraph, prepareEdges, edgeWidth, displayName, subLabel, headerFitsRow } from './layout';
 import type { GraphNode, Measurer } from './layout';
 
 /** Deterministic fake measurer: width tracks char count × size. */
@@ -114,6 +114,56 @@ describe('layoutGraph', () => {
     const spec = { meta: { name: 'm' }, tree: container('root', [wide]), edges: [] };
     const r = await layoutGraph(spec as any, new Set(), { measure, elk });
     expect(r.boxes['root.a'].w).toBeGreaterThan(300);
+  });
+
+  // 展开容器标题行是「名称 + 副标(class · 参数量)同行并排」;放不下时绘制端
+  // 把副标换到第二行。所以布局只需保证盒子 ≥ 两者各自宽度较大者(+边距),
+  // 不能撑到整行宽度——否则收起宽子节点后盒子右侧出现大片空白。
+  const stackNeed = (n: GraphNode) =>
+    Math.max(measure(displayName(n), 13, 600), measure(subLabel(n), 10.5)) + 40;
+  const rowNeed = (n: GraphNode) =>
+    12 + measure(displayName(n), 13, 600) + 10 + measure(subLabel(n), 10.5) + 22;
+
+  it('keeps an expanded container as wide as its header stack, not the full row', async () => {
+    const inner = {
+      ...container('root.block', [leaf('root.block.x'), leaf('root.block.y')]),
+      class: 'Qwen3_5ForConditionalGeneration',
+      params: { total: 860e6, trainable: 860e6, self: 0, fmt: '860.00M' },
+    };
+    const spec = { meta: { name: 'm' }, tree: container('root', [inner]), edges: [] };
+    const r = await layoutGraph(spec as any, new Set(), { measure, elk });
+    expect(r.boxes['root.block'].w).toBeGreaterThanOrEqual(stackNeed(inner));
+    // 副标远比子节点宽时也不许撑到整行宽度(换行兜底,避免大量空白)
+    expect(r.boxes['root.block'].w).toBeLessThan(rowNeed(inner));
+  });
+
+  it('keeps the root box as wide as its header stack, not the full row', async () => {
+    const tree = {
+      ...container('root', [leaf('root.a'), leaf('root.b')]),
+      class: 'Qwen3_5ForConditionalGeneration',
+      params: { total: 860e6, trainable: 860e6, self: 0, fmt: '860.00M' },
+    };
+    const spec = { meta: { name: 'm' }, tree, edges: [] };
+    const r = await layoutGraph(spec as any, new Set(), { measure, elk });
+    expect(r.boxes['root'].w).toBeGreaterThanOrEqual(stackNeed(tree));
+    expect(r.boxes['root'].w).toBeLessThan(rowNeed(tree));
+  });
+});
+
+describe('headerFitsRow', () => {
+  it('allows the one-line header when name + sub + margins fit the box', () => {
+    // 12 左距 + 40 名称 + 10 间隔 + 160 副标 + 20 门限 = 242 ≤ 300
+    expect(headerFitsRow(300, 40, 160)).toBe(true);
+  });
+
+  it('rejects the one-line header when the row overflows the box', () => {
+    expect(headerFitsRow(200, 40, 160)).toBe(false);
+  });
+
+  it('keeps a right margin so the text never kisses the border', () => {
+    // 临界 242:少 1px 就应换行,给右侧留 20px 余量
+    expect(headerFitsRow(241, 40, 160)).toBe(false);
+    expect(headerFitsRow(242, 40, 160)).toBe(true);
   });
 });
 
