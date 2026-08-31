@@ -33,13 +33,13 @@ class Tiny(nn.Module):
 def test_trace_embedding_first_model():
     m = EmbedFirst().eval()
     g = build_model_graph(m, name="m", input_shape=(2, 16), trace=True)
-    assert g["meta"]["trace_mode"] == "hooks"
+    assert g["meta"]["trace_mode"] == "fake"  # fake Long 输入即可,无需真实 forward
     assert g["edges"]
 
 
 def test_trace_follows_model_dtype():
     m = Tiny().half().eval()
     g = build_model_graph(m, name="m", input_shape=(2, 8), trace=True)
-    assert g["meta"]["trace_mode"] == "hooks"
+    assert g["meta"]["trace_mode"] == "fake"  # fake 路径同样按模型 dtype 合成输入
     gate = g["tree"]["children"][0]
     assert gate.get("dtype") == "float16"

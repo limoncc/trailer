@@ -29,12 +29,12 @@ describe('layoutGraph', () => {
     const r = await layoutGraph(spec as any, new Set(), { measure, elk });
     const a = r.boxes['root.a'], b = r.boxes['root.b'], c = r.boxes['root.c'];
     expect(a && b && c).toBeTruthy();
-    // top level flows left-to-right
-    expect(b.x).toBeGreaterThan(a.x);
-    expect(c.x).toBeGreaterThan(b.x);
-    // no overlap
-    expect(b.x).toBeGreaterThanOrEqual(a.x + a.w);
-    expect(c.x).toBeGreaterThanOrEqual(b.x + b.w);
+    // 全纵向:自上而下排列
+    expect(b.y).toBeGreaterThan(a.y);
+    expect(c.y).toBeGreaterThan(b.y);
+    // 无重叠
+    expect(b.y).toBeGreaterThanOrEqual(a.y + a.h);
+    expect(c.y).toBeGreaterThanOrEqual(b.y + b.h);
   });
 
   it('draws collapsed containers as fixed boxes and hides their children', async () => {
