@@ -17,6 +17,33 @@ from .hooks import attach_io, trace_edges
 from .remap import remap_edges
 
 
+def _trace(model, input_shape):
+    """Run one traced forward, synthesizing an input the model can consume.
+
+    First tries randn in the model's own dtype (float models); on failure
+    falls back to zero Long indices for embedding-first models, where a float
+    input raises a scalar-type error. Returns (edges, io_map) or raises.
+    """
+    import torch
+
+    try:
+        dtype = next(model.parameters()).dtype
+    except StopIteration:
+        dtype = torch.float32
+    last: Optional[Exception] = None
+    for make in (
+        lambda: torch.randn(*input_shape, dtype=dtype),
+        lambda: torch.zeros(*input_shape, dtype=torch.long),
+    ):
+        try:
+            return trace_edges(model, make())
+        except RuntimeError as exc:  # dtype / scalar-type mismatches
+            last = exc
+    raise RuntimeError(
+        f"could not synthesize a trace input for shape {input_shape}: {last}"
+    )
+
+
 def build_model_graph(
     model,
     name: str = "model",
@@ -33,10 +60,7 @@ def build_model_graph(
     remapped onto the repeat-merged tree.
     """
     if trace:
-        import torch
-
-        x = torch.randn(*input_shape)
-        edges, io_map = trace_edges(model, x)
+        edges, io_map = _trace(model, input_shape)
         graph = extract_graph(
             model, name=name, merge_repeats=merge_repeats,
             edges=edges, input_spec=f"{input_shape}",
