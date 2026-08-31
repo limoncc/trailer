@@ -104,9 +104,9 @@ const BASE_OPTS: Record<string, string> = {
   'elk.spacing.nodeNode': '24',
 };
 
-/** Top levels read left-to-right; block internals stack top-to-bottom. */
-function dirFor(depth: number): 'RIGHT' | 'DOWN' {
-  return depth <= 2 ? 'RIGHT' : 'DOWN';
+/** Layout flows top-to-bottom at every level (portrait, classic trailer look). */
+function dirFor(_depth: number): 'DOWN' {
+  return 'DOWN';
 }
 
 // --- display helpers (shared with the drawing component) ---

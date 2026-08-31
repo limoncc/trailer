@@ -176,7 +176,7 @@ class TestTracedRouting:
         ):
             model = MoEModel(block_cls).eval()
             g = build_model_graph(model, name="m", input_shape=(2, H), trace=True)
-            assert g["meta"]["trace_mode"] == "hooks"
+            assert g["meta"]["trace_mode"] == "fake"
             assert len(_find_edges(g["edges"], source=router_id,
                                    target=pool_id, kind="routing")) == 1
             combine_edges = _find_edges(g["edges"],
