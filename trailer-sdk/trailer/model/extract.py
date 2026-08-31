@@ -80,25 +80,52 @@ def _detect_moe_experts(module: nn.Module) -> int:
     an nn.ModuleList. We expand them into virtual `expert xN` leaves so the
     structure is readable and param accounting stays correct.
 
-    We only match genuine fused-expert leaves: a module that exposes `num_experts`,
-    has a parameter whose leading dim equals that count, AND has no substantial
-    submodules of its own (so a top-level model that merely *references*
-    num_experts is not mistaken for an experts block).
+    We only match genuine fused-expert leaves: a module that exposes `num_experts`
+    (or whose stacked 3D weights betray one), has a parameter whose leading dim
+    equals that count, AND has no substantial submodules of its own (so a
+    top-level model that merely *references* num_experts is not mistaken for an
+    experts block).
     """
     ne = getattr(module, "num_experts", None)
-    if not isinstance(ne, int) or ne <= 1:
-        return 0
-    # Only a *fused* experts block has 3D weights whose leading dim == num_experts
-    # (e.g. gate_up_proj [ne, 2*inter, hidden]). A router (TopKRouter) also carries
-    # `num_experts` but only a 2D routing weight, so we exclude it here.
-    has_fused = any(getattr(p, "ndim", len(getattr(p, "shape", ()))) >= 3 and getattr(p, "shape", ())[:1] == (ne,) for p in module.parameters())
-    if not has_fused:
-        return 0
+    if isinstance(ne, int) and ne > 1:
+        # Only a *fused* experts block has 3D weights whose leading dim == num_experts
+        # (e.g. gate_up_proj [ne, 2*inter, hidden]). A router (TopKRouter) also carries
+        # `num_experts` but only a 2D routing weight, so we exclude it here.
+        has_fused = any(getattr(p, "ndim", len(getattr(p, "shape", ()))) >= 3 and getattr(p, "shape", ())[:1] == (ne,) for p in module.parameters())
+        if not has_fused:
+            return 0
+    else:
+        # No usable num_experts attribute: infer from the weights. Genuine fused
+        # experts stack >= 2 tensors (gate_up + down) sharing a leading dim; a
+        # lone stacked weight (Conv3d kernel, ...) is not enough.
+        ne = _infer_fused_expert_count(module)
+        if ne <= 1:
+            return 0
     has_real_children = any(
         any(True for _ in c.parameters()) or any(True for _ in c.children())
         for _, c in module.named_children()
     )
     return ne if not has_real_children else 0
+
+
+def _infer_fused_expert_count(module: nn.Module) -> int:
+    """Expert count from weights alone: >=2 params with ndim>=3 sharing a
+    leading dim. Returns 0 when the pattern does not hold."""
+    leads = {
+        int(p.shape[0])
+        for p in module.parameters()
+        if getattr(p, "ndim", len(getattr(p, "shape", ()))) >= 3
+        and int(getattr(p, "shape", (0,))[0] if len(getattr(p, "shape", ())) else 0) > 1
+    }
+    if len(leads) == 1:
+        ne = next(iter(leads))
+        stacked = sum(
+            1
+            for p in module.parameters()
+            if getattr(p, "ndim", len(getattr(p, "shape", ()))) >= 3
+        )
+        return ne if stacked >= 2 else 0
+    return 0
 
 
 def _make_moe_expert_node(module: nn.Module, path: str, ne: int) -> dict:
@@ -187,18 +214,27 @@ def _detect_moe_block(module: nn.Module):
         return None
     cname, child, elems = pool
     ne = len(elems)
-    fp0 = _fingerprint(elems[0])
-    same = sum(1 for e in elems if _fingerprint(e) == fp0)
-    if same < max(2, int(ne * 0.8)):
-        return None  # not a uniform expert pool
+    groups: dict[str, list[int]] = {}
+    for i, e in enumerate(elems):
+        groups.setdefault(_fingerprint(e), []).append(i)
+    majority_fp, idxs = max(groups.items(), key=lambda kv: len(kv[1]))
+    template = elems[idxs[0]]
+    if len(idxs) < max(2, int(ne * 0.8)):
+        # Non-uniform pool (e.g. DeepSeek-style interleaved designs): fold the
+        # majority design and keep the remaining members visible as siblings,
+        # instead of dropping the whole pool out of MoE treatment.
+        if len(idxs) < 2 or len(idxs) / ne < 0.6:
+            return None  # no dominant repeated design
     # locate the router (gate / *router*)
     router = None
     for rcname, rchild in module.named_children():
         if rcname == "gate" or rcname.endswith("router") or "router" in rcname.lower():
             router = (rcname, rchild)
             break
-    return {"pool_name": cname, "pool": child, "ne": ne,
-            "template": elems[0], "router": router}
+    uniques = [i for i in range(ne) if i not in set(idxs)] if len(idxs) < ne else []
+    return {"pool_name": cname, "pool": child, "elems": elems, "ne": ne,
+            "template": template, "router": router,
+            "majority": len(idxs), "uniques": uniques}
 
 
 def _make_moe_block_node(module: nn.Module, name: str, path: str, info: dict,
@@ -210,23 +246,47 @@ def _make_moe_block_node(module: nn.Module, name: str, path: str, info: dict,
     direct = list(module.named_parameters(recurse=False))
     self_params = sum(p.numel() for _, p in direct)
     ne = info["ne"]
+    majority = info.get("majority", ne)
+    uniques = info.get("uniques") or []
 
     expert_node = _build_node(info["template"], "expert", f"{path}.expert", merge_repeats)
     expert_node["id"] = f"{path}.expert"
     expert_node["name"] = "expert"
-    expert_node["moe_experts"] = ne
+    expert_node["moe_experts"] = majority
     per = expert_node["params"]["total"]
     expert_node["repeat"] = {
-        "count": ne,
-        "names": [f"expert.{i}" for i in range(ne)],
-        "group_params": per * ne,
-        "group_fmt": _fmt_params(per * ne),
+        "count": majority,
+        "names": [f"expert.{i}" for i in range(majority)],
+        "group_params": per * majority,
+        "group_fmt": _fmt_params(per * majority),
     }
+
+    if not uniques:
+        # uniform pool: the folded expert node replaces the ModuleList entirely
+        pool_node = expert_node
+    else:
+        # non-uniform pool: keep a container so uniques stay visible next to
+        # the folded majority design, and routing still targets one node
+        pool = info["pool"]
+        pool_total = sum(p.numel() for p in pool.parameters())
+        pool_node = {
+            "id": f"{path}.{info['pool_name']}",
+            "name": info["pool_name"],
+            "class": type(pool).__name__,
+            "kind": "container",
+            "moe_experts": ne,
+            "params": {"total": pool_total, "trainable": pool_total, "self": 0,
+                       "fmt": _fmt_params(pool_total)},
+            "children": [expert_node] + [
+                _build_node(info["elems"][i], str(i), f"{path}.{info['pool_name']}.{i}", merge_repeats)
+                for i in uniques
+            ],
+        }
 
     children = []
     for cname, child in module.named_children():
         if cname == info["pool_name"]:
-            children.append(expert_node)
+            children.append(pool_node)
         else:
             children.append(_build_node(child, cname, f"{path}.{cname}", merge_repeats))
 
