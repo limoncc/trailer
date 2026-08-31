@@ -19,6 +19,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    setupFiles: ['src/test/setup.ts'],
     include: ['src/**/*.test.{ts,js}', 'src/**/*.spec.{ts,js}'],
     alias: {
       $lib: path.resolve(__dirname, 'src/lib'),
