@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Button from '$lib/components/ui/Button.svelte';
-  import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, MousePointerClick, Network } from 'lucide-svelte';
+  import { Maximize2, ChevronsDownUp, ChevronsUpDown, ChevronDown, MousePointerClick, Network, Search } from 'lucide-svelte';
   import { layoutGraph, displayName, subLabel, ioLabel, type LayoutResult } from './model/layout';
   import { canvasMeasure as tw } from './model/measure';
+  import { ancestorsOf, enforceBudget, computeFrame, easeOutCubic } from './model/interactions';
+  import ModelNodeFinder from './ModelNodeFinder.svelte';
 
   interface Props {
     spec: { meta?: any; tree?: any; edges?: any[] };
@@ -56,8 +58,20 @@
   let collapsedSet = new Set<string>();
   let layout: LayoutResult | null = null;
   let layoutGen = 0;
+  let openOrder: string[] = [];
+  let animRaf = 0;
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  let toastMsg = $state('');
+  let finderOpen = $state(false);
   let selectedId: string | null = $state(null);
   let selectedInfo: any = $state(null);
+
+  // Breadcrumb trail of the selection (root → … → selected)
+  const breadcrumb = $derived.by(() => {
+    if (!selectedId || !graphData) return [];
+    const ids = [...ancestorsOf(selectedId), selectedId];
+    return ids.filter((id) => nodeById[id]).map((id) => ({ id, name: nodeById[id].name || id }));
+  });
 
   // --- Data loading ---
   function indexTree(n: any, parent: any) {
@@ -100,6 +114,108 @@
       relayout().then(() => { setTimeout(fitView, 60); showDetail(g.tree.id); });
     }
   }
+
+  // --- Container open/close with render budget (modelmap §10 semantics) ---
+  function showToast(msg: string) {
+    toastMsg = msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toastMsg = ''), 3200);
+  }
+
+  function applyBudget(opened: string | null) {
+    if (!graphData) return;
+    const res = enforceBudget(graphData.tree, collapsedSet, openOrder, opened);
+    collapsedSet = res.collapsed;
+    openOrder = res.order;
+    if (res.evicted)
+      showToast(`Collapsed ${res.evicted} container${res.evicted > 1 ? 's' : ''} to keep the graph fast`);
+  }
+
+  function openContainer(id: string) {
+    if (!isContainer(nodeById[id])) return;
+    collapsedSet.delete(id);
+    applyBudget(id);
+    relayout().then(() => frame(id));
+  }
+
+  function closeContainer(id: string) {
+    if (!isContainer(nodeById[id]) || collapsedSet.has(id)) return;
+    collapsedSet.add(id);
+    openOrder = openOrder.filter((x) => x !== id);
+    relayout();
+  }
+
+  /** collapse the container itself, or (for a leaf / already-collapsed node)
+   *  its nearest expanded ancestor */
+  function collapseNearest(id: string) {
+    if (isContainer(nodeById[id]) && !collapsedSet.has(id)) { closeContainer(id); return; }
+    let cur: string | null = parentOf[id];
+    while (cur && !isContainer(nodeById[cur])) cur = parentOf[cur];
+    if (cur) closeContainer(cur);
+  }
+
+  /** open every ancestor of id, select it and frame it (search, deep links) */
+  function reveal(id: string) {
+    if (!nodeById[id]) return;
+    for (const a of ancestorsOf(id)) if (isContainer(nodeById[a])) collapsedSet.delete(a);
+    applyBudget(id);
+    relayout().then(() => { showDetail(id); highlight(id); frame(id); });
+  }
+
+  function pickNode(id: string) {
+    finderOpen = false;
+    reveal(id);
+  }
+
+  // --- Camera framing ---
+  function animateGroup(target: { scale: number; x: number; y: number }, dur: number) {
+    if (!contentGroup) return;
+    cancelAnimationFrame(animRaf);
+    const from = { scale: contentGroup.scaleX || 1, x: contentGroup.x || 0, y: contentGroup.y || 0 };
+    const apply = (s: number, x: number, y: number) => {
+      contentGroup.scaleX = s; contentGroup.scaleY = s; contentGroup.x = x; contentGroup.y = y;
+    };
+    if (dur <= 0) { apply(target.scale, target.x, target.y); return; }
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / dur);
+      const e = easeOutCubic(p);
+      apply(
+        from.scale + (target.scale - from.scale) * e,
+        from.x + (target.x - from.x) * e,
+        from.y + (target.y - from.y) * e,
+      );
+      if (p < 1) animRaf = requestAnimationFrame(step);
+    };
+    animRaf = requestAnimationFrame(step);
+  }
+
+  /** frame one container (after opening / picking) */
+  function frame(id: string) {
+    if (!layout || !container) return;
+    const b = layout.boxes[id];
+    if (!b) { fitView(); return; }
+    const vw = container.clientWidth || 800, vh = container.clientHeight || 500;
+    animateGroup(computeFrame(b, vw, vh), 350);
+  }
+
+  // --- Keyboard: E expand · C collapse · 0 fit · / search · Esc deselect ---
+  function onKey(e: KeyboardEvent) {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'Escape') {
+      if (finderOpen) finderOpen = false;
+      else { selectedId = null; selectedInfo = null; }
+    } else if (e.key === '0') fitView();
+    else if (e.key === '/') { e.preventDefault(); finderOpen = true; }
+    else if (e.key === 'e' || e.key === 'E') { if (selectedId) openContainer(selectedId); }
+    else if (e.key === 'c' || e.key === 'C') { if (selectedId) collapseNearest(selectedId); }
+  }
+  $effect(() => {
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   // --- Colors (light/dark aware) ---
   function colorsFor(n: any, depth: number) {
@@ -274,9 +390,8 @@
       el.on(R.PointerEvent.DOUBLE_TAP, () => {
         let n = nodeById[el.__id];
         if (!isContainer(n)) return;
-        if (collapsedSet.has(el.__id)) collapsedSet.delete(el.__id);
-        else collapsedSet.add(el.__id);
-        relayout();
+        if (collapsedSet.has(el.__id)) openContainer(el.__id);
+        else closeContainer(el.__id);
       });
     }
     if (selectedId) highlight(selectedId);
@@ -285,12 +400,14 @@
   function highlight(id: string) {
     selectedId = id;
     if (!contentGroup || !layout) return;
+    const ancSet = new Set(id ? ancestorsOf(id) : []);
     for (const ch of contentGroup.children) {
       if (!ch.__id) continue;
       let b = layout.boxes[ch.__id];
       if (!b) continue;
       let col = colorsFor(b.node, b.depth);
       if (ch.__id === id) { ch.stroke = '#c2622d'; ch.strokeWidth = 2.5; }
+      else if (ancSet.has(ch.__id)) { ch.stroke = '#c2622d'; ch.strokeWidth = 1.8; }
       else { ch.stroke = col.stroke; ch.strokeWidth = b.depth === 0 ? 2 : 1.2; }
     }
   }
@@ -313,7 +430,11 @@
   }
 
   // --- Toolbar ---
-  function expandAll() { collapsedSet.clear(); relayout().then(() => setTimeout(fitView, 30)); }
+  function expandAll() {
+    collapsedSet.clear();
+    applyBudget(null);
+    relayout().then(() => setTimeout(fitView, 30));
+  }
   function collapseAll() {
     for (const id of Object.keys(nodeById)) {
       if (isContainer(nodeById[id]) && id !== (graphData?.tree?.id)) collapsedSet.add(id);
@@ -365,6 +486,7 @@
         // Zoom
         container.addEventListener('wheel', (e: WheelEvent) => {
           e.preventDefault();
+          cancelAnimationFrame(animRaf);
           let os = contentGroup.scaleX || 1;
           let f = e.deltaY < 0 ? 1.08 : 0.92;
           let ns = Math.max(0.02, Math.min(4, os * f));
@@ -380,6 +502,7 @@
         // Pan
         let dragging = false, sx = 0, sy = 0, gx = 0, gy = 0;
         leafer.on(R.PointerEvent.DOWN, (e: any) => {
+          cancelAnimationFrame(animRaf);
           if (e.target === leafer || e.target === contentGroup) {
             dragging = true; sx = e.x; sy = e.y; gx = contentGroup.x || 0; gy = contentGroup.y || 0;
           }
@@ -407,6 +530,7 @@
       {/if}
     </div>
     <div class="flex-1"></div>
+    <Button variant="outline" size="sm" onclick={() => (finderOpen = true)}><Search class="w-3.5 h-3.5" />Search</Button>
     <Button variant="outline" size="sm" onclick={expandAll}><ChevronsDownUp class="w-3.5 h-3.5" />Expand</Button>
     <Button variant="outline" size="sm" onclick={collapseAll}><ChevronsUpDown class="w-3.5 h-3.5" />Collapse</Button>
     <Button variant="outline" size="sm" onclick={expandOneLevel}><ChevronDown class="w-3.5 h-3.5" />Expand 1 level</Button>
@@ -423,7 +547,20 @@
       <span class="flex items-center gap-1"><span style="color:#f59e0b;">╮</span>Residual</span>
       <span class="flex items-center gap-1"><span style="color:#d946ec;">╌╌</span>Routing</span>
     </div>
-    <div class="flex items-center gap-3 font-mono text-[10px]"><span>Click → Select</span><span>·</span><span>Dbl-click → Collapse</span><span>·</span><span>Scroll · Drag</span></div>
+    <div class="flex items-center gap-3 font-mono text-[10px]"><span>Click → Select</span><span>·</span><span>Dbl-click → Collapse</span><span>·</span><span>E/C · 0 fit · / search</span></div>
+  </div>
+  {/if}
+
+  <!-- Breadcrumb -->
+  {#if selectedId && breadcrumb.length > 1}
+  <div class="flex items-center gap-1 px-4 py-1 text-[11px] font-mono bg-muted/10 border-b border-border overflow-x-auto shrink-0">
+    {#each breadcrumb as seg, i}
+      {#if i > 0}<span class="text-muted-foreground/40 shrink-0">/</span>{/if}
+      <button
+        class="truncate hover:text-violet-500 transition-colors {i === breadcrumb.length - 1 ? 'text-foreground font-semibold' : 'text-muted-foreground'}"
+        onclick={() => { showDetail(seg.id); highlight(seg.id); frame(seg.id); }}
+      >{seg.name}</button>
+    {/each}
   </div>
   {/if}
 
@@ -431,6 +568,12 @@
   <div class="flex flex-1 min-h-0">
     <div class="relative flex-1 min-w-0" class:bg-[#fafafa]={!darkMode} class:bg-[#1a1a2e]={darkMode}>
       <div bind:this={container} class="absolute inset-0"></div>
+      {#if finderOpen}
+        <ModelNodeFinder {nodeById} onpick={pickNode} onclose={() => (finderOpen = false)} />
+      {/if}
+      {#if toastMsg}
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded-md bg-foreground/90 text-background text-xs shadow-lg pointer-events-none">{toastMsg}</div>
+      {/if}
       {#if !graphReady}
       <div class="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground bg-background flex-col">
         {#if initErr}<p class="text-destructive">{initErr}</p>{:else}<div class="w-2 h-2 rounded-full bg-primary/40 animate-pulse"></div><p>Loading model graph...</p>{/if}
