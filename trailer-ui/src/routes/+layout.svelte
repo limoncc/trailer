@@ -5,7 +5,13 @@
   import Button from '$lib/components/ui/Button.svelte';
   import { api } from '$lib/utils/api';
   import { applyCustomTheme, loadCustomTheme, saveCustomTheme, loadThemeState, applyThemeState } from '$lib/theme-builder/color';
-  import { FlaskConical, FileText, Microscope, Moon, Sun, Trash2, Zap, Leaf, BookOpen, Eclipse } from 'lucide-svelte';
+  import {
+    Compass, FileText, LayoutGrid, Microscope, Moon, Sun, Trash2, Upload, Zap, Leaf, BookOpen, Eclipse,
+    FlaskConical, Palette,
+  } from 'lucide-svelte';
+  import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+  import { sidebarState } from '$lib/sidebar-state.svelte';
+  import { IsMobile } from '$lib/hooks/is-mobile.svelte';
   import { initAuthFetch } from '$lib/utils/authFetch';
   import { fetchServerVersion, UI_VERSION, type ServerVersion } from '$lib/utils/version';
   import { createAuthReadyPromise, signalAuthReady, authReady } from '$lib/utils/auth';
@@ -38,6 +44,18 @@
   }
   const THEMES = ['light', 'dark', 'cyber', 'nature', 'editorial', 'midnight'] as const;
   let theme = $state<string>(typeof localStorage !== 'undefined' ? localStorage.getItem('trailer_theme') || 'light' : 'light');
+
+  const isMobile = new IsMobile();
+
+  /** 主导航(数据驱动);adminOnly 项仅管理员可见。图标 + 文字,折叠态由 MenuButton 收成图标。 */
+  const NAV_ITEMS = [
+    { href: '/explore', label: 'Explore', icon: Compass, adminOnly: false },
+    { href: '/reports', label: 'Reports', icon: FileText, adminOnly: false },
+    { href: '/dashboard', label: 'Dashboard', icon: LayoutGrid, adminOnly: true },
+    { href: '/shares', label: 'Shared Links', icon: Upload, adminOnly: false },
+    { href: '/theme-builder', label: 'Theme Builder', icon: Palette, adminOnly: false },
+  ] as const;
+  const visibleNav = $derived(NAV_ITEMS.filter((i) => !i.adminOnly || user?.role === 'admin'));
 
   function isDarkTheme(name: string): boolean {
     return name === 'dark' || name === 'cyber' || name === 'midnight';
@@ -233,108 +251,128 @@
   <title>Trailer</title>
 </svelte:head>
 
-<div class="flex h-screen bg-background">
-  <aside
-    class="border-r border-border bg-card flex flex-col shrink-0 overflow-hidden"
-    style="width: {sidebarWidth}px"
-  >
-    <div class="p-4 border-b border-border flex items-center justify-between">
-      <div>
-        <h1 class="text-lg font-bold flex items-center gap-2"><Microscope class="size-5" /><a href="/" class="hover:text-primary">Trailer</a></h1>
-        <p class="text-xs text-muted-foreground">Experiment Tracking</p>
+<Sidebar.Provider
+  open={sidebarState.open}
+  onOpenChange={(v) => sidebarState.setOpen(v)}
+  class={dragging ? 'sidebar-dragging' : ''}
+  style={`--sidebar-width: ${sidebarWidth}px`}
+>
+  <Sidebar.Root collapsible="icon">
+    <Sidebar.Header class="border-b border-border">
+      <div class="flex items-center justify-between gap-1">
+        <a href="/" class="flex min-w-0 items-center gap-2 overflow-hidden" title="Trailer">
+          <Microscope class="size-5 shrink-0" />
+          <span class="group-data-[collapsible=icon]:hidden">
+            <span class="block text-lg font-bold leading-tight">Trailer</span>
+            <span class="block text-xs text-muted-foreground">Experiment Tracking</span>
+          </span>
+        </a>
+        <div class="flex shrink-0 items-center gap-0.5 group-data-[collapsible=icon]:hidden">
+          <Button variant="ghost" size="icon" onclick={cycleTheme} title={theme}>
+            {#if theme === 'light'}<Sun class="size-4" />
+            {:else if theme === 'dark'}<Moon class="size-4" />
+            {:else if theme === 'cyber'}<Zap class="size-4" />
+            {:else if theme === 'nature'}<Leaf class="size-4" />
+            {:else if theme === 'editorial'}<BookOpen class="size-4" />
+            {:else if theme === 'midnight'}<Eclipse class="size-4" />
+            {/if}
+          </Button>
+          <Sidebar.Trigger class="size-8" />
+        </div>
       </div>
-      <Button variant="ghost" size="icon" onclick={cycleTheme} title={theme}>
-        {#if theme === 'light'}<Sun class="size-4" />
-        {:else if theme === 'dark'}<Moon class="size-4" />
-        {:else if theme === 'cyber'}<Zap class="size-4" />
-        {:else if theme === 'nature'}<Leaf class="size-4" />
-        {:else if theme === 'editorial'}<BookOpen class="size-4" />
-        {:else if theme === 'midnight'}<Eclipse class="size-4" />
-        {/if}
-      </Button>
-    </div>
+      <!-- 折叠态:居中的展开按钮(主题按钮让位) -->
+      <div class="hidden justify-center group-data-[collapsible=icon]:flex">
+        <Sidebar.Trigger class="size-8" />
+      </div>
+    </Sidebar.Header>
 
-    <nav class="flex-1 overflow-y-auto p-2 flex flex-col">
-      <div class="text-xs font-semibold text-muted-foreground uppercase px-2 py-1">Projects</div>
-      {#if projects.length > 0}
-        <div class="px-2 pb-1">
-          <input
-            type="text"
-            placeholder="Search projects..."
-            value={projectSearch}
-            oninput={onProjectSearch}
-            class="w-full px-2 py-1 text-xs border border-border rounded-md bg-background"
-          />
-        </div>
-        <div class="space-y-0.5">
-          {#each pagedProjects as p}
-            <div class="flex items-center gap-0 group">
-              <a href="/?project={p}"
-                 class="flex-1 block px-3 py-1.5 rounded-md text-sm transition-colors hover:bg-accent/50 truncate">
-                <FlaskConical class="size-3.5 inline-block mr-1.5" />{p}
-              </a>
-              {#if canManage(p)}
-              <button
-                onclick={() => { confirmDelete = p; deleteError = ''; }}
-                class="p-1.5 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-destructive/10 transition-all shrink-0"
-                title="Delete project"
-              >
-                <Trash2 class="size-3" />
-              </button>
-              {/if}
+    <Sidebar.Content>
+      <!-- Projects:折叠态整体隐藏(48px 下项目名无意义) -->
+      <Sidebar.Group class="group-data-[collapsible=icon]:hidden">
+        <Sidebar.GroupLabel>Projects</Sidebar.GroupLabel>
+        <Sidebar.GroupContent>
+          {#if projects.length > 0}
+            <div class="px-2 pb-1">
+              <Sidebar.Input
+                placeholder="Search projects..."
+                value={projectSearch}
+                oninput={onProjectSearch}
+              />
             </div>
+          {/if}
+          {#if projects.length > 0}
+            <Sidebar.Menu>
+              {#each pagedProjects as p}
+                <Sidebar.MenuItem>
+                  <div class="flex items-center gap-0 group">
+                    <Sidebar.MenuButton class="flex-1 px-2" tabindex={-1}>
+                      {#snippet child({ props })}
+                        <a {...props} href="/?project={p}">
+                          <FlaskConical />
+                          <span>{p}</span>
+                        </a>
+                      {/snippet}
+                    </Sidebar.MenuButton>
+                    {#if canManage(p)}
+                      <button
+                        onclick={() => { confirmDelete = p; deleteError = ''; }}
+                        class="p-1.5 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-destructive/10 transition-all shrink-0"
+                        title="Delete project"
+                      >
+                        <Trash2 class="size-3" />
+                      </button>
+                    {/if}
+                  </div>
+                </Sidebar.MenuItem>
+              {:else}
+                <p class="text-xs text-muted-foreground px-2 py-2">No projects found</p>
+              {/each}
+            </Sidebar.Menu>
+            {#if projectTotalPages > 1}
+              <div class="flex items-center justify-between px-2 pt-2 text-[11px]">
+                <button
+                  onclick={() => (projectPage = Math.max(1, projectPage - 1))}
+                  disabled={projectPage <= 1}
+                  class="px-1.5 py-0.5 border border-border rounded-md hover:bg-accent/50 disabled:opacity-40 disabled:hover:bg-transparent"
+                >← Prev</button>
+                <span class="text-muted-foreground">{projectPage} / {projectTotalPages}</span>
+                <button
+                  onclick={() => (projectPage = Math.min(projectTotalPages, projectPage + 1))}
+                  disabled={projectPage >= projectTotalPages}
+                  class="px-1.5 py-0.5 border border-border rounded-md hover:bg-accent/50 disabled:opacity-40 disabled:hover:bg-transparent"
+                >Next →</button>
+              </div>
+            {/if}
           {:else}
-            <p class="text-xs text-muted-foreground px-2 py-2">No projects found</p>
-          {/each}
-        </div>
-        {#if projectTotalPages > 1}
-          <div class="flex items-center justify-between px-2 pt-2 text-[11px]">
-            <button
-              onclick={() => (projectPage = Math.max(1, projectPage - 1))}
-              disabled={projectPage <= 1}
-              class="px-1.5 py-0.5 border border-border rounded-md hover:bg-accent/50 disabled:opacity-40 disabled:hover:bg-transparent"
-            >← Prev</button>
-            <span class="text-muted-foreground">{projectPage} / {projectTotalPages}</span>
-            <button
-              onclick={() => (projectPage = Math.min(projectTotalPages, projectPage + 1))}
-              disabled={projectPage >= projectTotalPages}
-              class="px-1.5 py-0.5 border border-border rounded-md hover:bg-accent/50 disabled:opacity-40 disabled:hover:bg-transparent"
-            >Next →</button>
-          </div>
-        {/if}
-      {:else}
-        <p class="text-xs text-muted-foreground px-2 py-4">Loading projects...</p>
-      {/if}
+            <p class="text-xs text-muted-foreground px-2 py-4">Loading projects...</p>
+          {/if}
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
 
-      {#if user}
-        <div class="border-t border-border my-2 mx-2"></div>
-        <a href="/explore"
-           class="px-3 py-1.5 rounded-md text-sm transition-colors hover:bg-accent/50 flex items-center gap-2">
-          <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>Explore
-        </a>
-        <a href="/reports"
-           class="px-3 py-1.5 rounded-md text-sm transition-colors hover:bg-accent/50 flex items-center gap-2">
-          <FileText class="size-3.5" />Reports
-        </a>
-        {#if user.role === 'admin'}
-          <a href="/dashboard"
-             class="px-3 py-1.5 rounded-md text-sm transition-colors hover:bg-accent/50 flex items-center gap-2">
-            <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard
-          </a>
-        {/if}
-        <a href="/shares"
-           class="px-3 py-1.5 rounded-md text-sm transition-colors hover:bg-accent/50 flex items-center gap-2">
-          <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>Shared Links
-        </a>
-        <a href="/theme-builder"
-           class="px-3 py-1.5 rounded-md text-sm transition-colors hover:bg-accent/50 flex items-center gap-2">
-          <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="0.5"/><circle cx="17.5" cy="10.5" r="0.5"/><circle cx="8.5" cy="7.5" r="0.5"/><circle cx="6.5" cy="12.5" r="0.5"/><path d="M12 22a10 10 0 1 1 10-10"/></svg>Theme Builder
-        </a>
-      {/if}
-    </nav>
+      <!-- 主导航 -->
+      <Sidebar.Group>
+        <Sidebar.GroupContent>
+          <Sidebar.Menu>
+            {#each visibleNav as item}
+              <Sidebar.MenuItem>
+                <Sidebar.MenuButton tooltipContent={item.label}>
+                  {#snippet child({ props })}
+                    <a {...props} href={item.href}>
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </a>
+                  {/snippet}
+                </Sidebar.MenuButton>
+              </Sidebar.MenuItem>
+            {/each}
+          </Sidebar.Menu>
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
+    </Sidebar.Content>
 
-      <!-- Refresh interval -->
-      <div class="border-t border-border px-3 py-2 flex items-center justify-between text-xs text-muted-foreground">
+    <Sidebar.Footer>
+      <!-- Refresh interval:折叠态隐藏 -->
+      <div class="group-data-[collapsible=icon]:hidden border-t border-border px-1 py-2 flex items-center justify-between text-xs text-muted-foreground">
         <span class="flex items-center gap-1.5">
           <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg>
           Auto-refresh
@@ -351,19 +389,23 @@
         </select>
       </div>
 
-      <!-- User section at bottom -->
-      <div class="border-t border-border px-2 py-2 flex items-center gap-2 text-xs">
+      <!-- User section:折叠态只剩头像 + tooltip -->
+      <div class="border-t border-border pt-2 flex items-center gap-2 text-xs">
         {#if user}
-          <a href="/profile" class="flex items-center gap-2 flex-1 hover:bg-accent/50 rounded-md px-2 py-1.5 transition-colors no-underline">
-            <span class="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shrink-0">
-              {user.username[0].toUpperCase()}
-            </span>
-            <div class="flex-1 min-w-0">
-              <div class="font-medium text-foreground truncate">{user.username}</div>
-              <div class="text-muted-foreground text-[10px]">{user.role}</div>
-            </div>
-          </a>
-          <button onclick={logout} class="text-[10px] text-muted-foreground hover:text-foreground shrink-0 px-1 underline">Sign out</button>
+          <Sidebar.MenuButton class="flex-1" tooltipContent={user.username}>
+            {#snippet child({ props })}
+              <a {...props} href="/profile">
+                <span class="size-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shrink-0">
+                  {user.username[0].toUpperCase()}
+                </span>
+                <span class="flex-1 min-w-0 text-left">
+                  <span class="block font-medium text-foreground truncate">{user.username}</span>
+                  <span class="block text-muted-foreground text-[10px]">{user.role}</span>
+                </span>
+              </a>
+            {/snippet}
+          </Sidebar.MenuButton>
+          <button onclick={logout} class="text-[10px] text-muted-foreground hover:text-foreground shrink-0 px-1 underline group-data-[collapsible=icon]:hidden">Sign out</button>
         {:else}
           <a href="/login" class="block w-full px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
             Sign in
@@ -371,15 +413,39 @@
         {/if}
       </div>
 
-      <!-- Copyright -->
-      <div class="border-t border-border px-2 py-2 text-center text-[10px] text-muted-foreground">
+      <!-- Copyright:折叠态隐藏 -->
+      <div class="border-t border-border px-2 py-2 text-center text-[10px] text-muted-foreground group-data-[collapsible=icon]:hidden">
         {#if appVersion}
           <button onclick={() => showVersionInfo = true} title="About Trailer"
             class="font-mono underline decoration-dotted underline-offset-2 hover:text-foreground cursor-pointer">v{appVersion.version}</button>{' '}
         {/if}
         © {new Date().getFullYear()} Trailer · <a href="mailto:limoncc@icloud.com" class="underline hover:text-foreground">limoncc@icloud.com</a>
       </div>
-  </aside>
+    </Sidebar.Footer>
+
+    <Sidebar.Rail />
+  </Sidebar.Root>
+
+  <!-- 拖拽把手:仅展开态 + 桌面端(折叠时宽度由 --sidebar-width-icon 接管) -->
+  {#if !isMobile.current && sidebarState.open}
+    <div
+      class="w-1 shrink-0 cursor-col-resize hover:bg-ring/50 transition-colors bg-transparent"
+      style="touch-action:none"
+      role="presentation"
+      onpointerdown={startDrag}
+    ></div>
+  {/if}
+
+  <!-- 移动端(<768px)侧栏抽屉默认收起,悬浮按钮打开 -->
+  {#if isMobile.current}
+    <div class="fixed top-2 left-2 z-30">
+      <Sidebar.Trigger />
+    </div>
+  {/if}
+
+  <main class="h-svh flex-1 min-w-0 overflow-auto">
+    {@render children()}
+  </main>
 
   {#if confirmDelete}
     <div class="fixed inset-0 bg-black/30 z-40" role="presentation" onclick={() => confirmDelete = null} onkeydown={(e) => { if (e.key === 'Escape') confirmDelete = null; }}></div>
@@ -412,15 +478,4 @@
       </div>
     </div>
   {/if}
-
-  <!-- Drag handle -->
-  <div
-    class="w-1 shrink-0 cursor-col-resize hover:bg-ring/50 transition-colors bg-transparent" style="touch-action:none"
-    role="presentation"
-    onpointerdown={startDrag}
-  ></div>
-
-  <main class="flex-1 overflow-auto">
-    {@render children()}
-  </main>
-</div>
+</Sidebar.Provider>
