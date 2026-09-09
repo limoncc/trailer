@@ -16,7 +16,8 @@
   import { fetchServerVersion, UI_VERSION, type ServerVersion } from '$lib/utils/version';
   import { createAuthReadyPromise, signalAuthReady, authReady } from '$lib/utils/auth';
   import { refreshInterval } from '$lib/refresh.svelte';
-  import { getProjects, getOwners, getUser, setProjects, setOwners, setUser, getLatestRun, setLatestRun, pickLatestRun } from '$lib/projectsStore.svelte';
+  import { getProjects, getOwners, getUser, setProjects, setOwners, setUser, getLatestRun, setLatestRun, pickLatestRun, getRunsById, setRunsById, runIdFromPath } from '$lib/projectsStore.svelte';
+  import { page } from '$app/state';
 
   let { children } = $props();
 
@@ -28,6 +29,15 @@
   let owners = $derived(getOwners());
   let user = $derived(getUser());
   let latestRun = $derived(getLatestRun());
+  // 折叠态入口:用户正在浏览的 run 优先,否则回退最近的 run;不在列表的 run 只知 id
+  const activeRun = $derived.by(() => {
+    const urlId = runIdFromPath(page.url.pathname);
+    if (!urlId) return latestRun;
+    return getRunsById().get(urlId) ?? { id: urlId, name: urlId, project: '', created_at: 0 };
+  });
+  const activeRunLabel = $derived(
+    activeRun ? (activeRun.project ? `${activeRun.project} / ${activeRun.name}` : activeRun.name) : '',
+  );
   // PROJECTS 侧边栏:搜索 + 分页
   const PROJECTS_PER_PAGE = 20;
   let projectSearch = $state('');
@@ -203,14 +213,18 @@
         const projSet = new Set<string>();
         const ownersMap = new Map<string, number | null>();
         const liteRuns = [];
+        const byId = new Map();
         for (const r of runs) {
           projSet.add(r.project);
           if (!ownersMap.has(r.project)) ownersMap.set(r.project, r.owner_id ?? null);
-          liteRuns.push({ id: r.run_id, name: r.name, project: r.project, created_at: r.created_at });
+          const lite = { id: r.run_id, name: r.name, project: r.project, created_at: r.created_at };
+          liteRuns.push(lite);
+          byId.set(lite.id, lite);
         }
         setProjects([...projSet]);
         setOwners(ownersMap);
         setLatestRun(pickLatestRun(liteRuns));
+        setRunsById(byId);
       }
     } catch (_) {}
   }
@@ -353,17 +367,17 @@
         </Sidebar.GroupContent>
       </Sidebar.Group>
 
-      <!-- 折叠态:最近 run 快捷入口(展开态由完整 Projects 列表覆盖) -->
+      <!-- 折叠态:当前/最近 run 快捷入口(展开态由完整 Projects 列表覆盖;无 run 不显示) -->
       <Sidebar.Group class="hidden group-data-[collapsible=icon]:block">
         <Sidebar.GroupContent>
           <Sidebar.Menu>
-            {#if latestRun}
+            {#if activeRun}
               <Sidebar.MenuItem>
-                <Sidebar.MenuButton tooltipContent={`${latestRun.project} / ${latestRun.name}`}>
+                <Sidebar.MenuButton tooltipContent={activeRunLabel}>
                   {#snippet child({ props })}
-                    <a {...props} href={`/run/${latestRun.id}`}>
+                    <a {...props} href={`/run/${activeRun.id}`}>
                       <FlaskConical />
-                      <span>{latestRun.name}</span>
+                      <span>{activeRun.name}</span>
                     </a>
                   {/snippet}
                 </Sidebar.MenuButton>
