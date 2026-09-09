@@ -171,6 +171,15 @@
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  /* 主题未单独定义 sidebar 边框/焦点色,回退到各自的 border/ring */
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--ring);
+}
+
+/* 拖拽调宽时关闭侧栏宽度过渡,否则滑块跟不上指针 */
+.sidebar-dragging [data-slot='sidebar-gap'],
+.sidebar-dragging [data-slot='sidebar-container'] {
+  transition: none;
 }
 
 /* Editorial theme — NYT newspaper clean */
