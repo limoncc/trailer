@@ -16,7 +16,7 @@
   import { fetchServerVersion, UI_VERSION, type ServerVersion } from '$lib/utils/version';
   import { createAuthReadyPromise, signalAuthReady, authReady } from '$lib/utils/auth';
   import { refreshInterval } from '$lib/refresh.svelte';
-  import { getProjects, getOwners, getUser, setProjects, setOwners, setUser } from '$lib/projectsStore.svelte';
+  import { getProjects, getOwners, getUser, setProjects, setOwners, setUser, getLatestRun, setLatestRun, pickLatestRun } from '$lib/projectsStore.svelte';
 
   let { children } = $props();
 
@@ -27,6 +27,7 @@
   let projects = $derived(getProjects());
   let owners = $derived(getOwners());
   let user = $derived(getUser());
+  let latestRun = $derived(getLatestRun());
   // PROJECTS 侧边栏:搜索 + 分页
   const PROJECTS_PER_PAGE = 20;
   let projectSearch = $state('');
@@ -201,12 +202,15 @@
         const runs = await resp.json();
         const projSet = new Set<string>();
         const ownersMap = new Map<string, number | null>();
+        const liteRuns = [];
         for (const r of runs) {
           projSet.add(r.project);
           if (!ownersMap.has(r.project)) ownersMap.set(r.project, r.owner_id ?? null);
+          liteRuns.push({ id: r.run_id, name: r.name, project: r.project, created_at: r.created_at });
         }
         setProjects([...projSet]);
         setOwners(ownersMap);
+        setLatestRun(pickLatestRun(liteRuns));
       }
     } catch (_) {}
   }
@@ -259,7 +263,7 @@
 >
   <Sidebar.Root collapsible="icon">
     <Sidebar.Header class="border-b border-border">
-      <div class="flex items-center justify-between gap-1">
+      <div class="flex items-center justify-between gap-1 group-data-[collapsible=icon]:justify-center">
         <a href="/" class="flex min-w-0 items-center gap-2 overflow-hidden" title="Trailer">
           <Microscope class="size-5 shrink-0" />
           <span class="group-data-[collapsible=icon]:hidden">
@@ -346,6 +350,26 @@
           {:else}
             <p class="text-xs text-muted-foreground px-2 py-4">Loading projects...</p>
           {/if}
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
+
+      <!-- 折叠态:最近 run 快捷入口(展开态由完整 Projects 列表覆盖) -->
+      <Sidebar.Group class="hidden group-data-[collapsible=icon]:block">
+        <Sidebar.GroupContent>
+          <Sidebar.Menu>
+            {#if latestRun}
+              <Sidebar.MenuItem>
+                <Sidebar.MenuButton tooltipContent={`${latestRun.project} / ${latestRun.name}`}>
+                  {#snippet child({ props })}
+                    <a {...props} href={`/run/${latestRun.id}`}>
+                      <FlaskConical />
+                      <span>{latestRun.name}</span>
+                    </a>
+                  {/snippet}
+                </Sidebar.MenuButton>
+              </Sidebar.MenuItem>
+            {/if}
+          </Sidebar.Menu>
         </Sidebar.GroupContent>
       </Sidebar.Group>
 
