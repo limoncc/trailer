@@ -426,10 +426,11 @@
     <Sidebar.Rail />
   </Sidebar.Root>
 
-  <!-- 拖拽把手:仅展开态 + 桌面端(折叠时宽度由 --sidebar-width-icon 接管) -->
+  <!-- 拖拽把手:仅展开态 + 桌面端(折叠时宽度由 --sidebar-width-icon 接管)。
+       z-30 需压过 Sidebar.Rail 的 z-20——rail 的贴边热区恰好覆盖把手位置 -->
   {#if !isMobile.current && sidebarState.open}
     <div
-      class="w-1 shrink-0 cursor-col-resize hover:bg-ring/50 transition-colors bg-transparent"
+      class="z-30 w-1 shrink-0 cursor-col-resize hover:bg-ring/50 transition-colors bg-transparent"
       style="touch-action:none"
       role="presentation"
       onpointerdown={startDrag}
