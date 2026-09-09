@@ -430,13 +430,16 @@
       <!-- User section:折叠态只剩头像 + tooltip -->
       <div class="border-t border-border pt-2 flex items-center gap-2 text-xs">
         {#if user}
-          <Sidebar.MenuButton class="flex-1" tooltipContent={user.username}>
+          <Sidebar.MenuButton
+            class="flex-1 group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center"
+            tooltipContent={user.username}
+          >
             {#snippet child({ props })}
               <a {...props} href="/profile">
                 <span class="size-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shrink-0">
                   {user.username[0].toUpperCase()}
                 </span>
-                <span class="flex-1 min-w-0 text-left">
+                <span class="flex-1 min-w-0 text-left group-data-[collapsible=icon]:hidden">
                   <span class="block font-medium text-foreground truncate">{user.username}</span>
                   <span class="block text-muted-foreground text-[10px]">{user.role}</span>
                 </span>
