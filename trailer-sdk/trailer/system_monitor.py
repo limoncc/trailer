@@ -66,16 +66,17 @@ class SystemMonitor:
                     util = self._pynvml.nvmlDeviceGetUtilizationRates(handle)
                     mem = self._pynvml.nvmlDeviceGetMemoryInfo(handle)
                     temp = self._pynvml.nvmlDeviceGetTemperature(handle, self._pynvml.NVML_TEMPERATURE_GPU)
+                    prefix = f"system/nvidia/gpu{i}"
                     records.append({
                         "kind": "metric",
                         "run_id": "__system__",
                         "step": 0,
                         "wall_time": timestamp,
-                        "context": f"gpu{i}",
+                        "context": f"nvidia/gpu{i}",
                         "payload": {
-                            f"system/gpu_util": float(util.gpu) / 100.0,
-                            f"system/gpu_mem_used": mem.used / (1024 * 1024),
-                            f"system/gpu_temp": float(temp),
+                            f"{prefix}/gpu_util": float(util.gpu) / 100.0,
+                            f"{prefix}/vram_used": mem.used / (1024 * 1024),
+                            f"{prefix}/temp_c": float(temp),
                         },
                     })
                 except Exception:
@@ -86,17 +87,19 @@ class SystemMonitor:
             import psutil
             cpu = psutil.cpu_percent(interval=None) / 100.0
             mem_info = psutil.virtual_memory()
+            payload = {
+                "system/cpu_util": cpu,
+                "system/mem_used": mem_info.used / (1024 * 1024),
+            }
+            if mem_info.total > 0:
+                payload["system/mem_util"] = mem_info.used / mem_info.total
             records.append({
                 "kind": "metric",
                 "run_id": "__system__",
                 "step": 0,
                 "wall_time": timestamp,
                 "context": "",
-                "payload": {
-                    "system/cpu": cpu,
-                    "system/mem_used": mem_info.used / (1024 * 1024),
-                    "system/mem_total": mem_info.total / (1024 * 1024),
-                },
+                "payload": payload,
             })
         except ImportError:
             pass

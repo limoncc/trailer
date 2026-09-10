@@ -27,6 +27,8 @@
     logY?: boolean;
     /// Metric name shown in tooltip (e.g. "train/loss")
     metricLabel?: string;
+    /// Y 值格式化(轴刻度与 tooltip),如系统指标的 GB/百分比
+    yFormat?: (v: number) => string;
     /// Moving-average window (SMA) applied per series (>1 enables)
     smoothWindow?: number;
     /// Points to highlight on the chart (e.g. latest data point marker)
@@ -49,6 +51,7 @@
     logX = false,
     logY = false,
     metricLabel = '',
+    yFormat,
     smoothWindow = 0,
     markers = [],
   }: Props = $props();
@@ -128,7 +131,7 @@
       },
       axis: {
         x: xIsTime ? { title: false, labelFormatter: (d: any) => { const dt = d instanceof Date ? d : new Date(d); return dt.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }, labelAutoHide: true, labelAutoRotate: false } : { title: false, labelAutoHide: true, labelAutoRotate: false },
-        y: { title: false, labelAutoHide: true, labelAutoRotate: false },
+        y: yFormat ? { title: false, labelAutoHide: true, labelAutoRotate: false, labelFormatter: yFormat } : { title: false, labelAutoHide: true, labelAutoRotate: false },
       },
       legend: false,
       tooltip: {
@@ -140,7 +143,7 @@
           }
           return `${xField}: ${d[xField]}`;
         },
-        items: [{ channel: 'y', name: metricLabel || yField, valueFormatter: (v: number) => { const s = String(v); const i = s.indexOf('.'); return i < 0 || s.length - i - 1 <= 6 ? s : v.toFixed(6); } }],
+        items: [{ channel: 'y', name: metricLabel || yField, valueFormatter: yFormat ?? ((v: number) => { const s = String(v); const i = s.indexOf('.'); return i < 0 || s.length - i - 1 <= 6 ? s : v.toFixed(6); }) }],
       },
       // crosshair 需配在 interaction.tooltip 而非 tooltip：crosshairsY(竖线)默认开，crosshairsX(水平线)需显式开启
       interaction: {
