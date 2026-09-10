@@ -687,6 +687,8 @@ pub struct RunListItem {
     pub created_at: f64,
     pub sweep_id: Option<String>,
     pub config: serde_json::Value,
+    /// 运行环境元数据(hardware 探针:GPU 型号等)
+    pub env: serde_json::Value,
     pub summary: HashMap<String, serde_json::Value>,
     pub owner_id: Option<i64>,
 }
@@ -898,6 +900,7 @@ pub async fn list_runs(
                         created_at: r.created_at,
                         sweep_id: r.sweep_id.clone(),
                         config: r.config.clone(),
+                        env: r.env.clone(),
                         summary,
                         owner_id: r.owner_id,
                     }
