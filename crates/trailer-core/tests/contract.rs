@@ -3,8 +3,8 @@ use std::sync::Arc;
 /// These tests run against both SQLite and PostgreSQL backends
 /// to guarantee identical behavior.
 use trailer_core::domain::{
-    ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow, ReportRow, RunFilter,
-    RunMeta, SummaryRow, TableRow, TextRow,
+    ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow, ReportRow,
+    RunDashboardRow, RunFilter, RunMeta, SummaryRow, TableRow, TextRow,
 };
 use trailer_core::storage::Storage;
 
@@ -1564,6 +1564,83 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
         .await
         .expect("get explore3")
         .is_none());
+
+    // ── Run dashboard CRUD ──
+    let dash = RunDashboardRow {
+        id: None,
+        run_id: "r1".into(),
+        title: "overview".into(),
+        layout: "{\"version\":1,\"widgets\":[]}".into(),
+        created_at: 2000.0,
+        updated_at: 2000.0,
+    };
+    let did = store.insert_run_dashboard(&dash).await.expect("insert dash");
+    assert!(did.starts_with("dash_"));
+    let got = store
+        .get_run_dashboard(&did)
+        .await
+        .expect("get dash")
+        .unwrap();
+    assert_eq!(got.run_id, "r1");
+    assert_eq!(got.title, "overview");
+
+    // 按 run 隔离 + created_at 排序
+    store
+        .insert_run_dashboard(&RunDashboardRow {
+            id: None,
+            run_id: "r2".into(),
+            title: "other run".into(),
+            layout: "{}".into(),
+            created_at: 2000.0,
+            updated_at: 2000.0,
+        })
+        .await
+        .expect("insert dash r2");
+    store
+        .insert_run_dashboard(&RunDashboardRow {
+            id: None,
+            run_id: "r1".into(),
+            title: "second".into(),
+            layout: "{}".into(),
+            created_at: 2001.0,
+            updated_at: 2001.0,
+        })
+        .await
+        .expect("insert dash r1 second");
+    let r1_dashes = store
+        .list_run_dashboards("r1")
+        .await
+        .expect("list r1 dashes");
+    assert_eq!(r1_dashes.len(), 2);
+    assert_eq!(r1_dashes[0].title, "overview");
+    assert_eq!(r1_dashes[1].title, "second");
+    assert!(store
+        .list_run_dashboards("r_missing")
+        .await
+        .expect("list missing run")
+        .is_empty());
+
+    // update
+    store
+        .update_run_dashboard(&did, "overview v2", "{\"version\":1,\"widgets\":[1]}")
+        .await
+        .expect("update dash");
+    let got = store
+        .get_run_dashboard(&did)
+        .await
+        .expect("get dash2")
+        .unwrap();
+    assert_eq!(got.title, "overview v2");
+    assert_eq!(got.layout, "{\"version\":1,\"widgets\":[1]}");
+    assert!(got.updated_at >= 2000.0);
+
+    // delete
+    store.delete_run_dashboard(&did).await.expect("delete dash");
+    assert!(store
+        .get_run_dashboard(&did)
+        .await
+        .expect("get dash3")
+        .is_none());
 }
 
 // ─── PostgreSQL contract (runs when --features pg is enabled) ───
@@ -1575,7 +1652,7 @@ async fn pg_insert_and_query_metrics() {
 
     // Clean state: drop all tables
     let pgpool = sqlx::PgPool::connect(&url).await.expect("PG connect");
-    let _ = sqlx::query("DROP TABLE IF EXISTS metrics, runs, run_summary, artifacts, figures, texts, tables, media, reports, histograms, shares, api_tokens, trailer_users, explores CASCADE")
+    let _ = sqlx::query("DROP TABLE IF EXISTS metrics, runs, run_summary, artifacts, figures, texts, tables, media, reports, histograms, shares, api_tokens, trailer_users, explores, run_dashboards CASCADE")
         .execute(&pgpool)
         .await;
     pgpool.close().await;

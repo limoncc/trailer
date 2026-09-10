@@ -168,6 +168,18 @@ pub struct ExploreRow {
     pub updated_at: f64,
 }
 
+/// A named board on a run: user-arranged dashboard of metric/log widgets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunDashboardRow {
+    pub id: Option<String>,
+    pub run_id: String,
+    pub title: String,
+    /// JSON DashboardLayout (widget list with grid layout, schemaless here)
+    pub layout: String,
+    pub created_at: f64,
+    pub updated_at: f64,
+}
+
 /// A registered user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserRow {
