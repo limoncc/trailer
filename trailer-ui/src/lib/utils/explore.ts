@@ -5,6 +5,8 @@
  * ChartDef 描述一张图:x/y/颜色来源、log 变换、图型。
  */
 
+import { displayMetricName } from './systemMetrics';
+
 export interface RunRecord {
   run_id: string;
   name: string | null;
@@ -238,7 +240,9 @@ export function buildLineRows(
   const colorField = '_series';
   const rows: Array<Record<string, unknown>> = [];
   for (const metric of metrics) {
-    const label = metric.context ? `${metric.context}/${metric.key}` : metric.key;
+    const label =
+      displayMetricName(metric.key, metric.context) ??
+      (metric.context ? `${metric.context}/${metric.key}` : metric.key);
     for (const r of runs) {
       const group = (series.get(r.run_id) ?? []).find((g) => g.key === metric.key && g.context === metric.context);
       if (!group) continue;
