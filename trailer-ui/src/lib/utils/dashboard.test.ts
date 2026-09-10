@@ -131,6 +131,23 @@ describe('parseLayout', () => {
     expect(ids.size).toBe(3);
   });
 
+  it('keeps valid header color and drops invalid ones', () => {
+    const s = JSON.stringify({
+      version: 2,
+      widgets: [
+        { id: 'w1', type: 'table', tableId: 1, color: '#FF00Aa' },
+        { id: 'w2', type: 'table', tableId: 2, color: 'red' },
+        { id: 'w3', type: 'table', tableId: 3, color: '#12345' },
+        { id: 'w4', type: 'table', tableId: 4 },
+      ],
+    });
+    const parsed = parseLayout(s);
+    expect(parsed.widgets[0].color).toBe('#ff00aa');
+    expect(parsed.widgets[1].color).toBeUndefined();
+    expect(parsed.widgets[2].color).toBeUndefined();
+    expect(parsed.widgets[3].color).toBeUndefined();
+  });
+
   it('returns empty layout for invalid JSON / wrong shapes / null', () => {
     expect(parseLayout('not json').widgets).toHaveLength(0);
     expect(parseLayout('{"widgets": 5}').widgets).toHaveLength(0);

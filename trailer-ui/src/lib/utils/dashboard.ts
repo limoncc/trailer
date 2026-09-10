@@ -10,10 +10,18 @@ export interface WidgetBase {
   id: string;
   /** 缺省 = 按内容自动生成标题 */
   title?: string;
-  /** 12 列网格的跨列数 */
+  /** 卡片头自定义颜色(#rrggbb),缺省无色条 */
+  color?: string;
+  /** 24 列网格的跨列数 */
   w: number;
   /** 行数(每行 44px) */
   h: number;
+}
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+export function normalizeColor(v: unknown): string | undefined {
+  return typeof v === 'string' && HEX_COLOR_RE.test(v) ? v.toLowerCase() : undefined;
 }
 
 export interface LineWidget extends WidgetBase {
@@ -123,6 +131,7 @@ function parseWidget(raw: unknown): DashWidget | null {
   const base = {
     id: typeof r.id === 'string' && r.id ? r.id : newWidgetId(),
     title: typeof r.title === 'string' && r.title ? r.title : undefined,
+    color: normalizeColor(r.color),
     w: clampW(r.w),
     h: clampH(r.h),
   };
