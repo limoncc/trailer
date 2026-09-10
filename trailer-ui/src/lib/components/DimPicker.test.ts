@@ -65,4 +65,34 @@ describe('DimPicker', () => {
     unmount(component);
     target.remove();
   });
+
+  it('groups multi-slash contexts by first segment (eval/train → eval group)', async () => {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const evalOptions = [
+      { axis: { kind: 'summary', summaryKey: 'sr_d2/eval/train', field: 'last' } as ScalarAxis, label: 'eval/train/sr_d2[last]' },
+      { axis: { kind: 'summary', summaryKey: 'sr/eval/test', field: 'last' } as ScalarAxis, label: 'eval/test/sr[last]' },
+    ];
+    const component = mount(DimPicker, {
+      target,
+      props: { options: evalOptions, value: [], onValueChange: vi.fn() },
+    });
+    await tick();
+    const trigger = target.querySelector('[data-slot="popover-trigger"]') as HTMLElement;
+    trigger.click();
+    await tick();
+    await tick();
+
+    // 分组头按钮形如 "eval (2)";context 含斜杠时取首段归组
+    const groupHeaders = [...document.body.querySelectorAll('button')].filter((b) =>
+      /^(.+) \(\d+\)$/.test(b.textContent?.trim() ?? ''),
+    );
+    const labels = groupHeaders.map((b) => b.textContent?.trim());
+    expect(labels).toContain('eval (2)');
+    expect(labels).not.toContain('train (1)');
+    expect(labels).not.toContain('test (1)');
+
+    unmount(component);
+    target.remove();
+  });
 });
