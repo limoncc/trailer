@@ -39,7 +39,7 @@
   let query = $state('');
   let collapsed = $state<Set<string>>(new Set());
 
-  const GROUP_ORDER = ['config', 'root', 'train', 'val', 'test', 'system'];
+  const GROUP_ORDER = ['config', 'root', 'train', 'val', 'eval', 'test', 'system'];
 
   function dimId(axis: ScalarAxis): string {
     return scalarAxisName(axis);

@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import ExploreWorkspace from '$lib/components/ExploreWorkspace.svelte';
-  import { api } from '$lib/utils/api';
-  import type { ChartDef } from '$lib/utils/explore';
+import { api } from '$lib/utils/api';
+import type { ChartDef } from '$lib/utils/explore';
+import { healChartDefs } from '$lib/utils/explore';
 
   const id = page.params.id;
   const shareToken = page.url.searchParams.get('token') ?? '';
@@ -25,7 +26,8 @@
           initialRunIds = [];
         }
         try {
-          initialDefs = JSON.parse(e.chart_defs || '[]');
+          // healChartDefs:修复旧版按最后一个 '/' 切分持久化的坏 MetricRef
+          initialDefs = healChartDefs(JSON.parse(e.chart_defs || '[]'));
         } catch {
           initialDefs = [];
         }

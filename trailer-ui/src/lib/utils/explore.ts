@@ -81,17 +81,39 @@ export function deserializeDefs(s: string): ChartDef[] | null {
         delete (d as { metric?: MetricRef }).metric;
       }
     }
-    return defs;
+    // 兼容旧数据:修复按最后一个 '/' 切分持久化的坏 MetricRef
+    return healChartDefs(defs);
   } catch {
     return null;
   }
 }
 
-/** summary key 格式是 "{key}/{context}"(后端 format),key 本身可能含 '/' → 用最后一个 '/' 分割 */
+/** summary key 格式是 "{key}/{context}"(后端 format)。写入侧 parse_key_context
+ * 按最后一个 '/' 拆分,存储层 key 永不含 '/' → 拼接串的第一个 '/' 即 key/context
+ * 边界,对任意层数斜杠的 context(eval/train、system/nvidia/gpu0)精确可逆 */
 export function parseSummaryKey(summaryKey: string): MetricRef {
-  const i = summaryKey.lastIndexOf('/');
+  const i = summaryKey.indexOf('/');
   if (i < 0) return { key: summaryKey, context: '' };
   return { key: summaryKey.slice(0, i), context: summaryKey.slice(i + 1) };
+}
+
+/** 修复旧版 parseSummaryKey(按最后一个 '/' 切分)持久化的坏 MetricRef:
+ * 那时 context 含斜杠的指标被存成 {key:"sr_d2/eval", context:"train"}。
+ * 合法 key 永不含 '/',凡 key 含 '/' 的对拼接串按首斜杠重切即可还原;
+ * summary 轴/颜色的 summaryKey 本就是无损拼接串,无需处理 */
+export function healChartDefs(defs: ChartDef[]): ChartDef[] {
+  const healMetric = (m: MetricRef): MetricRef =>
+    m.key.includes('/') ? parseSummaryKey(`${m.key}/${m.context}`) : m;
+  return defs.map((d): ChartDef => {
+    if (d.type === 'line') return { ...d, metrics: d.metrics.map(healMetric) };
+    if (d.type === 'scatter-pair')
+      return {
+        ...d,
+        x: { kind: 'metric', metric: healMetric(d.x.metric) },
+        y: { kind: 'metric', metric: healMetric(d.y.metric) },
+      };
+    return d;
+  });
 }
 
 /** 收集所有 run config 的叶节点点路径(数值/字符串/布尔),嵌套用点号 */
