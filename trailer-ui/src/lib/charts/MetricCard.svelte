@@ -43,9 +43,10 @@ import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics
   let expanded = $state(true);
   let showChart = $derived(expanded || compact);
 
-  // 系统指标用友好名(如"显存占用 · nvidia gpu0"),其余保持 key [context]
+  // 系统指标用友好名(如"VRAM used · nvidia gpu0"),其余保持 key [context];
+  // 型号名不进标题(占空间),放 hover tooltip
   let label = $derived(displayMetricName(key, context) ?? (context ? `${key} [${context}]` : key));
-  let labelWithDevice = $derived(deviceName ? `${label}（${deviceName}）` : label);
+  let labelDetail = $derived(deviceName ? `${label} · ${deviceName}` : label);
   let yFmt = $derived(systemAxisFormatter(key, context));
 
   // When smoothing is enabled, produce long-form data with a series column
@@ -105,7 +106,7 @@ import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics
   <!-- Header -->
   <div class="flex items-center gap-2 px-3 py-2 bg-muted/20 border-b border-border">
     {#if compact}
-      <span class="text-sm font-medium flex-1">{labelWithDevice}</span>
+      <span class="text-sm font-medium flex-1" title={labelDetail}>{label}</span>
     {:else}
       <button
         class="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -113,7 +114,7 @@ import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics
       >
         {expanded ? '▼' : '▶'}
       </button>
-      <span class="text-sm font-medium flex-1">{labelWithDevice}</span>
+      <span class="text-sm font-medium flex-1" title={labelDetail}>{label}</span>
       {#if onMoveUp}
         <button class="text-xs text-muted-foreground hover:text-foreground" onclick={onMoveUp} title="Move up">↑</button>
       {/if}
@@ -165,7 +166,7 @@ import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics
       height={250}
       point={false}
       yFormat={yFmt}
-      metricLabel={labelWithDevice}
+      metricLabel={label}
       markers={running ? getLatestMarkers(chartData, seriesField ? true : smooth >= 1) : []}
     />
   </div>
