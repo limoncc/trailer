@@ -43,10 +43,10 @@ import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics
   let expanded = $state(true);
   let showChart = $derived(expanded || compact);
 
-  // 系统指标用友好名(如"VRAM used · nvidia gpu0"),其余保持 key [context];
+  // 系统指标用规范路径名(如 nvidia/gpu0/vram_used),其余保持 key [context];
   // 型号名不进标题(占空间),放 hover tooltip
   let label = $derived(displayMetricName(key, context) ?? (context ? `${key} [${context}]` : key));
-  let labelDetail = $derived(deviceName ? `${label} · ${deviceName}` : label);
+  let labelDetail = $derived(deviceName ? `${label} (${deviceName})` : label);
   let yFmt = $derived(systemAxisFormatter(key, context));
 
   // When smoothing is enabled, produce long-form data with a series column

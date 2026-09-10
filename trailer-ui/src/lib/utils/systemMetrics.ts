@@ -35,34 +35,16 @@ export function canonicalKey(key: string, context: string): string {
   return LEGACY_KEY[key] ?? key;
 }
 
-const FRIENDLY: Record<string, string> = {
-  cpu_util: 'CPU util',
-  mem_used: 'Host memory',
-  mem_util: 'Host mem util',
-  gpu_util: 'GPU util',
-  vram_used: 'VRAM used',
-  vram_util: 'VRAM util',
-  power_w: 'Power',
-  temp_c: 'Temp',
-};
-
-/** 设备标签:system → host;system/nvidia/gpu0 → nvidia gpu0 */
-export function deviceLabel(context: string): string {
-  if (context === 'system') return 'host';
-  return context.replace(/^system\//, '').replaceAll('/', ' ');
-}
-
-/** 系统指标完整显示名:"VRAM used · nvidia gpu0";非系统指标返回 null */
+/** 系统指标完整显示名 = 规范路径(去 system/ 前缀) + 归一 key:
+ *   (util, system/nvidia/gpu0) → nvidia/gpu0/gpu_util
+ *   (mem_used, system/nvidia/gpu0) → nvidia/gpu0/vram_used
+ *   (cpu_util, system) → cpu_util
+ * 非系统指标返回 null。标识符本位,不做自然语言化 */
 export function displayMetricName(key: string, context: string): string | null {
   if (!isSystemContext(context)) return null;
   const c = canonicalKey(key, context);
-  if (context === 'system/cpu') {
-    if (c === 'temp_c') return 'CPU temp';
-    if (c === 'power_w') return 'CPU power';
-  }
-  const friendly = FRIENDLY[c];
-  if (!friendly) return null;
-  return context === 'system' ? friendly : `${friendly} · ${deviceLabel(context)}`;
+  const devicePath = context.slice('system/'.length);
+  return devicePath ? `${devicePath}/${c}` : c;
 }
 
 /** 值格式化:MiB→GB、0-1→百分比、W、°C */

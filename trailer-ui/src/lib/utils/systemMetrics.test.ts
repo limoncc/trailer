@@ -46,21 +46,18 @@ describe('canonicalKey', () => {
 });
 
 describe('displayMetricName', () => {
-  it('renders device series with device label', () => {
-    expect(displayMetricName('mem_used', 'system/nvidia/gpu0')).toBe('VRAM used · nvidia gpu0');
-    expect(displayMetricName('util', 'system/nvidia/gpu0')).toBe('GPU util · nvidia gpu0');
-    expect(displayMetricName('vram_used', 'system/apple/gpu0')).toBe('VRAM used · apple gpu0');
+  it('renders device series as canonical path without system/ prefix', () => {
+    expect(displayMetricName('util', 'system/nvidia/gpu0')).toBe('nvidia/gpu0/gpu_util');
+    expect(displayMetricName('mem_used', 'system/nvidia/gpu0')).toBe('nvidia/gpu0/vram_used');
+    expect(displayMetricName('vram_used', 'system/apple/gpu0')).toBe('apple/gpu0/vram_used');
+    expect(displayMetricName('temperature', 'system/cpu')).toBe('cpu/temp_c');
   });
 
-  it('renders host series without device suffix', () => {
-    expect(displayMetricName('mem_used', 'system')).toBe('Host memory');
-    expect(displayMetricName('cpu', 'system')).toBe('CPU util');
-    expect(displayMetricName('cpu_util', 'system')).toBe('CPU util');
-  });
-
-  it('renders cpu device metrics without redundant suffix', () => {
-    expect(displayMetricName('temperature', 'system/cpu')).toBe('CPU temp');
-    expect(displayMetricName('power', 'system/cpu')).toBe('CPU power');
+  it('renders host series as bare canonical key', () => {
+    expect(displayMetricName('cpu', 'system')).toBe('cpu_util');
+    expect(displayMetricName('cpu_util', 'system')).toBe('cpu_util');
+    expect(displayMetricName('mem_used', 'system')).toBe('mem_used');
+    expect(displayMetricName('mem_used_prop', 'system')).toBe('mem_util');
   });
 
   it('returns null for non-system metrics', () => {
@@ -68,8 +65,10 @@ describe('displayMetricName', () => {
     expect(displayMetricName('acc', '')).toBeNull();
   });
 
-  it('returns null for unknown system keys', () => {
-    expect(displayMetricName('mem_total', 'system')).toBeNull();
+  it('generalizes to unknown system keys via path form', () => {
+    // 标识符本位:任何 system 域 key 都按路径显示,无需映射表
+    expect(displayMetricName('mem_total', 'system')).toBe('mem_total');
+    expect(displayMetricName('anything', 'system/nvidia/gpu1')).toBe('nvidia/gpu1/anything');
   });
 });
 
