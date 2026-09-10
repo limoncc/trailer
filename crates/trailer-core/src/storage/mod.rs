@@ -6,7 +6,7 @@ pub mod postgres;
 
 use crate::domain::{
     ApiToken, ArtifactMeta, ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow,
-    ReportRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
+    ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
 };
 use crate::error::StorageResult;
 use async_trait::async_trait;
@@ -118,6 +118,13 @@ pub trait Storage: Send + Sync {
     ) -> StorageResult<Vec<ExploreRow>>;
     async fn count_explores(&self, owner_id: i64, project: Option<&str>) -> StorageResult<u64>;
     async fn get_explore(&self, id: &str) -> StorageResult<Option<ExploreRow>>;
+
+    // ── Run dashboards (per-run boards) ──
+    async fn insert_run_dashboard(&self, dash: &RunDashboardRow) -> StorageResult<String>;
+    async fn update_run_dashboard(&self, id: &str, title: &str, layout: &str) -> StorageResult<()>;
+    async fn delete_run_dashboard(&self, id: &str) -> StorageResult<()>;
+    async fn list_run_dashboards(&self, run_id: &str) -> StorageResult<Vec<RunDashboardRow>>;
+    async fn get_run_dashboard(&self, id: &str) -> StorageResult<Option<RunDashboardRow>>;
 
     // ── Tables ──
     async fn insert_table(&self, table: &TableRow) -> StorageResult<i64>;

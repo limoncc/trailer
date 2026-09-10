@@ -18,8 +18,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_stream::wrappers::BroadcastStream;
 use trailer_core::domain::{
-    Envelope, ExploreRow, FigureRow, MediaRow, MetricQuery, ReportRow, RunFilter, RunMeta,
-    TableRow, TextRow,
+    Envelope, ExploreRow, FigureRow, MediaRow, MetricQuery, ReportRow, RunDashboardRow, RunFilter,
+    RunMeta, TableRow, TextRow,
 };
 use trailer_core::downsample::lttb;
 use trailer_core::run_manager::RunManager;
@@ -179,6 +179,14 @@ pub fn router() -> Router<AppState> {
             axum::routing::get(get_explore_handler)
                 .put(update_explore_handler)
                 .delete(delete_explore_handler),
+        )
+        .route(
+            "/api/v1/runs/{id}/dashboards",
+            axum::routing::get(list_run_dashboards_handler).post(create_run_dashboard_handler),
+        )
+        .route(
+            "/api/v1/dashboards/{id}",
+            axum::routing::put(update_run_dashboard_handler).delete(delete_run_dashboard_handler),
         )
         .route("/api/v1/share", axum::routing::post(create_share))
         .route("/api/v1/shares", axum::routing::get(list_shares_handler))
@@ -1856,6 +1864,149 @@ async fn require_explore_write(
     Err(StatusCode::FORBIDDEN)
 }
 
+// ─── Run dashboards (per-run boards) ───
+
+#[derive(Deserialize)]
+pub struct CreateRunDashboardRequest {
+    pub title: String,
+    /// JSON DashboardLayout 字符串
+    pub layout: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateRunDashboardRequest {
+    pub title: Option<String>,
+    pub layout: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct RunDashboardItem {
+    pub id: String,
+    pub run_id: String,
+    pub title: String,
+    pub layout: String,
+    pub created_at: f64,
+    pub updated_at: f64,
+}
+
+fn dashboard_item(d: RunDashboardRow) -> RunDashboardItem {
+    RunDashboardItem {
+        id: d.id.unwrap_or_default(),
+        run_id: d.run_id,
+        title: d.title,
+        layout: d.layout,
+        created_at: d.created_at,
+        updated_at: d.updated_at,
+    }
+}
+
+fn now_secs() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+}
+
+pub async fn list_run_dashboards_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Query(share): Query<ShareQuery>,
+    Path(run_id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(status) = require_run_read(&state, &run_id, &headers, share.token.as_deref()).await {
+        return status.into_response();
+    }
+    match state.store.list_run_dashboards(&run_id).await {
+        Ok(rows) => Json(rows.into_iter().map(dashboard_item).collect::<Vec<_>>()).into_response(),
+        Err(e) => internal_error(e, "list_run_dashboards_handler").into_response(),
+    }
+}
+
+pub async fn create_run_dashboard_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(run_id): Path<String>,
+    Json(body): Json<CreateRunDashboardRequest>,
+) -> impl IntoResponse {
+    if let Err(status) = require_run_write(&state, &run_id, &headers).await {
+        return status.into_response();
+    }
+    let now = now_secs();
+    let row = RunDashboardRow {
+        id: None,
+        run_id,
+        title: body.title,
+        layout: body
+            .layout
+            .unwrap_or_else(|| "{\"version\":1,\"widgets\":[]}".into()),
+        created_at: now,
+        updated_at: now,
+    };
+    match state.store.insert_run_dashboard(&row).await {
+        Ok(id) => (StatusCode::CREATED, Json(serde_json::json!({"id": id}))).into_response(),
+        Err(e) => internal_error(e, "create_run_dashboard_handler").into_response(),
+    }
+}
+
+/// dashboard 写权限:解析出所属 run 后复用 run 写权限(owner/admin)
+async fn require_dashboard_write(
+    state: &AppState,
+    dash_id: &str,
+    headers: &axum::http::HeaderMap,
+) -> Result<String, StatusCode> {
+    let dash = state
+        .store
+        .get_run_dashboard(dash_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    require_run_write(state, &dash.run_id, headers).await?;
+    Ok(dash.run_id)
+}
+
+pub async fn update_run_dashboard_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateRunDashboardRequest>,
+) -> impl IntoResponse {
+    // PUT 为全量语义:缺失字段回落到现值
+    let existing = match state.store.get_run_dashboard(&id).await {
+        Ok(Some(d)) => d,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => return internal_error(e, "update_run_dashboard_handler").into_response(),
+    };
+    if let Err(status) = require_dashboard_write(&state, &id, &headers).await {
+        return status.into_response();
+    }
+    match state
+        .store
+        .update_run_dashboard(
+            &id,
+            body.title.as_deref().unwrap_or(&existing.title),
+            body.layout.as_deref().unwrap_or(&existing.layout),
+        )
+        .await
+    {
+        Ok(()) => Json(serde_json::json!({"id": id})).into_response(),
+        Err(e) => internal_error(e, "update_run_dashboard_handler").into_response(),
+    }
+}
+
+pub async fn delete_run_dashboard_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(status) = require_dashboard_write(&state, &id, &headers).await {
+        return status.into_response();
+    }
+    match state.store.delete_run_dashboard(&id).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => internal_error(e, "delete_run_dashboard_handler").into_response(),
+    }
+}
+
 // ─── POST /api/v1/share ───
 
 #[derive(Deserialize)]
@@ -2565,7 +2716,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use axum::routing::{delete, get, post};
+    use axum::routing::{delete, get, post, put};
     use axum::Router;
     use std::time::Duration;
     use tower::ServiceExt;
@@ -2603,6 +2754,7 @@ mod tests {
                     sweep_id: None,
                     config: None,
                     created_at: None,
+                    env: None,
                 })
                 .unwrap(),
             ))
@@ -2705,6 +2857,14 @@ mod tests {
             )
             .route("/api/v1/runs/{id}/tables/{table_id}", get(get_table))
             .route(
+                "/api/v1/runs/{id}/dashboards",
+                get(list_run_dashboards_handler).post(create_run_dashboard_handler),
+            )
+            .route(
+                "/api/v1/dashboards/{id}",
+                put(update_run_dashboard_handler).delete(delete_run_dashboard_handler),
+            )
+            .route(
                 "/api/v1/projects/{name}/delete",
                 post(delete_project_handler),
             )
@@ -2782,6 +2942,7 @@ mod tests {
                         sweep_id: None,
                         config: None,
                         created_at: None,
+                        env: None,
                     })
                     .unwrap(),
                 ))
@@ -2829,6 +2990,7 @@ mod tests {
                     sweep_id: None,
                     config: None,
                     created_at: None,
+                    env: None,
                 })
                 .unwrap(),
             ))
@@ -2933,6 +3095,7 @@ mod tests {
                     sweep_id: None,
                     config: None,
                     created_at: None,
+                    env: None,
                 })
                 .unwrap(),
             ))
@@ -3094,6 +3257,141 @@ mod tests {
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn run_dashboards_crud() {
+        let app = test_app().await;
+        let token = login_and_create_run(&app, "p1", "r1").await;
+        let auth_val = format!("Bearer {}", token);
+
+        // Create dashboard
+        let body = serde_json::json!({
+            "title": "overview",
+            "layout": "{\"version\":1,\"widgets\":[]}",
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/r1/dashboards")
+            .header("content-type", "application/json")
+            .header("authorization", &auth_val)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let did = json["id"].as_str().unwrap().to_string();
+        assert!(did.starts_with("dash_"));
+
+        // List
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/r1/dashboards")
+            .header("authorization", &auth_val)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let list: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["title"], "overview");
+
+        // Update layout
+        let body = serde_json::json!({
+            "layout": "{\"version\":1,\"widgets\":[{\"id\":\"w1\",\"type\":\"line\"}]}",
+        });
+        let req = Request::builder()
+            .method("PUT")
+            .uri(format!("/api/v1/dashboards/{}", did))
+            .header("content-type", "application/json")
+            .header("authorization", &auth_val)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/r1/dashboards")
+            .header("authorization", &auth_val)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let list: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert!(list[0]["layout"]
+            .as_str()
+            .unwrap()
+            .contains("\"w1\""),);
+
+        // Anonymous without token → 401;with run share token → 200
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/r1/dashboards")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let body = serde_json::json!({"resource_type": "run", "resource_id": "r1"});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/share")
+            .header("content-type", "application/json")
+            .header("authorization", &auth_val)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let stoken = json["token"].as_str().unwrap().to_string();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/runs/r1/dashboards?token={}", stoken))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Anonymous mutation → 401
+        let body = serde_json::json!({"title": "hijack"});
+        let req = Request::builder()
+            .method("PUT")
+            .uri(format!("/api/v1/dashboards/{}", did))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Delete
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/dashboards/{}", did))
+            .header("authorization", &auth_val)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/r1/dashboards")
+            .header("authorization", &auth_val)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let list: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert!(list.is_empty());
     }
 
     #[tokio::test]
@@ -3498,6 +3796,7 @@ mod tests {
                     sweep_id: None,
                     config: None,
                     created_at: None,
+                    env: None,
                 })
                 .unwrap(),
             ))
@@ -3565,6 +3864,7 @@ mod tests {
                     sweep_id: None,
                     config: None,
                     created_at: None,
+                    env: None,
                 })
                 .unwrap(),
             ))
@@ -3633,6 +3933,7 @@ mod tests {
                     sweep_id: None,
                     config: None,
                     created_at: None,
+                    env: None,
                 })
                 .unwrap(),
             ))
@@ -3659,6 +3960,7 @@ mod tests {
                     sweep_id: None,
                     config: None,
                     created_at: None,
+                    env: None,
                 })
                 .unwrap(),
             ))

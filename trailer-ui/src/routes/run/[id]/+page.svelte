@@ -14,6 +14,7 @@
   import LandscapeExplorer from '$lib/charts/landscape/LandscapeExplorer.svelte';
   import Card from '$lib/components/ui/Card.svelte';
   import MetricPicker from '$lib/components/MetricPicker.svelte';
+  import BoardsPanel from '$lib/components/boards/BoardsPanel.svelte';
   import type { MetricRef } from '$lib/utils/explore';
 
   interface MetricGroup {
@@ -22,7 +23,7 @@
     points: Array<{ step: number; value: number; idx: number; wall_time?: number }>;
   }
 
-  let tab = $state<'config' | 'metrics' | 'histograms' | 'pca' | 'landscape' | 'figures' | 'texts' | 'media' | 'tables' | 'model'>('metrics');
+  let tab = $state<'config' | 'metrics' | 'histograms' | 'pca' | 'landscape' | 'figures' | 'texts' | 'media' | 'tables' | 'model' | 'boards'>('metrics');
   let runId = $state('');
   let runState = $state('');
   let runConfig = $state<Record<string, unknown> | null>(null);
@@ -66,6 +67,7 @@
     { k: 'media', l: 'Media', has: tabData.media },
     { k: 'tables', l: 'Tables', has: tabData.tables },
     { k: 'model', l: 'Model', has: tabData.model },
+    { k: 'boards', l: 'Boards', has: true },
   ]);
 
   /// 并行探测各数据类型是否存在(仅首次加载),决定 tab 显隐。
@@ -90,15 +92,6 @@
     } catch { /* 探测失败时对应 tab 保持隐藏 */ }
     tabDataLoaded = true;
   }
-
-  /// 探测完成后:当前 tab 无数据时自动切到第一个有数据的 tab。
-  $effect(() => {
-    if (!tabDataLoaded) return;
-    const visible = tabs.filter(t => t.has);
-    if (visible.length > 0 && !visible.some(t => t.k === tab)) {
-      tab = visible[0].k as any;
-    }
-  });
 
   async function createShare() {
     const days = shareExpiry === '0' ? null : parseInt(shareExpiry);
@@ -287,7 +280,18 @@
 
   $effect(() => {
     const id = page.params.id;
-    if (id && id !== runId) { runId = id; maxStep = 0; loadMetrics(id); loadTabAvailability(id); }
+    if (id && id !== runId) {
+      runId = id; maxStep = 0;
+      // 首次加载:两个加载都完成后才做一次"当前 tab 无数据则切走"的决策。
+      // 不能在单个加载完成时就决策——metrics/config 尚在加载会被误判为无数据;
+      // boards 恒可用,排除在候选外,避免抢走首屏(空 run 保持落在 Metrics 显示空态)。
+      Promise.all([loadMetrics(id), loadTabAvailability(id)]).then(() => {
+        const visible = tabs.filter(t => t.has && t.k !== 'boards');
+        if (visible.length > 0 && !visible.some(t => t.k === tab)) {
+          tab = visible[0].k as typeof tab;
+        }
+      });
+    }
   });
 
   // Auto-refresh: incremental update (only fetches points after maxStep)
@@ -407,6 +411,8 @@
       {#key tab}
         <ModelExplorer {runId} />
       {/key}
+    {:else if tab === 'boards'}
+      <BoardsPanel {runId} {metrics} metricOptions={metricOptions} {runState} />
     {:else if tab === 'config'}
       <Card>
         <div class="p-4">
