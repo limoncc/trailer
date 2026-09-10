@@ -88,7 +88,7 @@ impl RustTracker {
     }
 
     /// Create a run entry in the runs table.
-    #[pyo3(signature = (run_id, project, name, sweep_id=None, config_json=None, owner_id=None))]
+    #[pyo3(signature = (run_id, project, name, sweep_id=None, config_json=None, owner_id=None, env_json=None))]
     fn create_run(
         &self,
         run_id: String,
@@ -97,12 +97,16 @@ impl RustTracker {
         sweep_id: Option<String>,
         config_json: Option<String>,
         owner_id: Option<i64>,
+        env_json: Option<String>,
     ) -> PyResult<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs_f64();
         let config = config_json
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(serde_json::json!({}));
+        let env = env_json
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or(serde_json::json!({}));
         let run = RunMeta {
@@ -112,7 +116,7 @@ impl RustTracker {
             name: Some(name),
             state: "running".into(),
             config,
-            env: serde_json::json!({}),
+            env,
             git_commit: None,
             sweep_id,
             created_at: now,

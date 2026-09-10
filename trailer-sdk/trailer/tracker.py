@@ -203,11 +203,12 @@ class Tracker:
         # Create run entry in the database
         try:
             name_str = name or self.run_id[:12]
+            hardware_env = self._hardware_env()
             if self._mode == "local":
-                self._backend._rust.create_run(self.run_id, self.project, name_str, self.sweep_id, json.dumps(self.config), 1)
+                self._backend._rust.create_run(self.run_id, self.project, name_str, self.sweep_id, json.dumps(self.config), 1, json.dumps(hardware_env))
             elif self._mode == "remote":
                 import urllib.request as _ur
-                body = json.dumps({"project": self.project, "name": name_str, "run_id": self.run_id, "sweep_id": self.sweep_id, "config": self.config}).encode()
+                body = json.dumps({"project": self.project, "name": name_str, "run_id": self.run_id, "sweep_id": self.sweep_id, "config": self.config, "env": hardware_env}).encode()
                 req = _ur.Request(f"{host.rstrip('/')}/api/v1/runs", data=body,
                     headers=self._auth_headers(), method="POST")
                 _ur.urlopen(req, timeout=5)
@@ -238,6 +239,26 @@ class Tracker:
         if self._token:
             headers["authorization"] = f"Bearer {self._token}"
         return headers
+
+    def _hardware_env(self) -> Dict[str, Any]:
+        """一次硬件探针,写入 run env.hardware(GPU 型号/显存总量等),供前端辨识设备。"""
+        try:
+            from . import _rust as _r
+            if _r is None:
+                return {}
+            sample = json.loads(_r.sample_hardware())
+            gpus = [
+                {
+                    "vendor": g.get("vendor"),
+                    "index": g.get("index"),
+                    "name": g.get("name"),
+                    "total_mb": g.get("mem_total_mb"),
+                }
+                for g in sample.get("gpus", [])
+            ]
+            return {"hardware": {"gpus": gpus, "mem_total_mb": sample.get("memory_total_mb")}}
+        except Exception:
+            return {}
 
     def _start_monitor(self):
         """Start hardware monitoring daemon thread.
@@ -282,17 +303,19 @@ class Tracker:
             ts = sample["timestamp"]
 
             # CPU + memory record
+            # 命名语法 <域>/<设备>/<资源>_<度量>[_单位]:key 自解释,
+            # vram_*/mem_* 区分显存与主机内存,*_util 统一为 0-1 利用率
             mem_total = sample.get("memory_total_mb", 0)
             cpu_payload = {
-                "system/cpu": sample["cpu_usage"],
+                "system/cpu_util": sample["cpu_usage"],
                 "system/mem_used": sample["memory_used_mb"],
             }
             if mem_total > 0:
-                cpu_payload["system/mem_used_prop"] = sample["memory_used_mb"] / mem_total
+                cpu_payload["system/mem_util"] = sample["memory_used_mb"] / mem_total
             if sample.get("cpu_temp_c") is not None:
-                cpu_payload["system/cpu/temperature"] = sample["cpu_temp_c"]
+                cpu_payload["system/cpu/temp_c"] = sample["cpu_temp_c"]
             if sample.get("cpu_power_w") is not None:
-                cpu_payload["system/cpu/power"] = sample["cpu_power_w"]
+                cpu_payload["system/cpu/power_w"] = sample["cpu_power_w"]
             self._buffer.put({
                 "kind": "metric",
                 "run_id": self.run_id,
@@ -307,19 +330,19 @@ class Tracker:
                 prefix = f"system/{gpu['vendor']}/gpu{gpu['index']}"
                 payload = {}
                 if gpu.get("gpu_util") is not None:
-                    payload[f"{prefix}/util"] = gpu["gpu_util"]
+                    payload[f"{prefix}/gpu_util"] = gpu["gpu_util"]
                 if gpu.get("mem_used_mb") is not None:
-                    payload[f"{prefix}/mem_used"] = gpu["mem_used_mb"]
+                    payload[f"{prefix}/vram_used"] = gpu["mem_used_mb"]
                     # Proportion: use GPU total if available, else system total (unified memory)
                     gpu_total = gpu.get("mem_total_mb")
                     if gpu_total and gpu_total > 0:
-                        payload[f"{prefix}/mem_used_prop"] = gpu["mem_used_mb"] / gpu_total
+                        payload[f"{prefix}/vram_util"] = gpu["mem_used_mb"] / gpu_total
                     elif mem_total > 0:
-                        payload[f"{prefix}/mem_used_prop"] = gpu["mem_used_mb"] / mem_total
+                        payload[f"{prefix}/vram_util"] = gpu["mem_used_mb"] / mem_total
                 if gpu.get("temp_c") is not None:
-                    payload[f"{prefix}/temperature"] = gpu["temp_c"]
+                    payload[f"{prefix}/temp_c"] = gpu["temp_c"]
                 if gpu.get("power_w") is not None:
-                    payload[f"{prefix}/power"] = gpu["power_w"]
+                    payload[f"{prefix}/power_w"] = gpu["power_w"]
                 if payload:
                     self._buffer.put({
                         "kind": "metric",

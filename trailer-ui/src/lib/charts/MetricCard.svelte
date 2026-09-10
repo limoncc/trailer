@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { inview } from '$lib/utils/inview';
-  import LineChart from './LineChart.svelte';
+import { inview } from '$lib/utils/inview';
+import LineChart from './LineChart.svelte';
+import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics';
 
   interface Point {
     step: number;
@@ -17,6 +18,7 @@
     colors?: string[];             // palette for multi-series
     running?: boolean;
     compact?: boolean;             // hide controls when true
+    deviceName?: string;           // 系统指标的设备型号(来自 run env.hardware)
     onRemove?: () => void;
     onMoveUp?: () => void;
     onMoveDown?: () => void;
@@ -30,6 +32,7 @@
     colors,
     running = false,
     compact = false,
+    deviceName = '',
     onRemove,
     onMoveUp,
     onMoveDown,
@@ -40,7 +43,10 @@
   let expanded = $state(true);
   let showChart = $derived(expanded || compact);
 
-  let label = $derived(context ? `${key} [${context}]` : key);
+  // 系统指标用友好名(如"显存占用 · nvidia gpu0"),其余保持 key [context]
+  let label = $derived(displayMetricName(key, context) ?? (context ? `${key} [${context}]` : key));
+  let labelWithDevice = $derived(deviceName ? `${label}（${deviceName}）` : label);
+  let yFmt = $derived(systemAxisFormatter(key, context));
 
   // When smoothing is enabled, produce long-form data with a series column
   // so G2 draws two separate lines (raw transparent + smoothed solid).
@@ -99,7 +105,7 @@
   <!-- Header -->
   <div class="flex items-center gap-2 px-3 py-2 bg-muted/20 border-b border-border">
     {#if compact}
-      <span class="text-sm font-medium flex-1">{label}</span>
+      <span class="text-sm font-medium flex-1">{labelWithDevice}</span>
     {:else}
       <button
         class="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -107,7 +113,7 @@
       >
         {expanded ? '▼' : '▶'}
       </button>
-      <span class="text-sm font-medium flex-1">{label}</span>
+      <span class="text-sm font-medium flex-1">{labelWithDevice}</span>
       {#if onMoveUp}
         <button class="text-xs text-muted-foreground hover:text-foreground" onclick={onMoveUp} title="Move up">↑</button>
       {/if}
@@ -158,6 +164,8 @@
       colors={colors || ['rgba(59,130,246,0.15)', '#3b82f6']}
       height={250}
       point={false}
+      yFormat={yFmt}
+      metricLabel={labelWithDevice}
       markers={running ? getLatestMarkers(chartData, seriesField ? true : smooth >= 1) : []}
     />
   </div>

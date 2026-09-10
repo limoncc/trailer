@@ -860,7 +860,7 @@ async fn file_storage_reports_and_delete_project() {
     assert_ne!(rid1, rid2);
     assert_eq!(
         store
-            .list_reports(Some("rpp"), None, None)
+            .list_reports(Some("rpp"), None, None, None)
             .await
             .expect("list proj")
             .len(),
@@ -868,7 +868,7 @@ async fn file_storage_reports_and_delete_project() {
     );
     assert_eq!(
         store
-            .list_reports(Some("other"), None, None)
+            .list_reports(Some("other"), None, None, None)
             .await
             .expect("list other")
             .len(),
@@ -912,7 +912,7 @@ async fn file_storage_reports_and_delete_project() {
     );
     assert!(
         store
-            .list_reports(Some("rpp"), None, None)
+            .list_reports(Some("rpp"), None, None, None)
             .await
             .expect("list after")
             .is_empty(),
@@ -1196,7 +1196,7 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
     let rid = store.insert_report(&report).await.expect("insert_report");
     assert!(rid.starts_with("report_"));
     let reports = store
-        .list_reports(Some("test"), None, None)
+        .list_reports(Some("test"), None, None, None)
         .await
         .expect("list_reports");
     assert_eq!(reports.len(), 1);

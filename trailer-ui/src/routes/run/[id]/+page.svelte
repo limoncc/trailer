@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import MetricCard from '$lib/charts/MetricCard.svelte';
+  import { displayMetricName } from '$lib/utils/systemMetrics';
   import TextExplorer from '$lib/charts/TextExplorer.svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
@@ -25,6 +26,8 @@
   let runId = $state('');
   let runState = $state('');
   let runConfig = $state<Record<string, unknown> | null>(null);
+  // run env.hardware(SDK 注册时上报):context(system/nvidia/gpu0) → GPU 型号名
+  let gpuNames = $state<Map<string, string>>(new Map());
   let metrics = $state<MetricGroup[]>([]);
   let loading = $state(true);
   let hidden = $state<Set<string>>(new Set());
@@ -213,7 +216,18 @@
       if (runsResp.ok) {
         const runs = await runsResp.json();
         const r = runs.find((x: any) => x.run_id === id);
-        if (r) { runState = r.state; runConfig = r.config || null; }
+        if (r) {
+          runState = r.state;
+          runConfig = r.config || null;
+          const gpus = r.env?.hardware?.gpus;
+          if (Array.isArray(gpus)) {
+            gpuNames = new Map(
+              gpus
+                .filter((g: any) => g?.name)
+                .map((g: any) => [`system/${g.vendor}/gpu${g.index}`, g.name])
+            );
+          }
+        }
       }
       tabData.config = !!runConfig && Object.keys(runConfig).length > 0;
     } catch (_) {}
@@ -345,7 +359,7 @@
             options={metricOptions}
             value={visibleRefs}
             onValueChange={onMetricsChange}
-            formatLabel={(m) => (m.context ? `${m.key} [${m.context}]` : m.key)}
+            formatLabel={(m) => displayMetricName(m.key, m.context) ?? (m.context ? `${m.key} [${m.context}]` : m.key)}
           />
           <input
             type="text"
@@ -378,6 +392,7 @@
                 context={m.context}
                 data={m.points}
                 running={runState === 'running'}
+                deviceName={gpuNames.get(m.context) ?? ''}
                 onMoveUp={i > 0 ? () => moveMetric(i, -1) : undefined}
                 onMoveDown={i < visibleMetrics.length - 1 ? () => moveMetric(i, 1) : undefined}
                 onRemove={() => { const s = new Set(hidden); s.add(metricId(m)); hidden = s; }}

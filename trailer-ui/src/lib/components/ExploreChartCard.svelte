@@ -16,6 +16,7 @@
   import MetricPicker from '$lib/components/MetricPicker.svelte';
   import DimPicker from '$lib/components/DimPicker.svelte';
   import { groupMetricsByContext } from '$lib/utils/metricGroups';
+  import { displayMetricName } from '$lib/utils/systemMetrics';
 
   interface Props {
     def: ChartDef;
@@ -34,7 +35,7 @@
 
   const description = $derived(
     def.type === 'line'
-      ? `${def.metrics.map(metricLabel).join(', ')} · ${colorLabel(def.color)}`
+      ? `${def.metrics.map(metricDisplay).join(', ')} · ${colorLabel(def.color)}`
       : def.type === 'scatter'
         ? `${scalarLabel(def.x)} → ${scalarLabel(def.y)}`
         : def.type === 'scatter-pair'
@@ -77,6 +78,11 @@
 
   function metricLabel(m: MetricRef): string {
     return m.context ? `${m.context}/${m.key}` : m.key;
+  }
+
+  // 展示名:系统指标用友好名(显存占用 · nvidia gpu0),选项 value 仍用 metricLabel 保证 round-trip
+  function metricDisplay(m: MetricRef): string {
+    return displayMetricName(m.key, m.context) ?? metricLabel(m);
   }
 
   function colorLabel(c: ColorSpec): string {
@@ -195,7 +201,7 @@
         options={summaryOptions.map((o) => ({ key: o.key, context: o.context }))}
         value={def.metrics}
         onValueChange={(next) => onChange({ ...def, metrics: next })}
-        formatLabel={metricLabel}
+        formatLabel={metricDisplay}
       />
       <select
         value={def.x.kind}
@@ -326,7 +332,7 @@
         {#each summaryGroups as g}
           <optgroup label={g.label}>
             {#each g.items as o}
-              <option value={metricLabel({ key: o.key, context: o.context })}>x: {metricLabel({ key: o.key, context: o.context })}</option>
+              <option value={metricLabel({ key: o.key, context: o.context })}>x: {metricDisplay({ key: o.key, context: o.context })}</option>
             {/each}
           </optgroup>
         {/each}
@@ -339,7 +345,7 @@
         {#each summaryGroups as g}
           <optgroup label={g.label}>
             {#each g.items as o}
-              <option value={metricLabel({ key: o.key, context: o.context })}>y: {metricLabel({ key: o.key, context: o.context })}</option>
+              <option value={metricLabel({ key: o.key, context: o.context })}>y: {metricDisplay({ key: o.key, context: o.context })}</option>
             {/each}
           </optgroup>
         {/each}

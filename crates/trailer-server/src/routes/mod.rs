@@ -582,6 +582,8 @@ pub struct CreateRunRequest {
     pub sweep_id: Option<String>,
     pub config: Option<serde_json::Value>,
     pub created_at: Option<f64>,
+    /// 运行环境元数据(SDK 注册时上报硬件信息,如 GPU 型号),默认空对象。
+    pub env: Option<serde_json::Value>,
 }
 
 pub async fn create_run(
@@ -617,7 +619,7 @@ pub async fn create_run(
         name: body.name,
         state: "running".into(),
         config: body.config.unwrap_or(serde_json::json!({})),
-        env: serde_json::json!({}),
+        env: body.env.unwrap_or(serde_json::json!({})),
         git_commit: None,
         sweep_id: body.sweep_id,
         created_at: body.created_at.unwrap_or(now),
