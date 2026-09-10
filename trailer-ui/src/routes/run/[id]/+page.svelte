@@ -14,6 +14,7 @@
   import LandscapeExplorer from '$lib/charts/landscape/LandscapeExplorer.svelte';
   import Card from '$lib/components/ui/Card.svelte';
   import MetricPicker from '$lib/components/MetricPicker.svelte';
+  import BoardsPanel from '$lib/components/boards/BoardsPanel.svelte';
   import type { MetricRef } from '$lib/utils/explore';
 
   interface MetricGroup {
@@ -22,7 +23,7 @@
     points: Array<{ step: number; value: number; idx: number; wall_time?: number }>;
   }
 
-  let tab = $state<'config' | 'metrics' | 'histograms' | 'pca' | 'landscape' | 'figures' | 'texts' | 'media' | 'tables' | 'model'>('metrics');
+  let tab = $state<'config' | 'metrics' | 'histograms' | 'pca' | 'landscape' | 'figures' | 'texts' | 'media' | 'tables' | 'model' | 'boards'>('metrics');
   let runId = $state('');
   let runState = $state('');
   let runConfig = $state<Record<string, unknown> | null>(null);
@@ -66,6 +67,7 @@
     { k: 'media', l: 'Media', has: tabData.media },
     { k: 'tables', l: 'Tables', has: tabData.tables },
     { k: 'model', l: 'Model', has: tabData.model },
+    { k: 'boards', l: 'Boards', has: true },
   ]);
 
   /// 并行探测各数据类型是否存在(仅首次加载),决定 tab 显隐。
@@ -407,6 +409,8 @@
       {#key tab}
         <ModelExplorer {runId} />
       {/key}
+    {:else if tab === 'boards'}
+      <BoardsPanel {runId} {metrics} metricOptions={metricOptions} {runState} />
     {:else if tab === 'config'}
       <Card>
         <div class="p-4">
