@@ -12,6 +12,8 @@
 /// | Windows  | `sysinfo` | (none yet) |
 ///
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// GPU sample, one per detected GPU device.
@@ -19,6 +21,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct GpuSample {
     pub vendor: String,
     pub index: u32,
+    /// 设备型号名(NVML device.name() / Apple Silicon 标识),拿不到为 None。
+    pub name: Option<String>,
     pub gpu_util: Option<f64>,
     pub mem_used_mb: Option<f64>,
     pub mem_total_mb: Option<f64>,
@@ -66,10 +70,24 @@ fn now_secs() -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Sample CPU usage and memory using `sysinfo`
+/// Sample CPU usage and memory using `sysinfo`.
+///
+/// sysinfo 的 CPU 利用率是相邻两次刷新之间的增量:必须持有长生命周期实例,
+/// 否则每次新建后立即读数恒为 0。首次调用补一次 MINIMUM_CPU_UPDATE_INTERVAL
+/// 间隔的刷新(仅 monitor 线程内一次性 200ms 阻塞),之后每次采样即为真实增量。
 fn sample_cpu_memory() -> (f64, f64, f64) {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_cpu_usage();
+    static SYS: Mutex<Option<sysinfo::System>> = Mutex::new(None);
+    static PRIMED: AtomicBool = AtomicBool::new(false);
+    let mut guard = SYS.lock().unwrap_or_else(|e| e.into_inner());
+    let sys = guard.get_or_insert_with(|| {
+        let mut s = sysinfo::System::new();
+        s.refresh_cpu_usage();
+        s
+    });
+    if !PRIMED.swap(true, Ordering::Relaxed) {
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        sys.refresh_cpu_usage();
+    }
     sys.refresh_memory();
 
     let cpu_usage = sys.global_cpu_usage() as f64 / 100.0;
@@ -148,6 +166,7 @@ fn sample_nvidia_gpus() -> Result<Vec<GpuSample>, Box<dyn std::error::Error>> {
         gpus.push(GpuSample {
             vendor: "nvidia".into(),
             index: i,
+            name: device.name().ok(),
             gpu_util: util.map(|u| u.gpu as f64 / 100.0),
             mem_used_mb: mem.as_ref().map(|m| m.used as f64 / (1024.0 * 1024.0)),
             mem_total_mb: mem.map(|m| m.total as f64 / (1024.0 * 1024.0)),
@@ -223,6 +242,7 @@ fn sample_amd_gpus_sysfs() -> Result<Vec<GpuSample>, Box<dyn std::error::Error>>
         gpus.push(GpuSample {
             vendor: "amd".into(),
             index,
+            name: None, // sysfs 拿不到型号名(hwmon product_name 各厂商不一,留空)
             gpu_util: gpu_busy,
             mem_used_mb: vram_used,
             mem_total_mb: vram_total,
@@ -251,6 +271,7 @@ fn sample_apple_gpus() -> Result<Vec<GpuSample>, Box<dyn std::error::Error>> {
     gpus.push(GpuSample {
         vendor: "apple".into(),
         index: 0,
+        name: Some("Apple Silicon GPU (Metal)".into()),
         gpu_util: usage_info.map(|u| u.0),
         mem_used_mb: mem_info.map(|b| b as f64 / (1024.0 * 1024.0)),
         mem_total_mb: None,
