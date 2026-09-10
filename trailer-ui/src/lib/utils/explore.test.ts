@@ -11,6 +11,7 @@ import {
   scalarAxisName,
   serializeDefs,
   deserializeDefs,
+  healChartDefs,
   loadSeries,
 } from './explore';
 import type { RunRecord, SeriesData, BatchQuery, ChartDef } from './explore';
@@ -41,6 +42,8 @@ const runs: RunRecord[] = [
 ];
 
 describe('parseSummaryKey', () => {
+  // 不变量:写入侧 parse_key_context 按最后一个 '/' 拆分,存储层 key 永不含 '/';
+  // API 拼接串 "key/context" 的第一个 '/' 即边界 → 任意层数斜杠的 context 精确可逆
   it('parses empty context (key ending with slash)', () => {
     expect(parseSummaryKey('loss/')).toEqual({ key: 'loss', context: '' });
   });
@@ -49,8 +52,20 @@ describe('parseSummaryKey', () => {
     expect(parseSummaryKey('loss/train')).toEqual({ key: 'loss', context: 'train' });
   });
 
-  it('handles key containing slashes', () => {
-    expect(parseSummaryKey('train/loss/')).toEqual({ key: 'train/loss', context: '' });
+  it('parses multi-slash context (eval nested)', () => {
+    expect(parseSummaryKey('sr_d2/eval/train')).toEqual({ key: 'sr_d2', context: 'eval/train' });
+  });
+
+  it('parses four-level context', () => {
+    expect(parseSummaryKey('m/a/b/c/d')).toEqual({ key: 'm', context: 'a/b/c/d' });
+  });
+
+  it('parses composite with empty key', () => {
+    expect(parseSummaryKey('/train/loss')).toEqual({ key: '', context: 'train/loss' });
+  });
+
+  it('parses bare key without slash', () => {
+    expect(parseSummaryKey('loss')).toEqual({ key: 'loss', context: '' });
   });
 });
 
@@ -81,6 +96,46 @@ describe('collectSummaryOptions', () => {
     const opts = collectSummaryOptions(runs);
     const lossTrain = opts.find((o) => o.summaryKey === 'loss/train');
     expect(lossTrain).toEqual({ summaryKey: 'loss/train', key: 'loss', context: 'train' });
+  });
+
+  // 原始 bug 回归:context 含斜杠(eval/train)时按最后一个 '/' 切分会解错,
+  // 导致 Explore 选 eval 指标后 batch-query 查 0 行、不出图
+  it('decodes slash contexts and matches series end-to-end (regression)', () => {
+    const evalRuns: RunRecord[] = [
+      {
+        run_id: 'e1',
+        name: 'eval run',
+        state: 'running',
+        project: 'p1',
+        created_at: 3,
+        sweep_id: null,
+        config: {},
+        summary: { 'sr_d2/eval/train': { last: 0.29 }, 'loss/': { last: 0.5 } },
+        owner_id: null,
+      },
+    ];
+    const evalSeries: SeriesData = new Map([
+      [
+        'e1',
+        [
+          {
+            run_id: 'e1',
+            key: 'sr_d2',
+            context: 'eval/train',
+            points: [
+              { step: 0, wall_time: 1, value: 0.1, idx: 0 },
+              { step: 20, wall_time: 2, value: 0.2, idx: 1 },
+            ],
+          },
+        ],
+      ],
+    ]);
+    const opts = collectSummaryOptions(evalRuns);
+    const sr = opts.find((o) => o.key === 'sr_d2');
+    expect(sr).toEqual({ summaryKey: 'sr_d2/eval/train', key: 'sr_d2', context: 'eval/train' });
+    const { rows } = buildLineRows(evalRuns, [sr!], { kind: 'run' }, evalSeries);
+    expect(rows.length).toBe(2);
+    expect(rows[0]).toMatchObject({ step: 0, value: 0.1, run_id: 'e1', _series: 'e1 | eval/train/sr_d2' });
   });
 });
 
@@ -269,3 +324,70 @@ describe('chart data builders', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('healChartDefs', () => {
+  // 旧版 parseSummaryKey 按最后一个 '/' 切分,保存的 MetricRef key 会吞进 context 前缀。
+  // 合法 key 永不含 '/',凡 key 含 '/' 的按首斜杠重切修复
+  it('heals line/scatter-pair MetricRefs saved with the legacy wrong split', () => {
+    const defs: ChartDef[] = [
+      {
+        type: 'line',
+        x: { kind: 'step' },
+        metrics: [
+          { key: 'sr_d2/eval', context: 'train' },
+          { key: 'loss', context: '' },
+        ],
+        color: { kind: 'run' },
+      },
+      {
+        type: 'scatter-pair',
+        x: { kind: 'metric', metric: { key: 'sr/eval', context: 'test' } },
+        y: { kind: 'metric', metric: { key: 'loss', context: 'train' } },
+        color: { kind: 'run' },
+      },
+    ];
+    const healed = healChartDefs(defs);
+    expect((healed[0] as Extract<ChartDef, { type: 'line' }>).metrics).toEqual([
+      { key: 'sr_d2', context: 'eval/train' },
+      { key: 'loss', context: '' },
+    ]);
+    const pair = healed[1] as Extract<ChartDef, { type: 'scatter-pair' }>;
+    expect(pair.x.metric).toEqual({ key: 'sr', context: 'eval/test' });
+    expect(pair.y.metric).toEqual({ key: 'loss', context: 'train' });
+  });
+
+  it('leaves summary axes, colors and configs untouched', () => {
+    const defs: ChartDef[] = [
+      {
+        type: 'scatter',
+        x: { kind: 'summary', summaryKey: 'sr_d2/eval/train', field: 'last' },
+        y: { kind: 'config', path: 'params' },
+        color: { kind: 'summary', summaryKey: 'loss/train', field: 'best' },
+      },
+      { type: 'parallel', dims: [{ kind: 'summary', summaryKey: 'acc/', field: 'max' }] },
+    ];
+    expect(healChartDefs(defs)).toEqual(defs);
+  });
+
+  it('does not mutate the input defs', () => {
+    const defs: ChartDef[] = [
+      { type: 'line', x: { kind: 'step' }, metrics: [{ key: 'sr_d2/eval', context: 'train' }], color: { kind: 'run' } },
+    ];
+    healChartDefs(defs);
+    expect((defs[0] as Extract<ChartDef, { type: 'line' }>).metrics[0]).toEqual({
+      key: 'sr_d2/eval',
+      context: 'train',
+    });
+  });
+
+  it('deserializeDefs heals legacy defs from saved explores / share URLs', () => {
+    const legacy = [
+      { type: 'line', x: { kind: 'step' }, metrics: [{ key: 'sr_d2/eval', context: 'train' }], color: { kind: 'run' } },
+    ];
+    const back = deserializeDefs(btoa(encodeURIComponent(JSON.stringify(legacy))));
+    expect((back?.[0] as Extract<ChartDef, { type: 'line' }>).metrics).toEqual([
+      { key: 'sr_d2', context: 'eval/train' },
+    ]);
+  });
+});
+

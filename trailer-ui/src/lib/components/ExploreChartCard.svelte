@@ -117,7 +117,9 @@
     const out: Array<{ axis: ScalarAxis; label: string }> = [];
     for (const p of configPaths) out.push({ axis: { kind: 'config', path: p }, label: `config.${p}` });
     for (const o of summaryOptions) {
-      out.push({ axis: { kind: 'summary', summaryKey: o.summaryKey, field: 'last' }, label: `${o.summaryKey}[last]` });
+      // context 优先,与 metricLabel/scalarAxisName 一致(summaryKey 是 key/context 顺序)
+      const label = o.context ? `${o.context}/${o.key}` : o.key;
+      out.push({ axis: { kind: 'summary', summaryKey: o.summaryKey, field: 'last' }, label: `${label}[last]` });
     }
     return out;
   });
