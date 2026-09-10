@@ -93,15 +93,6 @@
     tabDataLoaded = true;
   }
 
-  /// 探测完成后:当前 tab 无数据时自动切到第一个有数据的 tab。
-  $effect(() => {
-    if (!tabDataLoaded) return;
-    const visible = tabs.filter(t => t.has);
-    if (visible.length > 0 && !visible.some(t => t.k === tab)) {
-      tab = visible[0].k as any;
-    }
-  });
-
   async function createShare() {
     const days = shareExpiry === '0' ? null : parseInt(shareExpiry);
     const resp = await fetch('/api/v1/share', {
@@ -289,7 +280,18 @@
 
   $effect(() => {
     const id = page.params.id;
-    if (id && id !== runId) { runId = id; maxStep = 0; loadMetrics(id); loadTabAvailability(id); }
+    if (id && id !== runId) {
+      runId = id; maxStep = 0;
+      // 首次加载:两个加载都完成后才做一次"当前 tab 无数据则切走"的决策。
+      // 不能在单个加载完成时就决策——metrics/config 尚在加载会被误判为无数据;
+      // boards 恒可用,排除在候选外,避免抢走首屏(空 run 保持落在 Metrics 显示空态)。
+      Promise.all([loadMetrics(id), loadTabAvailability(id)]).then(() => {
+        const visible = tabs.filter(t => t.has && t.k !== 'boards');
+        if (visible.length > 0 && !visible.some(t => t.k === tab)) {
+          tab = visible[0].k as typeof tab;
+        }
+      });
+    }
   });
 
   // Auto-refresh: incremental update (only fetches points after maxStep)

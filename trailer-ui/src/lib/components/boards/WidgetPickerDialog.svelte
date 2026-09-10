@@ -9,8 +9,7 @@
   import type { BoardsData } from './boardsData';
 
   interface Props {
-    open: boolean;
-    /** 编辑已有 widget 时传入(决定初始 tab 与选中项);新建为 null */
+    /** 编辑已有 widget(决定初始 tab 与选中项);新建为 null。组件按需挂载,挂载时取值 */
     editWidget?: DashWidget | null;
     metricOptions: MetricOption[];
     boardsData: BoardsData;
@@ -18,39 +17,21 @@
     onClose: () => void;
   }
 
-  let { open, editWidget = null, metricOptions, boardsData, onConfirm, onClose }: Props = $props();
+  let { editWidget = null, metricOptions, boardsData, onConfirm, onClose }: Props = $props();
 
-  let activeType = $state<DashWidget['type']>('line');
+  // 由父组件条件挂载(每次打开都是新实例),初始状态直接取自 props,无需 effect 同步
+  let activeType = $state<DashWidget['type']>(editWidget?.type ?? 'line');
   let query = $state('');
-
-  // line 选择集
-  let selectedMetrics = $state<MetricRef[]>([]);
-  // hist 选中的 group id(`key[context]`)
-  let selectedHistId = $state('');
-  // figure/text 选中的 name
-  let selectedName = $state('');
-  // table/media 选中的数字 id
-  let selectedNumericId = $state<number | null>(null);
-
-  $effect(() => {
-    if (!open) return;
-    query = '';
-    const w = editWidget;
-    if (w) {
-      activeType = w.type;
-      if (w.type === 'line') selectedMetrics = [...w.metrics];
-      if (w.type === 'hist') selectedHistId = w.context ? `${w.key}[${w.context}]` : w.key;
-      if (w.type === 'figure' || w.type === 'text') selectedName = w.name;
-      if (w.type === 'table') selectedNumericId = w.tableId;
-      if (w.type === 'media') selectedNumericId = w.mediaId;
-    } else {
-      activeType = 'line';
-      selectedMetrics = [];
-      selectedHistId = '';
-      selectedName = '';
-      selectedNumericId = null;
-    }
-  });
+  let selectedMetrics = $state<MetricRef[]>(editWidget?.type === 'line' ? [...editWidget.metrics] : []);
+  let selectedHistId = $state(
+    editWidget?.type === 'hist' ? (editWidget.context ? `${editWidget.key}[${editWidget.context}]` : editWidget.key) : ''
+  );
+  let selectedName = $state(
+    editWidget && (editWidget.type === 'figure' || editWidget.type === 'text') ? editWidget.name : ''
+  );
+  let selectedNumericId = $state<number | null>(
+    editWidget?.type === 'table' ? editWidget.tableId : editWidget?.type === 'media' ? editWidget.mediaId : null
+  );
 
   function displayName(m: MetricRef): string {
     return displayMetricName(m.key, m.context) ?? (m.context ? `${m.key} [${m.context}]` : m.key);
@@ -134,14 +115,13 @@
   }
 </script>
 
-{#if open}
-  <div
-    class="fixed inset-0 bg-black/30 z-40"
-    role="presentation"
-    onclick={onClose}
-    onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
-  ></div>
-  <div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-card border border-border rounded-xl shadow-xl w-[560px] max-w-[92vw] max-h-[80vh] flex flex-col">
+<div
+  class="fixed inset-0 bg-black/30 z-40"
+  role="presentation"
+  onclick={onClose}
+  onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
+></div>
+<div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-card border border-border rounded-xl shadow-xl w-[560px] max-w-[92vw] max-h-[80vh] flex flex-col">
     <div class="flex items-center justify-between px-4 py-3 border-b border-border">
       <h3 class="text-sm font-semibold">{editWidget ? 'Edit Widget Content' : 'Add Chart'}</h3>
       <button onclick={onClose} class="text-muted-foreground hover:text-foreground text-sm leading-none">
@@ -280,4 +260,4 @@
       </button>
     </div>
   </div>
-{/if}
+

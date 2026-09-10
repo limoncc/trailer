@@ -11,24 +11,57 @@ import {
 } from './dashboard';
 
 describe('parseLayout', () => {
-  it('parses a valid layout with all widget types', () => {
-    const layout: DashboardLayout = {
-      version: 1,
+  it('parses a valid v2 layout with all widget types', () => {
+    const layout = {
+      version: 2 as const,
       widgets: [
-        { id: 'w1', type: 'line', metrics: [{ key: 'loss', context: '' }], w: 6, h: 10, smooth: 3 },
-        { id: 'w2', type: 'hist', key: 'weights', context: 'layer0', w: 6, h: 9, step: 'latest' },
+        { id: 'w1', type: 'line', metrics: [{ key: 'loss', context: '' }], w: 12, h: 10, smooth: 3 },
+        { id: 'w2', type: 'hist', key: 'weights', context: 'layer0', w: 12, h: 9, step: 'latest' as const },
         { id: 'w3', type: 'figure', name: 'confusion', w: 4, h: 8 },
         { id: 'w4', type: 'text', name: 'notes', w: 4, h: 8 },
-        { id: 'w5', type: 'table', tableId: 7, w: 8, h: 12 },
+        { id: 'w5', type: 'table', tableId: 7, w: 14, h: 12 },
         { id: 'w6', type: 'media', mediaId: 3, w: 4, h: 8 },
       ],
     };
     const parsed = parseLayout(serializeLayout(layout));
+    expect(parsed.version).toBe(2);
     expect(parsed.widgets).toHaveLength(6);
     expect(parsed.widgets[0]).toMatchObject({ type: 'line', smooth: 3, xKind: 'step' });
     expect(parsed.widgets[1]).toMatchObject({ type: 'hist', key: 'weights', context: 'layer0' });
     expect(parsed.widgets[4]).toMatchObject({ type: 'table', tableId: 7 });
     expect(parsed.widgets[5]).toMatchObject({ type: 'media', mediaId: 3 });
+  });
+
+  it('serializes as v2 regardless of input version', () => {
+    const s = serializeLayout({ version: 1, widgets: [] });
+    expect(JSON.parse(s).version).toBe(2);
+  });
+
+  it('migrates v1 (12-col) layouts by doubling widths', () => {
+    const s = JSON.stringify({
+      version: 1,
+      widgets: [
+        { id: 'w1', type: 'line', metrics: [{ key: 'a', context: '' }], w: 6, h: 10 },
+        { id: 'w2', type: 'line', metrics: [{ key: 'b', context: '' }], w: 12, h: 8 },
+      ],
+    });
+    const parsed = parseLayout(s);
+    expect(parsed.version).toBe(2);
+    expect(parsed.widgets[0].w).toBe(12);
+    expect(parsed.widgets[1].w).toBe(24);
+  });
+
+  it('heals the legacy double-wrapped corrupt layout', () => {
+    const s = JSON.stringify({
+      version: 1,
+      widgets: {
+        version: 1,
+        widgets: [{ id: 'w1', title: '熵监控', type: 'line', metrics: [{ key: 'entropy', context: 'train' }], w: 6, h: 8 }],
+      },
+    });
+    const parsed = parseLayout(s);
+    expect(parsed.widgets).toHaveLength(1);
+    expect(parsed.widgets[0]).toMatchObject({ id: 'w1', title: '熵监控', w: 12 });
   });
 
   it('drops unknown widget types (forward compatibility)', () => {
@@ -70,16 +103,16 @@ describe('parseLayout', () => {
 
   it('clamps w/h into range and fills defaults', () => {
     const s = JSON.stringify({
-      version: 1,
+      version: 2,
       widgets: [
         { id: 'w1', type: 'line', metrics: [{ key: 'a', context: '' }], w: 99, h: -5 },
         { id: 'w2', type: 'table', tableId: 1 },
       ],
     });
     const parsed = parseLayout(s);
-    expect(parsed.widgets[0].w).toBe(12);
+    expect(parsed.widgets[0].w).toBe(24);
     expect(parsed.widgets[0].h).toBe(4);
-    expect(parsed.widgets[1].w).toBe(6);
+    expect(parsed.widgets[1].w).toBe(12);
     expect(parsed.widgets[1].h).toBe(10);
   });
 
@@ -108,7 +141,7 @@ describe('parseLayout', () => {
 
   it('normalizes xKind and smooth', () => {
     const s = JSON.stringify({
-      version: 1,
+      version: 2,
       widgets: [
         { id: 'w1', type: 'line', metrics: [{ key: 'a', context: '' }], xKind: 'wall_time', smooth: 99 },
         { id: 'w2', type: 'line', metrics: [{ key: 'a', context: '' }], smooth: 0, yLog: true },
@@ -121,13 +154,12 @@ describe('parseLayout', () => {
 });
 
 describe('clamp helpers', () => {
-  it('clampW respects type minimum', () => {
-    expect(clampW('line', 1)).toBe(6);
-    expect(clampW('table', 1)).toBe(6);
-    expect(clampW('hist', 3)).toBe(4);
-    expect(clampW('media', 3)).toBe(4);
-    expect(clampW('line', 13)).toBe(12);
-    expect(clampW('line', NaN)).toBe(6);
+  it('clampW bounds (24-col grid)', () => {
+    expect(clampW(1)).toBe(3);
+    expect(clampW(13)).toBe(13);
+    expect(clampW(99)).toBe(24);
+    expect(clampW(NaN)).toBe(12);
+    expect(clampW(undefined, 8)).toBe(8);
   });
 
   it('clampH bounds', () => {
@@ -172,7 +204,7 @@ describe('defaultWidgets', () => {
     const widgets = defaultWidgets(metrics);
     expect(widgets).toHaveLength(2);
     const root = widgets.find((w) => (w as any).metrics.length === 2);
-    expect(root).toMatchObject({ type: 'line', w: 6, h: 10 });
+    expect(root).toMatchObject({ type: 'line', w: 12, h: 10 });
   });
 
   it('splits large contexts into chunks of 8', () => {

@@ -1,5 +1,6 @@
 <script lang="ts">
   // ─── Boards tab:run 下多个命名看板(子标签),12 列网格自由布局 ───
+  import { onMount } from 'svelte';
   import { Plus, Pencil, Check, LayoutDashboard, X } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
@@ -62,7 +63,7 @@
       if (dashes.length > 0) {
         const keep = dashes.find((d) => d.id === activeId) ?? dashes[0];
         activeId = keep.id;
-        widgets = parseLayout(keep.layout);
+        widgets = parseLayout(keep.layout).widgets;
       } else {
         activeId = null;
         widgets = [];
@@ -79,16 +80,16 @@
     boardsData = await fetchBoardsData(runId, prev ?? boardsData);
   }
 
-  $effect(() => {
-    if (!runId) return;
-    loading = true;
+  // 组件仅在 Boards tab 激活时挂载,runId 生命周期内不变 → onMount 拉初始数据
+  onMount(() => {
     loadBoards();
     loadLogData(EMPTY_BOARDS_DATA);
   });
 
-  // 运行中 run:按全局刷新间隔拉新 hist/figure/text/table/media(line 走 run 页轮询)
+  // 运行中 run:按全局刷新间隔拉新 hist/figure/text/table/media(line 走 run 页轮询)。
+  // 定时器+网络请求属于 effect 的合法用途(外部副作用),随 runState/间隔变化重建。
   $effect(() => {
-    if (!runId || runState !== 'running' || $refreshInterval <= 0) return;
+    if (runState !== 'running' || $refreshInterval <= 0) return;
     const timer = setInterval(() => loadLogData(), $refreshInterval * 1000);
     return () => clearInterval(timer);
   });
@@ -137,7 +138,7 @@
     editing = false;
     activeId = id;
     const d = dashes.find((x) => x.id === id);
-    widgets = parseLayout(d?.layout);
+    widgets = parseLayout(d?.layout).widgets;
   }
 
   async function deleteBoard(board: BoardItem) {
@@ -148,7 +149,7 @@
       dashes = dashes.filter((d) => d.id !== board.id);
       const next = dashes[Math.min(idx, dashes.length - 1)];
       activeId = next?.id ?? null;
-      widgets = next ? parseLayout(next.layout) : [];
+      widgets = next ? parseLayout(next.layout).widgets : [];
       if (activeId === null) editing = false;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to delete board';
@@ -363,11 +364,12 @@
   {/if}
 </div>
 
-<WidgetPickerDialog
-  open={pickerOpen}
-  editWidget={pickerEdit}
-  {metricOptions}
-  boardsData={boardsData}
-  onConfirm={onPickerConfirm}
-  onClose={() => (pickerOpen = false)}
-/>
+{#if pickerOpen}
+  <WidgetPickerDialog
+    editWidget={pickerEdit}
+    {metricOptions}
+    boardsData={boardsData}
+    onConfirm={onPickerConfirm}
+    onClose={() => (pickerOpen = false)}
+  />
+{/if}

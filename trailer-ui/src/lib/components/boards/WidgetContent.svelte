@@ -1,5 +1,6 @@
 <script lang="ts">
   // ─── Widget 内容渲染分发(唯一扩展点:新增类型加一个分支) ───
+  import { untrack } from 'svelte';
   import LineChart from '$lib/charts/LineChart.svelte';
   import HistogramChart from '$lib/charts/HistogramChart.svelte';
   import G2SpecChart from '$lib/charts/G2SpecChart.svelte';
@@ -122,25 +123,24 @@
     return String(val);
   }
 
-  // 媒体文件流需鉴权:fetch(带 token)→ object URL(同 MediaExplorer)
+  let tableVisibleRows = $state(50);
+
+  // 媒体文件流需鉴权:fetch(带 token)→ object URL(同 MediaExplorer)。
+  // 网络请求属于 effect 的合法用途;缓存读用 untrack 包住,避免 effect 读写自身依赖的状态。
   let blobUrls = $state<Map<number, string>>(new Map());
   $effect(() => {
     if (!mediaRow) return;
     const id = mediaRow.id;
-    if (blobUrls.has(id)) return;
+    if (untrack(() => blobUrls.has(id))) return;
     const url = `/api/v1/runs/${encodeURIComponent(runId)}/media/${id}/file`;
     fetch(url)
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((b) => {
-        blobUrls = new Map(blobUrls).set(id, URL.createObjectURL(b));
+        untrack(() => {
+          blobUrls = new Map(blobUrls).set(id, URL.createObjectURL(b));
+        });
       })
       .catch(() => {});
-  });
-
-  let tableVisibleRows = $state(50);
-  $effect(() => {
-    // 切换 table widget 时重置可见行数
-    if (widget.type === 'table') tableVisibleRows = 50;
   });
 </script>
 

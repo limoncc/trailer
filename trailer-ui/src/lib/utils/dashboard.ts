@@ -65,48 +65,42 @@ export type DashWidget =
   | MediaWidget;
 
 export interface DashboardLayout {
-  version: 1;
+  /** v1 = 12 列网格(历史数据);v2 = 24 列网格(当前)。parseLayout 统一返回 v2 语义 */
+  version: 1 | 2;
   widgets: DashWidget[];
 }
 
 export const MIN_W = 3;
-export const MAX_W = 12;
+export const MAX_W = 24;
 export const MIN_H = 4;
 export const MAX_H = 40;
-export const DEFAULT_W = 6;
+export const DEFAULT_W = 12;
 export const DEFAULT_H = 10;
 
 export function newWidgetId(): string {
   return `w_${Math.random().toString(16).slice(2, 10)}`;
 }
 
-const W_MIN = { line: 6, hist: 4, figure: 4, text: 4, table: 6, media: 4 } as const;
-
 export function defaultSize(type: DashWidget['type']): { w: number; h: number } {
   switch (type) {
     case 'line':
       return { w: DEFAULT_W, h: DEFAULT_H };
     case 'hist':
-      return { w: 6, h: 9 };
+      return { w: 12, h: 9 };
     case 'figure':
-      return { w: 6, h: 10 };
+      return { w: 12, h: 10 };
     case 'text':
-      return { w: 6, h: 8 };
+      return { w: 10, h: 8 };
     case 'table':
-      return { w: 8, h: 12 };
+      return { w: 14, h: 12 };
     case 'media':
-      return { w: 4, h: 8 };
+      return { w: 8, h: 8 };
   }
 }
 
-/** 类型允许的最小宽(比全局 MIN_W 更严的,按类型收紧) */
-export function minWOf(type: DashWidget['type']): number {
-  return Math.max(MIN_W, W_MIN[type] ?? MIN_W);
-}
-
-export function clampW(type: DashWidget['type'], w: unknown): number {
-  const n = typeof w === 'number' && Number.isFinite(w) ? Math.round(w) : DEFAULT_W;
-  return Math.min(MAX_W, Math.max(minWOf(type), n));
+export function clampW(w: unknown, fallback = DEFAULT_W): number {
+  const n = typeof w === 'number' && Number.isFinite(w) ? Math.round(w) : fallback;
+  return Math.min(MAX_W, Math.max(MIN_W, n));
 }
 
 export function clampH(h: unknown, fallback = DEFAULT_H): number {
@@ -129,7 +123,7 @@ function parseWidget(raw: unknown): DashWidget | null {
   const base = {
     id: typeof r.id === 'string' && r.id ? r.id : newWidgetId(),
     title: typeof r.title === 'string' && r.title ? r.title : undefined,
-    w: clampW(r.type as DashWidget['type'], r.w),
+    w: clampW(r.w),
     h: clampH(r.h),
   };
   switch (r.type) {
@@ -184,32 +178,48 @@ function parseStep(v: unknown): LatestOrStep | undefined {
   return undefined;
 }
 
-/** 容错解析服务端返回的 layout JSON 串;非法输入返回空布局 */
+/** 容错解析服务端返回的 layout JSON 串;统一归一为 v2(24 列)语义。
+ *  兼容两类历史数据:v1(12 列,w ×2 迁移)与早期 bug 写出的双层包裹
+ *  {widgets:{version,widgets:[...]}}(Board 数据损坏自愈)。非法输入返回空布局。 */
 export function parseLayout(s: string | null | undefined): DashboardLayout {
-  const empty: DashboardLayout = { version: 1, widgets: [] };
+  const empty: DashboardLayout = { version: 2, widgets: [] };
   if (!s) return empty;
   try {
     const obj = JSON.parse(s) as unknown;
-    if (typeof obj !== 'object' || obj === null || !Array.isArray((obj as Record<string, unknown>).widgets))
-      return empty;
+    if (typeof obj !== 'object' || obj === null) return empty;
+    let rawWidgets = (obj as Record<string, unknown>).widgets;
+    let version = (obj as Record<string, unknown>).version;
+    if (
+      !Array.isArray(rawWidgets) &&
+      typeof rawWidgets === 'object' &&
+      rawWidgets !== null &&
+      Array.isArray((rawWidgets as Record<string, unknown>).widgets)
+    ) {
+      version = (rawWidgets as Record<string, unknown>).version;
+      rawWidgets = (rawWidgets as Record<string, unknown>).widgets;
+    }
+    if (!Array.isArray(rawWidgets)) return empty;
+    // v1 是 12 列网格,升到 24 列宽度 ×2,视觉比例不变
+    const scale = version === 2 ? 1 : 2;
     const seen = new Set<string>();
-    const widgets = (obj as Record<string, unknown>).widgets
+    const widgets = rawWidgets
       .map(parseWidget)
       .filter((w): w is DashWidget => w !== null)
       .map((w) => {
+        const scaled = scale === 1 ? w : { ...w, w: clampW(w.w * scale) };
         // id 去重(后端不约束唯一)
-        if (seen.has(w.id)) return { ...w, id: newWidgetId() };
-        seen.add(w.id);
-        return w;
+        if (seen.has(scaled.id)) return { ...scaled, id: newWidgetId() };
+        seen.add(scaled.id);
+        return scaled;
       });
-    return { version: 1, widgets };
+    return { version: 2, widgets };
   } catch {
     return empty;
   }
 }
 
 export function serializeLayout(l: DashboardLayout): string {
-  return JSON.stringify(l);
+  return JSON.stringify({ version: 2, widgets: l.widgets });
 }
 
 /** 卡片缺省标题:按内容自动生成 */

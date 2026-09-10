@@ -3,7 +3,7 @@
   // 布局即数组顺序:卡片 span w 列 × h 行,grid-auto-flow: dense 自动填洞。
   import { GripHorizontal, Pencil, X } from 'lucide-svelte';
   import type { DashWidget } from '$lib/utils/dashboard';
-  import { clampH, clampW, defaultWidgetTitle, minWOf } from '$lib/utils/dashboard';
+  import { clampH, clampW, defaultWidgetTitle } from '$lib/utils/dashboard';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import type { BoardsData, MetricSeries } from './boardsData';
   import WidgetContent from './WidgetContent.svelte';
@@ -25,6 +25,8 @@
   const ROW_PX = 44;
   const GAP_PX = 12;
   const HEADER_PX = 32;
+  /** 24 列网格列数 */
+  const COLS = 24;
 
   function contentHeight(w: number): number {
     return Math.max(80, w * ROW_PX + (w - 1) * GAP_PX - HEADER_PX - 16);
@@ -37,7 +39,8 @@
     );
   }
 
-  // ─── 拖拽换位:拖拽中只显示指示边框,落点提交(避免 dense 重排抖动图表) ───
+  // ─── 拖拽换位:只有左侧把手可发起拖拽(整卡 draggable 会和右下角缩放手柄
+  // 的 mousedown 冲突);拖拽中只显示指示边框,落点提交,避免 dense 重排抖动图表 ───
   let dragId = $state<string | null>(null);
   let overIndex = $state(-1);
 
@@ -95,16 +98,15 @@
     const startY = e.clientY;
     const startW = widget.w;
     const startH = widget.h;
-    const minW = minWOf(widget.type);
     const rect = gridEl?.getBoundingClientRect();
-    const colStep = rect ? rect.width / 12 + GAP_PX : 80;
+    const colStep = rect ? rect.width / COLS + GAP_PX : 40;
 
     const onMove = (ev: MouseEvent) => {
       const dw = Math.round((ev.clientX - startX) / colStep);
       const dh = Math.round((ev.clientY - startY) / (ROW_PX + GAP_PX));
       resizing = {
         id: widget.id,
-        w: clampW(widget.type, Math.max(minW, startW + dw)),
+        w: clampW(startW + dw),
         h: clampH(startH + dh),
       };
     };
@@ -150,7 +152,7 @@
 <div
   bind:this={gridEl}
   class="grid"
-  style="grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: {ROW_PX}px; grid-auto-flow: dense; gap: {GAP_PX}px;"
+  style="grid-template-columns: repeat({COLS}, minmax(0, 1fr)); grid-auto-rows: {ROW_PX}px; grid-auto-flow: dense; gap: {GAP_PX}px;"
 >
   {#each widgets as widget, idx (widget.id)}
     <div
@@ -160,11 +162,8 @@
         ? 'ring-2 ring-primary/60'
         : ''}"
       style="grid-column: span {effectiveW(widget)}; grid-row: span {effectiveH(widget)};"
-      draggable={editing}
-      ondragstart={(e) => onDragStart(e, widget)}
       ondragover={(e) => onDragOver(e, idx)}
       ondrop={(e) => onDrop(e, idx)}
-      ondragend={onDragEnd}
       role="{editing ? 'button' : 'presentation'}"
       tabindex={editing ? 0 : -1}
       onkeydown={(e) => {
@@ -174,7 +173,18 @@
       <!-- Header -->
       <div class="flex items-center gap-1.5 px-2.5 border-b border-border bg-muted/20 shrink-0" style="height: {HEADER_PX}px;">
         {#if editing}
-          <GripHorizontal size={13} class="text-muted-foreground shrink-0" />
+          <span
+            class="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground shrink-0 flex items-center"
+            draggable="true"
+            title="Drag to move"
+            role="button"
+            tabindex="0"
+            ondragstart={(e) => onDragStart(e, widget)}
+            ondragend={onDragEnd}
+            onkeydown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+          >
+            <GripHorizontal size={13} />
+          </span>
         {/if}
         {#if renameId === widget.id}
           <input
