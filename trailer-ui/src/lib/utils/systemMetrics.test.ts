@@ -47,20 +47,20 @@ describe('canonicalKey', () => {
 
 describe('displayMetricName', () => {
   it('renders device series with device label', () => {
-    expect(displayMetricName('mem_used', 'system/nvidia/gpu0')).toBe('显存占用 · nvidia gpu0');
-    expect(displayMetricName('util', 'system/nvidia/gpu0')).toBe('GPU 利用率 · nvidia gpu0');
-    expect(displayMetricName('vram_used', 'system/apple/gpu0')).toBe('显存占用 · apple gpu0');
+    expect(displayMetricName('mem_used', 'system/nvidia/gpu0')).toBe('VRAM used · nvidia gpu0');
+    expect(displayMetricName('util', 'system/nvidia/gpu0')).toBe('GPU util · nvidia gpu0');
+    expect(displayMetricName('vram_used', 'system/apple/gpu0')).toBe('VRAM used · apple gpu0');
   });
 
   it('renders host series without device suffix', () => {
-    expect(displayMetricName('mem_used', 'system')).toBe('主机内存');
-    expect(displayMetricName('cpu', 'system')).toBe('CPU 利用率');
-    expect(displayMetricName('cpu_util', 'system')).toBe('CPU 利用率');
+    expect(displayMetricName('mem_used', 'system')).toBe('Host memory');
+    expect(displayMetricName('cpu', 'system')).toBe('CPU util');
+    expect(displayMetricName('cpu_util', 'system')).toBe('CPU util');
   });
 
   it('renders cpu device metrics without redundant suffix', () => {
-    expect(displayMetricName('temperature', 'system/cpu')).toBe('CPU 温度');
-    expect(displayMetricName('power', 'system/cpu')).toBe('CPU 功耗');
+    expect(displayMetricName('temperature', 'system/cpu')).toBe('CPU temp');
+    expect(displayMetricName('power', 'system/cpu')).toBe('CPU power');
   });
 
   it('returns null for non-system metrics', () => {

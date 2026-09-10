@@ -36,29 +36,29 @@ export function canonicalKey(key: string, context: string): string {
 }
 
 const FRIENDLY: Record<string, string> = {
-  cpu_util: 'CPU 利用率',
-  mem_used: '主机内存',
-  mem_util: '内存占用率',
-  gpu_util: 'GPU 利用率',
-  vram_used: '显存占用',
-  vram_util: '显存占用率',
-  power_w: '功耗',
-  temp_c: '温度',
+  cpu_util: 'CPU util',
+  mem_used: 'Host memory',
+  mem_util: 'Host mem util',
+  gpu_util: 'GPU util',
+  vram_used: 'VRAM used',
+  vram_util: 'VRAM util',
+  power_w: 'Power',
+  temp_c: 'Temp',
 };
 
-/** 设备标签:system → 主机;system/nvidia/gpu0 → nvidia gpu0 */
+/** 设备标签:system → host;system/nvidia/gpu0 → nvidia gpu0 */
 export function deviceLabel(context: string): string {
-  if (context === 'system') return '主机';
+  if (context === 'system') return 'host';
   return context.replace(/^system\//, '').replaceAll('/', ' ');
 }
 
-/** 系统指标完整显示名:"显存占用 · nvidia gpu0";非系统指标返回 null */
+/** 系统指标完整显示名:"VRAM used · nvidia gpu0";非系统指标返回 null */
 export function displayMetricName(key: string, context: string): string | null {
   if (!isSystemContext(context)) return null;
   const c = canonicalKey(key, context);
   if (context === 'system/cpu') {
-    if (c === 'temp_c') return 'CPU 温度';
-    if (c === 'power_w') return 'CPU 功耗';
+    if (c === 'temp_c') return 'CPU temp';
+    if (c === 'power_w') return 'CPU power';
   }
   const friendly = FRIENDLY[c];
   if (!friendly) return null;
