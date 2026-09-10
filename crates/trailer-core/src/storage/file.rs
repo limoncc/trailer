@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::{
     ApiToken, ArtifactMeta, ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow,
-    ReportRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
+    ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
 };
 use crate::error::{StorageError, StorageResult};
 use crate::storage::Storage;
@@ -876,6 +876,58 @@ impl Storage for FileStorage {
     async fn get_explore(&self, id: &str) -> StorageResult<Option<ExploreRow>> {
         Ok(self
             .load_json::<ExploreRow>("_explores.json")
+            .await?
+            .into_iter()
+            .find(|x| x.id.as_deref() == Some(id)))
+    }
+
+    // ── Run dashboards ──
+    async fn insert_run_dashboard(&self, d: &RunDashboardRow) -> StorageResult<String> {
+        let mut dashes = self.load_json::<RunDashboardRow>("_run_dashboards.json").await?;
+        let id = format!("dash_{:x}", rand::random::<u64>());
+        let mut row = d.clone();
+        row.id = Some(id.clone());
+        dashes.push(row);
+        self.save_json("_run_dashboards.json", &dashes).await?;
+        Ok(id)
+    }
+
+    async fn update_run_dashboard(&self, id: &str, title: &str, layout: &str) -> StorageResult<()> {
+        let mut dashes = self.load_json::<RunDashboardRow>("_run_dashboards.json").await?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        for x in dashes.iter_mut() {
+            if x.id.as_deref() == Some(id) {
+                x.title = title.into();
+                x.layout = layout.into();
+                x.updated_at = now;
+            }
+        }
+        self.save_json("_run_dashboards.json", &dashes).await
+    }
+
+    async fn delete_run_dashboard(&self, id: &str) -> StorageResult<()> {
+        let mut dashes = self.load_json::<RunDashboardRow>("_run_dashboards.json").await?;
+        dashes.retain(|x| x.id.as_deref() != Some(id));
+        self.save_json("_run_dashboards.json", &dashes).await
+    }
+
+    async fn list_run_dashboards(&self, run_id: &str) -> StorageResult<Vec<RunDashboardRow>> {
+        let mut dashes: Vec<_> = self
+            .load_json::<RunDashboardRow>("_run_dashboards.json")
+            .await?
+            .into_iter()
+            .filter(|x| x.run_id == run_id)
+            .collect();
+        dashes.sort_by(|a, b| a.created_at.total_cmp(&b.created_at).then(a.id.cmp(&b.id)));
+        Ok(dashes)
+    }
+
+    async fn get_run_dashboard(&self, id: &str) -> StorageResult<Option<RunDashboardRow>> {
+        Ok(self
+            .load_json::<RunDashboardRow>("_run_dashboards.json")
             .await?
             .into_iter()
             .find(|x| x.id.as_deref() == Some(id)))

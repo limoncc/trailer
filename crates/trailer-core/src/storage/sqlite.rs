@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use crate::domain::{
     ApiToken, ArtifactMeta, ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow,
-    ReportRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
+    ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
 };
 use crate::error::{StorageError, StorageResult};
 use crate::storage::Storage;
@@ -210,6 +210,22 @@ impl SqliteStorage {
         )
         .execute(&self.pool)
         .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS run_dashboards (
+                id         TEXT PRIMARY KEY,
+                run_id     TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                layout     TEXT NOT NULL DEFAULT '{\"version\":1,\"widgets\":[]}',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_run_dashboards_run ON run_dashboards(run_id)")
+            .execute(&self.pool)
+            .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tables (
@@ -1125,6 +1141,77 @@ impl Storage for SqliteStorage {
                 run_ids: r.get("run_ids"),
                 chart_defs: r.get("chart_defs"),
                 config: r.get("config"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })
+            .next())
+    }
+
+    // ── Run dashboards ──
+    async fn insert_run_dashboard(&self, d: &RunDashboardRow) -> StorageResult<String> {
+        let id = format!("dash_{:x}", rand::random::<u64>());
+        sqlx::query(
+            "INSERT INTO run_dashboards (id, run_id, title, layout, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id).bind(&d.run_id).bind(&d.title).bind(&d.layout)
+        .bind(d.created_at).bind(d.updated_at)
+        .execute(&self.pool).await?;
+        Ok(id)
+    }
+
+    async fn update_run_dashboard(&self, id: &str, title: &str, layout: &str) -> StorageResult<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        sqlx::query("UPDATE run_dashboards SET title = ?, layout = ?, updated_at = ? WHERE id = ?")
+            .bind(title).bind(layout).bind(now).bind(id)
+            .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn delete_run_dashboard(&self, id: &str) -> StorageResult<()> {
+        sqlx::query("DELETE FROM run_dashboards WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn list_run_dashboards(&self, run_id: &str) -> StorageResult<Vec<RunDashboardRow>> {
+        let rows = sqlx::query(
+            "SELECT id, run_id, title, layout, created_at, updated_at
+             FROM run_dashboards WHERE run_id = ? ORDER BY created_at ASC, id ASC",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool).await?;
+        Ok(rows
+            .iter()
+            .map(|r| RunDashboardRow {
+                id: Some(r.get("id")),
+                run_id: r.get("run_id"),
+                title: r.get("title"),
+                layout: r.get("layout"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect())
+    }
+
+    async fn get_run_dashboard(&self, id: &str) -> StorageResult<Option<RunDashboardRow>> {
+        let rows = sqlx::query(
+            "SELECT id, run_id, title, layout, created_at, updated_at
+             FROM run_dashboards WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_all(&self.pool).await?;
+        Ok(rows
+            .iter()
+            .map(|r| RunDashboardRow {
+                id: Some(r.get("id")),
+                run_id: r.get("run_id"),
+                title: r.get("title"),
+                layout: r.get("layout"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
             })
