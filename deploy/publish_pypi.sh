@@ -7,7 +7,8 @@
 #
 # 用法(自动下载 + 发布):
 #   ./deploy/publish_pypi.sh [--run=<run-id>] [--test]
-#     - 自动下载最新 release run(或 --run 指定)的 sdk-* artifacts
+#     - 自动下载最新 release 的 sdk-* wheel(默认经 GH_PROXY 代理镜像加速,
+#       失败自动回退 gh run download;GH_PROXY= 置空强制走原方式)
 #   ./deploy/publish_pypi.sh [wheel目录] [--test]
 #     - 使用本地已有的 wheel 目录(跳过下载)
 #
@@ -49,16 +50,55 @@ if [ "$needs_download" = true ]; then
     echo "❌ 需要 gh CLI 自动下载 artifacts, 请先安装并执行 gh auth login"
     exit 1
   fi
-  if [ -z "$RUN_ID" ]; then
-    RUN_ID=$(gh run list --workflow=release.yml --limit 1 --json databaseId -q '.[0].databaseId')
+  # 直连 gh run download 拉 artifacts 在国内网络常极慢甚至卡死;
+  # 默认走代理镜像下载 Release 资产(wheel 与 artifacts 内容一致),失败或指定 --run 时回退。
+  # GH_PROXY 可换镜像;GH_PROXY= 置空则强制走原 artifacts 下载。
+  GH_PROXY="${GH_PROXY:-https://v4.gh-proxy.org}"
+  mirror_done=false
+  if [ -n "$GH_PROXY" ] && [ -z "$RUN_ID" ]; then
+    TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+    REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
+    if [ -n "$TAG" ] && [ -n "$REPO" ]; then
+      echo "📦 经 $GH_PROXY 从 Release $TAG 下载 sdk-* wheel ..."
+      mkdir -p "$WHEEL_DIR"
+      ASSETS=$(gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' | grep '^trailer_sdk-.*\.whl$' || true)
+      ok=true
+      for a in $ASSETS; do
+        try=0
+        while [ "$try" -lt 3 ]; do
+          # 代理对连续请求限流,单文件失败删除残留并等 5s 重试(最多 3 次)
+          if curl -fsL --max-time 300 -o "$WHEEL_DIR/$a" \
+            "$GH_PROXY/https://github.com/$REPO/releases/download/$TAG/$a"; then
+            break
+          fi
+          try=$((try + 1))
+          rm -f "$WHEEL_DIR/$a"
+          [ "$try" -lt 3 ] && sleep 5
+        done
+        [ "$try" -lt 3 ] || ok=false
+        sleep 1
+      done
+      if [ "$ok" = true ] && ls "$WHEEL_DIR"/trailer_sdk-*.whl >/dev/null 2>&1; then
+        mirror_done=true
+        echo "✅ 代理下载完成"
+      else
+        rm -f "$WHEEL_DIR"/trailer_sdk-*.whl
+        echo "⚠️ 代理下载失败,回退 gh run download ..."
+      fi
+    fi
   fi
-  echo "📦 从 run $RUN_ID 下载 sdk-* artifacts ..."
-  mkdir -p "$WHEEL_DIR"
-  gh run download "$RUN_ID" --pattern 'sdk-*' -D "$WHEEL_DIR"
-  # gh run download 按 artifact 名建子目录, 把 .whl 移到统一目录
-  find "$WHEEL_DIR" -name '*.whl' -exec mv -f {} "$WHEEL_DIR" \;
-  # 清理空的子目录
-  find "$WHEEL_DIR" -type d -mindepth 1 -empty -delete 2>/dev/null || true
+  if [ "$mirror_done" != true ]; then
+    if [ -z "$RUN_ID" ]; then
+      RUN_ID=$(gh run list --workflow=release.yml --limit 1 --json databaseId -q '.[0].databaseId')
+    fi
+    echo "📦 从 run $RUN_ID 下载 sdk-* artifacts ..."
+    mkdir -p "$WHEEL_DIR"
+    gh run download "$RUN_ID" --pattern 'sdk-*' -D "$WHEEL_DIR"
+    # gh run download 按 artifact 名建子目录, 把 .whl 移到统一目录
+    find "$WHEEL_DIR" -name '*.whl' -exec mv -f {} "$WHEEL_DIR" \;
+    # 清理空的子目录
+    find "$WHEEL_DIR" -type d -mindepth 1 -empty -delete 2>/dev/null || true
+  fi
 fi
 
 # ── 校验本地 wheel ──
