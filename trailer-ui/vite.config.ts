@@ -3,10 +3,12 @@ import tailwindcss from '@tailwindcss/vite';
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 
-/** 前端版本注入:dev/build 均从 package.json 读取,与发布版本同步 */
-const appVersion: string = JSON.parse(
-  readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
-).version;
+/** 前端版本注入:单一事实来源 = crates/trailer-server/Cargo.toml(与 Server 版本同源,
+ *  UI 随 server 一起分发,不存在独立版本)。dev/build 均构建期读取。 */
+const appVersion: string = readFileSync(
+  new URL('../crates/trailer-server/Cargo.toml', import.meta.url),
+  'utf-8',
+).match(/^version = "([^"]+)"/m)?.[1] ?? 'dev';
 
 export default defineConfig({
   define: {
