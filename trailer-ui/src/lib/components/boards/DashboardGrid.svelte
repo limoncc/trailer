@@ -29,8 +29,8 @@
   const ROW_PX = 44;
   const GAP_PX = 12;
   const HEADER_PX = 32;
-  /** 24 列网格列数 */
-  const COLS = 24;
+  /** 36 列网格列数 */
+  const COLS = 36;
 
   function contentHeight(w: number): number {
     return Math.max(80, w * ROW_PX + (w - 1) * GAP_PX - HEADER_PX - 16);
