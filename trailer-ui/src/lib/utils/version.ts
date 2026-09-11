@@ -4,7 +4,8 @@ export interface ServerVersion {
   version: string;
 }
 
-/** 前端构建版本(来自 package.json,Vite define 注入);未注入环境回退 'dev'。 */
+/** 构建期注入的版本(vite 从 crates/trailer-server/Cargo.toml 读取,与 Server 同源)。
+ *  仅作为 /api/v1/version 不可达时的兜底显示;UI 随 server 分发,不维护独立版本。 */
 export const UI_VERSION: string = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 
 /** 拉取服务端版本号;任何失败(非 2xx/网络异常/缺字段)都返回 null,调用方静默降级。 */

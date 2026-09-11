@@ -40,9 +40,14 @@ describe('fetchServerVersion', () => {
 });
 
 describe('UI_VERSION', () => {
-  it('注入自 package.json 版本,与发布同步', async () => {
+  it('注入自 crates/trailer-server/Cargo.toml 版本(与 Server 单一来源)', async () => {
     const { UI_VERSION } = await import('./version');
-    const pkg = (await import('../../../package.json')) as { default: { version: string } };
-    expect(UI_VERSION).toBe(pkg.default.version);
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    // vitest root = trailer-ui,仓库 crates 在上一级
+    const cargo = readFileSync(resolve(process.cwd(), '../crates/trailer-server/Cargo.toml'), 'utf-8');
+    const cargoVersion = cargo.match(/^version = "([^"]+)"/m)?.[1];
+    expect(cargoVersion).toBeTruthy();
+    expect(UI_VERSION).toBe(cargoVersion);
   });
 });

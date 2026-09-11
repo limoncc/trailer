@@ -3,10 +3,12 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { readFileSync } from 'node:fs';
 import path from 'path';
 
-// 与 vite.config.ts 保持一致的版本注入,保证测试里 __APP_VERSION__ 有真实值
-const appVersion: string = JSON.parse(
-  readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'),
-).version;
+// 与 vite.config.ts 保持一致的版本注入(单一来源 = crates/trailer-server/Cargo.toml),
+// 保证测试里 __APP_VERSION__ 有真实值
+const appVersion: string = readFileSync(
+  path.resolve(__dirname, '../crates/trailer-server/Cargo.toml'),
+  'utf-8',
+).match(/^version = "([^"]+)"/m)?.[1] ?? 'dev';
 
 export default defineConfig({
   define: {
