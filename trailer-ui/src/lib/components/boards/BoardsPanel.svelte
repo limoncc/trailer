@@ -55,6 +55,12 @@
     return resp;
   }
 
+  // 改名输入框挂载即聚焦全选,避免"点了改名但没焦点"导致打字无效/误提交
+  function focusOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
   async function loadBoards() {
     await authReady();
     try {
@@ -247,6 +253,7 @@
         >
           {#if renamingId === d.id}
             <input
+              use:focusOnMount
               bind:value={renameValue}
               onclick={(e) => e.stopPropagation()}
               onblur={commitRename}

@@ -154,16 +154,21 @@
     renameId = widget.id;
     renameValue = titleOf(widget);
   }
+  // 未变更时必须完全不动 title:否则 blur 提交会把已有自定义名清回默认名
+  // (输入框未聚焦/回车后又 blur 的双触发场景都靠 renameId 置空 early-return 挡掉)
   function commitRename() {
-    if (renameId) {
-      const t = renameValue.trim();
-      onChange(
-        widgets.map((w) =>
-          w.id === renameId ? { ...w, title: t && t !== titleOf(w) ? t : undefined } : w
-        )
-      );
-    }
+    const id = renameId;
     renameId = null;
+    if (!id) return;
+    const t = renameValue.trim();
+    const current = widgets.find((w) => w.id === id);
+    if (!current || !t || t === titleOf(current)) return;
+    onChange(widgets.map((w) => (w.id === id ? { ...w, title: t } : w)));
+  }
+
+  function focusOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
   }
 </script>
 
@@ -217,6 +222,7 @@
         {/if}
         {#if renameId === widget.id}
           <input
+            use:focusOnMount
             bind:value={renameValue}
             class="flex-1 min-w-0 px-1.5 py-0.5 text-xs border border-border rounded bg-background font-mono"
             onblur={commitRename}
