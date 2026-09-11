@@ -35,6 +35,13 @@ export function themeOpts(): Record<string, unknown> {
   return t ? { theme: t } : {};
 }
 
+/** 轴刻度/网格数量随容器尺寸自适应(G2 默认固定 tick 数,窄容器下网格过密)。
+ *  size: 容器像素宽/高;minPx: 每个 tick 至少占用的像素;结果夹在 [2, max]。 */
+export function adaptiveTicks(size: number, minPx: number, max: number): number {
+  const n = Number.isFinite(size) && size > 0 ? Math.floor(size / minPx) : 0;
+  return Math.min(max, Math.max(2, n));
+}
+
 /** 订阅主题切换(命令式图表在 onMount 订阅、清理函数退订,
  *  不用 $effect 跟踪——图表创建属于外部事件驱动的命令式副作用)。返回退订函数。 */
 export function onChartThemeChange(cb: () => void): () => void {

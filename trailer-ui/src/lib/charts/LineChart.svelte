@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
-  import { g2Theme, onChartThemeChange } from './chartTheme.svelte';
+  import { g2Theme, onChartThemeChange, adaptiveTicks } from './chartTheme.svelte';
 
   interface DataPoint {
     step: number;
@@ -66,12 +66,18 @@
   let prevSmooth = false;
   let prevSmoothWindow = 0;
 
-  /// Custom tick method that only produces integer tick values.
-  function integerTick(min: number, max: number, _count: number): number[] {
+  /// Custom tick method: integer tick values honoring the requested count.
+  /// G2 把 scale.tickCount 作为 tickMethod 的 count 传入;旧实现忽略 count 逐整数
+  /// 返回(0..80 → 81 个),窄卡片网格密集。现在按 count 取 1/2/5×10^k 整数步长。
+  function integerTick(min: number, max: number, count: number): number[] {
+    if (!(max > min)) return [min];
+    const rawStep = (max - min) / Math.max(2, count || 5);
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    const step = Math.max(1, (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag);
+    const start = Math.ceil(min / step) * step;
     const ticks: number[] = [];
-    for (let i = Math.ceil(min); i <= Math.floor(max); i++) {
-      ticks.push(i);
-    }
+    for (let v = start; v <= max + step * 1e-9; v += step) ticks.push(Math.round(v));
     return ticks.length > 1 ? ticks : [Math.floor(min), Math.ceil(max)];
   }
 
@@ -112,10 +118,15 @@
       plotData = applySMA(plotData, smoothWindow);
     }
 
+    // 网格/刻度随容器尺寸自适应:卡片缩小(Boards 拖拽缩放/列数切换)时自动变稀,
+    // 避免 tick 数固定导致网格密集。ResizeObserver 会在尺寸变化时重建触发重算。
+    const xTicks = adaptiveTicks(container?.clientWidth ?? 600, 70, 12);
+    const yTicks = adaptiveTicks(height, 55, 8);
+
     const scaleX: Record<string, unknown> = xIsTime
-      ? { nice: false }
-      : { nice: false, tickMethod: integerTick, tickCount: 8 };
-    const scaleY: Record<string, unknown> = { nice: true };
+      ? { nice: false, tickCount: xTicks }
+      : { nice: false, tickMethod: integerTick, tickCount: xTicks };
+    const scaleY: Record<string, unknown> = { nice: true, tickCount: yTicks };
     if (logX && !xIsTime) scaleX.type = 'log';
     if (logY) scaleY.type = 'log';
 

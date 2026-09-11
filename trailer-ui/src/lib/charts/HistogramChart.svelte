@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { Chart } from '@antv/g2';
-  import { onChartThemeChange, themeOpts } from './chartTheme.svelte';
+  import { adaptiveTicks, onChartThemeChange, themeOpts } from './chartTheme.svelte';
 
   export interface HistogramPoint {
     run_id: string;
@@ -169,7 +169,7 @@
       type: 'interval', data: barData,
       encode: { x: 'v', y: 'count', color: 'count' },
       scale: { color: { palette: 'blues' }, x: { nice: true } },
-      axis: compact ? { x: false, y: false } : { x: { title: 'Value', labelAutoHide: true, labelFontSize: 10 }, y: { title: 'Count' } },
+      axis: compact ? { x: false, y: false } : { x: { title: 'Value', labelAutoHide: true, labelFontSize: 10, tickCount: adaptiveTicks(barContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Count', tickCount: 4 } },
       tooltip: { title: 'range', items: [{ field: 'count', name: 'Count', valueFormatter: FMT }] },
       legend: false, style: { radius: 2 },
     });
@@ -182,7 +182,7 @@
       type: 'line', data: trend,
       encode: { x: 'step', y: 'v', color: 'm' },
       scale: { color: { domain: ['mean', 'std', 'skewness'], range: [STAT_COLORS.mean, STAT_COLORS.std, STAT_COLORS.skewness] }, y: { nice: true } },
-      axis: compact ? { x: false, y: false } : { x: { title: 'Step' }, y: { title: 'Value' } },
+      axis: compact ? { x: false, y: false } : { x: { title: 'Step', tickCount: adaptiveTicks(trendContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Value', tickCount: 4 } },
       legend: compact ? false : { color: { title: null, position: 'top', layout: { justifyContent: 'center' } } },
       tooltip: { crosshairs: true, items: [{ field: 'v', name: 'Value', valueFormatter: FMT }] },
       annotations: [{ type: 'lineX', data: [selectedIndex + 1], style: { stroke: '#94a3b8', lineDash: [4, 4], lineWidth: 1 } }],
@@ -199,7 +199,7 @@
           type: 'line',
           encode: { x: 'step', y: 'v', color: 'm' },
           scale: { color: { domain: ['max', 'min'], range: [EXTREME_COLORS.max, EXTREME_COLORS.min] }, y: { nice: true } },
-          axis: compact ? { x: false, y: false } : { x: { title: 'Step' }, y: { title: 'Value' } },
+          axis: compact ? { x: false, y: false } : { x: { title: 'Step', tickCount: adaptiveTicks(extremeContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Value', tickCount: 4 } },
           legend: compact ? false : { color: { title: null, position: 'top', layout: { justifyContent: 'center' } } },
           tooltip: { crosshairs: true, items: [{ field: 'v', name: 'Value', valueFormatter: FMT }] },
         },
