@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { Chart } from '@antv/g2';
+  import { onChartThemeChange, themeOpts } from './chartTheme.svelte';
 
   export interface HistogramPoint {
     run_id: string;
@@ -217,24 +218,38 @@
   // Reactive: create chart when container appears, re-render on data change
   $effect(() => {
     if (barContainer && barData.length > 0) {
-      if (!barChart) barChart = new Chart({ container: barContainer, autoFit: true, height: 220 });
+      if (!barChart) barChart = new Chart({ container: barContainer, autoFit: true, height: 220, ...themeOpts() });
       renderBar();
     }
   });
   $effect(() => {
     if (trendContainer && trend.length > 0) {
-      if (!trendChart) trendChart = new Chart({ container: trendContainer, autoFit: true, height: 220 });
+      if (!trendChart) trendChart = new Chart({ container: trendContainer, autoFit: true, height: 220, ...themeOpts() });
       renderTrend();
     }
   });
   $effect(() => {
     if (extremeContainer && extremes.length > 0) {
-      if (!extremeChart) extremeChart = new Chart({ container: extremeContainer, autoFit: true, height: 220 });
+      if (!extremeChart) extremeChart = new Chart({ container: extremeContainer, autoFit: true, height: 220, ...themeOpts() });
       renderExtreme();
     }
   });
 
+  // 主题切换:销毁三个图表置空,立即按新主题懒创建重渲(订阅外部事件,非 effect)
+  let offChartTheme: (() => void) | null = null;
+  onMount(() => {
+    offChartTheme = onChartThemeChange(() => {
+      barChart?.destroy(); barChart = null;
+      trendChart?.destroy(); trendChart = null;
+      extremeChart?.destroy(); extremeChart = null;
+      if (barContainer && barData.length > 0) { barChart = new Chart({ container: barContainer, autoFit: true, height: 220, ...themeOpts() }); renderBar(); }
+      if (trendContainer && trend.length > 0) { trendChart = new Chart({ container: trendContainer, autoFit: true, height: 220, ...themeOpts() }); renderTrend(); }
+      if (extremeContainer && extremes.length > 0) { extremeChart = new Chart({ container: extremeContainer, autoFit: true, height: 220, ...themeOpts() }); renderExtreme(); }
+    });
+  });
+
   onDestroy(() => {
+    offChartTheme?.();
     barChart?.destroy(); trendChart?.destroy(); extremeChart?.destroy();
   });
 </script>

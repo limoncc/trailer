@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
+  import { onChartThemeChange, themeOpts } from './chartTheme.svelte';
 
   interface Props {
     spec: Record<string, unknown>;
@@ -18,16 +19,26 @@
     chart.render();
   }
 
-  onMount(() => {
+  let offChartTheme: (() => void) | null = null;
+
+  function createChart() {
+    chart?.destroy();
     chart = new Chart({
       container,
       autoFit: true,
       height,
+      ...themeOpts(),
     });
     renderChart();
+  }
+
+  onMount(() => {
+    createChart();
+    offChartTheme = onChartThemeChange(() => createChart());
   });
 
   onDestroy(() => {
+    offChartTheme?.();
     chart?.destroy();
   });
 

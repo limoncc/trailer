@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { Chart } from '@antv/g2';
+  import { themeOpts, onChartThemeChange } from '$lib/charts/chartTheme.svelte';
 
   interface Props {
     matrix: number[][];
@@ -17,7 +18,7 @@
 
     if (chart) chart.destroy();
     const h = container.clientHeight || 400;
-    chart = new Chart({ container, height: h, theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light' });
+    chart = new Chart({ container, height: h, ...themeOpts() });
 
     // Flatten matrix into data records
     const data: { x: string; y: string; value: number }[] = [];
@@ -41,7 +42,14 @@
     chart.render();
   }
 
-  onMount(() => { render(); });
+  let offChartTheme: (() => void) | null = null;
+
+  onMount(() => {
+    render();
+    offChartTheme = onChartThemeChange(() => render());
+  });
+
+  onDestroy(() => { if (offChartTheme) offChartTheme(); });
 
   $effect(() => {
     matrix; labels; // reactivity triggers
