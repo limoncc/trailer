@@ -49,6 +49,28 @@
 
   let activeBoard = $derived(dashes.find((d) => d.id === activeId) ?? null);
 
+  // 工具栏平滑控件:作用域为本看板所有 line 卡(便于整体看趋势)。
+  // 卡片各自保留 smooth 值;按最大值展示,卡间不一致时显示 * 提示,点按即统一。
+  let lineWidgetCount = $derived(widgets.filter((w) => w.type === 'line').length);
+  let boardSmooth = $derived(
+    lineWidgetCount === 0
+      ? 0
+      : Math.max(...widgets.filter((w) => w.type === 'line').map((w) => (w as { smooth?: number }).smooth ?? 0))
+  );
+  let mixedSmooth = $derived(
+    lineWidgetCount > 0 &&
+      widgets.some((w) => w.type === 'line' && ((w as { smooth?: number }).smooth ?? 0) !== boardSmooth)
+  );
+
+  function setBoardSmooth(next: number) {
+    const v = Math.min(20, Math.max(0, next));
+    // 先在本地算出新数组再赋值+保存:避免连续点击时读 $derived 的时序问题,
+    // 也保证保存的内容就是屏幕上应用的内容
+    const updated = widgets.map((w) => (w.type === 'line' ? { ...w, smooth: v } : w));
+    widgets = updated;
+    saveLayout(updated);
+  }
+
   async function api(url: string, init?: RequestInit) {
     const resp = await fetch(url, init);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -118,20 +140,28 @@
     }
   }
 
+  /** 写入串行化:快速连续调整(平滑 ± 连点/拖拽)时多个 PUT 并行会乱序落库,
+   *  用 promise 链保证按调用顺序写入,最后一次调用即最终状态。 */
+  let saveChain: Promise<void> = Promise.resolve();
+
   async function saveLayout(widgetsToSave: DashWidget[], boardId?: string) {
     const id = boardId ?? activeId;
     if (!id) return;
-    try {
-      await api(`/api/v1/dashboards/${id}`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ layout: serializeLayout({ version: 1, widgets: widgetsToSave }) }),
-      });
-      const d = dashes.find((x) => x.id === id);
-      if (d) d.layout = serializeLayout({ version: 1, widgets: widgetsToSave });
-    } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to save board';
-    }
+    const layout = serializeLayout({ version: 1, widgets: widgetsToSave });
+    const d = dashes.find((x) => x.id === id);
+    if (d) d.layout = layout;
+    saveChain = saveChain.then(async () => {
+      try {
+        await api(`/api/v1/dashboards/${id}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ layout }),
+        });
+      } catch (e) {
+        error = e instanceof Error ? e.message : 'Failed to save board';
+      }
+    });
+    await saveChain;
   }
 
   function onWidgetsChange(next: DashWidget[]) {
@@ -305,6 +335,30 @@
           <span class="text-xs text-destructive">{error}</span>
         {/if}
         {#if activeBoard}
+          {#if lineWidgetCount > 0}
+            <span
+              class="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md"
+              title={mixedSmooth
+                ? 'Smoothing (cards differ — click to unify)'
+                : 'Smoothing for all line cards (0 = raw, 1-20 = moving average)'}
+            >
+              <span class="text-muted-foreground">Smooth</span>
+              <button
+                class="px-1 hover:text-foreground disabled:opacity-30"
+                disabled={boardSmooth <= 0}
+                onclick={() => setBoardSmooth(boardSmooth - 1)}
+              >−</button>
+              <span class="w-4 text-center tabular-nums">{boardSmooth}</span>
+              <button
+                class="px-1 hover:text-foreground disabled:opacity-30"
+                disabled={boardSmooth >= 20}
+                onclick={() => setBoardSmooth(boardSmooth + 1)}
+              >+</button>
+              {#if mixedSmooth}
+                <span class="text-muted-foreground" title="Cards use different smoothing">*</span>
+              {/if}
+            </span>
+          {/if}
           <button
             class="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-md hover:bg-accent"
             onclick={openAdd}
