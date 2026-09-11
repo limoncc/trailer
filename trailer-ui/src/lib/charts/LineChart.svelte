@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
+  import { g2Theme, onChartThemeChange } from './chartTheme.svelte';
 
   interface DataPoint {
     step: number;
@@ -249,11 +250,13 @@
 
   function createChart() {
     chart?.destroy();
+    const theme = g2Theme();
     chart = new Chart({
       container,
       autoFit: true,
       height,
       animate: true,
+      ...(theme ? { theme } : {}),
     });
     chart.options(buildOptions());
     chart.render();
@@ -266,6 +269,8 @@
     startPulse();
   }
 
+  let offChartTheme: (() => void) | null = null;
+
   onMount(() => {
     createChart();
     // 容器尺寸变化(如列数切换)时销毁重建,让 G2 autoFit 重新计算
@@ -273,9 +278,12 @@
       resizeObs = new ResizeObserver(() => createChart());
       resizeObs.observe(container);
     }
+    // 主题切换销毁重建(外部事件订阅,非 effect)
+    offChartTheme = onChartThemeChange(() => createChart());
   });
 
   onDestroy(() => {
+    offChartTheme?.();
     resizeObs?.disconnect();
     stopPulse();
     chart?.destroy();

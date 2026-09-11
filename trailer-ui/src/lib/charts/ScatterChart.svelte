@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
+  import { onChartThemeChange, themeOpts } from './chartTheme.svelte';
 
   interface DataPoint {
     x: number;
@@ -163,6 +164,7 @@
       container,
       autoFit: true,
       height,
+      ...themeOpts(),
     });
     renderChart();
     updatePlotBox();
@@ -210,6 +212,8 @@
     };
   }
 
+  let offChartTheme: (() => void) | null = null;
+
   onMount(() => {
     createChart();
     setupCrosshair();
@@ -218,9 +222,12 @@
       resizeObs = new ResizeObserver(() => createChart());
       resizeObs.observe(container);
     }
+    // 主题切换销毁重建(外部事件订阅,非 effect)
+    offChartTheme = onChartThemeChange(() => createChart());
   });
 
   onDestroy(() => {
+    offChartTheme?.();
     crosshairCleanup();
     resizeObs?.disconnect();
     chart?.destroy();
