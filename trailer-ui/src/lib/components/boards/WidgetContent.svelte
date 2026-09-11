@@ -52,19 +52,59 @@
   };
 
   // ─── line ───
+  // 与 Metrics 卡片同款观感:smooth>0 时每条指标画「原始半透明线 + 平滑实线」两条。
+  // series 命名 "<指标名>__raw" / "<指标名>__smooth",色板按指标序分配(同一指标两线同色),
+  // 颜色由下方 lineColors 展开成成对色值({ name: [rawColor, solidColor] })。
+  const RAW_ALPHA = '40';
+  function withAlpha(hex: string, alphaHex: string): string {
+    return /^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}${alphaHex}` : hex;
+  }
+
+  let lineSeriesNames = $derived.by(() => {
+    if (widget.type !== 'line') return [];
+    return widget.metrics
+      .filter((m) => metrics.some((g) => g.key === m.key && g.context === m.context))
+      .map((m) => seriesName(m.key, m.context));
+  });
+  let lineSmoothOn = $derived(widget.type === 'line' && (widget.smooth ?? 0) > 0);
+  // smooth>0 时同一指标的两条线共用一个基色(色板索引按指标序而非 series 序)
+  let lineColors = $derived.by(() => {
+    if (widget.type !== 'line') return PALETTE;
+    const out: string[] = [];
+    lineSeriesNames.forEach((_, i) => {
+      const base = PALETTE[i % PALETTE.length];
+      if (lineSmoothOn) out.push(withAlpha(base, RAW_ALPHA), base);
+      else out.push(base);
+    });
+    return out;
+  });
+
   let lineData = $derived.by(() => {
     if (widget.type !== 'line') return [];
     const rows: Array<{ step: number; value: number; series: string }> = [];
     const xWall = widget.xKind === 'wall_time';
+    const win = (widget.smooth ?? 0) * 2 + 1;
     for (const m of widget.metrics) {
       const g = metrics.find((g) => g.key === m.key && g.context === m.context);
       if (!g) continue;
       const name = seriesName(m.key, m.context);
-      for (const p of g.points) {
-        rows.push({ step: xWall && p.wall_time != null ? p.wall_time * 1000 : p.step, value: p.value, series: name });
+      const pts = g.points
+        .map((p) => ({ step: xWall && p.wall_time != null ? p.wall_time * 1000 : p.step, value: p.value }))
+        .sort((a, b) => a.step - b.step);
+      if (lineSmoothOn && pts.length > 1) {
+        for (const p of pts) rows.push({ ...p, series: `${name}__raw` });
+        const half = Math.floor(win / 2);
+        for (let i = 0; i < pts.length; i++) {
+          const slice = pts.slice(Math.max(0, i - half), Math.min(pts.length, i + half + 1));
+          const avg = slice.reduce((s, q) => s + q.value, 0) / slice.length;
+          rows.push({ step: pts[i].step, value: avg, series: `${name}__smooth` });
+        }
+      } else {
+        for (const p of pts) rows.push({ ...p, series: name });
       }
     }
-    return rows;
+    // 按 series 分组排序,保证 G2 连线连续(series 序:同指标的 raw 在 smooth 前)
+    return rows.sort((a, b) => (a.series === b.series ? a.step - b.step : a.series < b.series ? -1 : 1));
   });
   let lineYFormat = $derived.by(() => {
     if (widget.type !== 'line') return undefined;
@@ -73,11 +113,11 @@
     const first = fams[0]!;
     return fams.every((f) => f === first) ? UNIT_FMT[first] : undefined;
   });
-  let lineSmoothWindow = $derived(widget.type === 'line' && widget.smooth ? widget.smooth * 2 + 1 : 0);
 
   // 运行中:每条 series 的最新点做绿色脉冲标记(step 已是绘图坐标,wall_time 视图即 ms)
   let lineMarkers = $derived.by(() => {
     if (!running || widget.type !== 'line' || lineData.length === 0) return [];
+    // 平滑关闭时每条指标一个点;开启时原始线/平滑线各一个(与 Metrics 一致)
     const lastBySeries = new Map<string, { step: number; value: number }>();
     for (const row of lineData) lastBySeries.set(row.series, { step: row.step, value: row.value });
     return [...lastBySeries.values()].map((p) => ({ ...p, color: '#22c55e' }));
@@ -164,10 +204,9 @@
       data={lineData}
       height={heightPx}
       seriesField="series"
-      colors={PALETTE}
+      colors={lineColors}
       xIsTime={widget.xKind === 'wall_time'}
       logY={widget.yLog === true}
-      smoothWindow={lineSmoothWindow}
       yFormat={lineYFormat}
       markers={lineMarkers}
     />
