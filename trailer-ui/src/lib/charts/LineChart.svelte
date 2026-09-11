@@ -59,12 +59,12 @@
 
   let container: HTMLDivElement;
   let chart: Chart | null = null;
-  let prevSeriesField: string | undefined;
-  let prevXIsTime = false;
-  let prevLogX = false;
-  let prevLogY = false;
-  let prevSmooth = false;
-  let prevSmoothWindow = 0;
+
+  /// 结构性选项(log 轴/平滑等)变化需销毁重建,确保 G2 scale 干净切换;纯数据变化走热更新
+  function structKey(): string {
+    return JSON.stringify([seriesField ?? null, xIsTime, logX, logY, smooth, smoothWindow]);
+  }
+  let prevStructKey = '';
 
   /// Custom tick method: integer tick values honoring the requested count.
   /// G2 把 scale.tickCount 作为 tickMethod 的 count 传入;旧实现忽略 count 逐整数
@@ -197,10 +197,11 @@
 
     // Add latest-point markers as big green dots (G2 native, no white border)
     if (markers.length > 0) {
-      // Markers may be in sec/ms — convert to Date objects to match time axis
-      let plotMarkers = markers;
+      // Markers may be in sec/ms — convert to Date objects to match time axis.
+      // pulseMarker 标记随数据行进入渲染元素的 __data__,供元素级脉冲动画定位。
+      let plotMarkers: Array<Record<string, unknown>> = markers.map(m => ({ ...m, pulseMarker: 1 }));
       if (xIsTime && markers.length > 0) {
-        plotMarkers = markers.map(m => {
+        plotMarkers = plotMarkers.map(m => {
           const raw = Number(m.step);
           const ms = !isNaN(raw) && raw > 0 && raw < 1e11 ? raw * 1000 : raw;
           return { ...m, step: new Date(ms) };
@@ -231,35 +232,72 @@
     return options;
   }
 
-  let pulseTimer: ReturnType<typeof setInterval> | undefined;
-  let resizeObs: ResizeObserver | null = null;
+  let pulseAnims: Array<{ cancel(): void }> = [];
 
-  /** Pulse the marker with dramatic size + color + opacity changes (full rebuild — no slider to reset). */
+  function stopPulse() {
+    for (const a of pulseAnims) { try { a.cancel(); } catch { /* ignore */ } }
+    pulseAnims = [];
+  }
+
+  /// 在 G2 场景图中找最新点标记的图形对象。标记渲染结构:层组 g 的 __data__.data
+  /// 携带 pulseMarker 数据行,圆点是其下的 path 元素(数据 join 后非 circle)。
+  /// 桥接 G2 内部结构,保持 any。
+  function findMarkerShapes(): any[] {
+    if (!chart) return [];
+    try {
+      const root: any = (chart as any).getContext?.().canvas?.document?.documentElement;
+      if (!root) return [];
+      const out: any[] = [];
+      const walk = (n: any) => {
+        for (const c of n.childNodes ?? []) {
+          const d = c?.__data__;
+          if (d && Array.isArray(d.data) && d.data.some((x: any) => x?.pulseMarker)) {
+            for (const p of c.childNodes ?? []) if (p.nodeName === 'path') out.push(p);
+          }
+          walk(c);
+        }
+      };
+      walk(root);
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  /// 脉冲用 @antv/g 的 WAAPI 无限动画直接驱动标记图形(transform scale + opacity),
+  /// 绝不整图重渲染——整图 render() 会销毁 tooltip 状态,这是运行中 run 悬停闪烁的根因。
+  /// path 几何在渲染期已定,不能动画 r;scale 配 transformOrigin:'center' 原位缩放。
   function startPulse() {
     stopPulse();
     if (!chart || markers.length === 0) return;
-    let toggle = false;
-    pulseTimer = setInterval(() => {
+    for (const shape of findMarkerShapes()) {
       try {
-        if (!chart) return;
-        toggle = !toggle;
-        const opts = buildOptions();
-        if (opts.children && opts.children.length > 1) {
-          opts.children[1].style = toggle
-            ? { fill: '#22c55e', r: 30, stroke: null, lineWidth: 0, opacity: 0.95 }
-            : { fill: '#4ade80', r: 14, stroke: null, lineWidth: 0, opacity: 0.6 };
-        }
-        chart.options(opts);
-        chart.render();
-      } catch { /* ignore */ }
-    }, 600);
+        shape.style.transformOrigin = 'center';
+        shape.style.transformBox = 'fill-box';
+        const anim = shape.animate(
+          [
+            { transform: 'scale(1)', opacity: 1 },
+            { transform: 'scale(1.2)', opacity: 0.25 },
+            { transform: 'scale(1)', opacity: 1 },
+          ],
+          { duration: 900, iterations: Infinity, easing: 'ease-in-out' },
+        );
+        if (anim) pulseAnims.push(anim);
+      } catch { /* 渲染环境不支持 WAAPI 时跳过 */ }
+    }
   }
 
-  function stopPulse() {
-    if (pulseTimer) { clearInterval(pulseTimer); pulseTimer = undefined; }
+  /// render() 是异步的,元素就绪后再挂脉冲;epoch 比对防止过期 promise 给新图挂旧动画
+  function renderAndPulse() {
+    if (!chart) return;
+    const c = chart;
+    Promise.resolve(c.render())
+      .then(() => { if (chart === c) startPulse(); })
+      .catch(() => {});
   }
 
   function createChart() {
+    stopPulse();
     chart?.destroy();
     const theme = g2Theme();
     chart = new Chart({
@@ -270,17 +308,51 @@
       ...(theme ? { theme } : {}),
     });
     chart.options(buildOptions());
-    chart.render();
-    prevSeriesField = seriesField;
-    prevXIsTime = xIsTime;
-    prevLogX = logX;
-    prevLogY = logY;
-    prevSmooth = smooth;
-    prevSmoothWindow = smoothWindow;
-    startPulse();
+    prevStructKey = structKey();
+    pendingHotUpdate = false;
+    renderAndPulse();
+  }
+
+  /// 数据/标记热更新:只换 options 重渲染,不重建 Chart 实例
+  function hotUpdate() {
+    if (!chart) return;
+    chart.options(buildOptions());
+    renderAndPulse();
+  }
+
+  // ─── 悬停期间推迟热更新(轮询渲染会打断 tooltip),移开后补一次渲染 ───
+  let hoverPause = false;
+  let pendingHotUpdate = false;
+
+  function flushPendingHotUpdate() {
+    hoverPause = false;
+    if (pendingHotUpdate) {
+      pendingHotUpdate = false;
+      hotUpdate();
+    }
+  }
+
+  /// props 变化 → 图表更新的命令式通道:use: action 的 update 在参数表达式
+  /// 变化时被模板调用,不经过 $effect。悬停监听也挂在这里(action 挂载即注册)。
+  function chartSync(node: HTMLDivElement, _params: { data: DataPoint[]; markers: Props['markers'] }) {
+    node.addEventListener('pointerenter', () => { hoverPause = true; });
+    node.addEventListener('pointerleave', flushPendingHotUpdate);
+    return {
+      update() {
+        if (!chart) return; // onMount 尚未建图,由 onMount 用最新 props 创建
+        if (structKey() !== prevStructKey) {
+          createChart();
+        } else if (hoverPause) {
+          pendingHotUpdate = true;
+        } else {
+          hotUpdate();
+        }
+      },
+    };
   }
 
   let offChartTheme: (() => void) | null = null;
+  let resizeObs: ResizeObserver | null = null;
 
   onMount(() => {
     createChart();
@@ -298,26 +370,7 @@
     resizeObs?.disconnect();
     stopPulse();
     chart?.destroy();
-  });
-
-  // Reactive update: recreate chart when seriesField changes, otherwise hot-update
-  $effect(() => {
-    if (!chart) return;
-    // log 轴/平滑等变化需销毁重建,确保 G2 scale 干净切换
-    if (
-      seriesField !== prevSeriesField ||
-      xIsTime !== prevXIsTime ||
-      logX !== prevLogX ||
-      logY !== prevLogY ||
-      smooth !== prevSmooth ||
-      smoothWindow !== prevSmoothWindow
-    ) {
-      createChart();
-    } else {
-      chart.options(buildOptions());
-      chart.render();
-      startPulse();
-    }
+    chart = null;
   });
 </script>
 
@@ -325,5 +378,10 @@
   {#if title}
     <h3 class="text-sm font-semibold mb-2 text-foreground">{title}</h3>
   {/if}
-  <div bind:this={container} class="w-full" style="height: {height}px;"></div>
+  <div
+    bind:this={container}
+    class="w-full"
+    style="height: {height}px;"
+    use:chartSync={{ data, markers }}
+  ></div>
 </div>
