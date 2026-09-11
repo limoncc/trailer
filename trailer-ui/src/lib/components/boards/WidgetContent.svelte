@@ -21,9 +21,11 @@
     data: BoardsData;
     /** 卡片内容区可用高度(px,line 图需要显式高度) */
     heightPx: number;
+    /** run 运行中:line 图最新点显示绿色脉冲标记(同 Metrics 卡片) */
+    running?: boolean;
   }
 
-  let { widget, runId, metrics, data, heightPx }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false }: Props = $props();
 
   const PALETTE = ['#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f59e0b', '#6366f1'];
 
@@ -72,6 +74,14 @@
     return fams.every((f) => f === first) ? UNIT_FMT[first] : undefined;
   });
   let lineSmoothWindow = $derived(widget.type === 'line' && widget.smooth ? widget.smooth * 2 + 1 : 0);
+
+  // 运行中:每条 series 的最新点做绿色脉冲标记(step 已是绘图坐标,wall_time 视图即 ms)
+  let lineMarkers = $derived.by(() => {
+    if (!running || widget.type !== 'line' || lineData.length === 0) return [];
+    const lastBySeries = new Map<string, { step: number; value: number }>();
+    for (const row of lineData) lastBySeries.set(row.series, { step: row.step, value: row.value });
+    return [...lastBySeries.values()].map((p) => ({ ...p, color: '#22c55e' }));
+  });
 
   // ─── hist ───
   let histFrames = $derived.by(() => {
@@ -159,6 +169,7 @@
       logY={widget.yLog === true}
       smoothWindow={lineSmoothWindow}
       yFormat={lineYFormat}
+      markers={lineMarkers}
     />
   {/if}
 {:else if widget.type === 'hist'}

@@ -16,13 +16,15 @@
     runId: string;
     metrics: MetricSeries[];
     boardsData: BoardsData;
+    /** run 运行中:line 图最新点显示绿色脉冲标记(同 Metrics 卡片) */
+    running?: boolean;
     /** 拖拽/缩放/删除/取色等布局变更 */
     onChange: (widgets: DashWidget[]) => void;
     /** 「编辑内容」按钮 → 父组件打开选择弹窗 */
     onEditContent: (widget: DashWidget) => void;
   }
 
-  let { widgets, editing, runId, metrics, boardsData, onChange, onEditContent }: Props = $props();
+  let { widgets, editing, runId, metrics, boardsData, running = false, onChange, onEditContent }: Props = $props();
 
   const ROW_PX = 44;
   const GAP_PX = 12;
@@ -272,7 +274,7 @@
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
         <div class="flex-1 min-h-0 p-2 {editing ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} />
+          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} />
         </div>
 
         <!-- Resize handle -->
