@@ -73,16 +73,16 @@ export type DashWidget =
   | MediaWidget;
 
 export interface DashboardLayout {
-  /** v1 = 12 列网格(历史数据);v2 = 24 列网格(当前)。parseLayout 统一返回 v2 语义 */
-  version: 1 | 2;
+  /** v1 = 12 列网格,v2 = 24 列网格(历史);v3 = 36 列网格(当前)。parseLayout 统一返回 v3 语义 */
+  version: 1 | 2 | 3;
   widgets: DashWidget[];
 }
 
 export const MIN_W = 3;
-export const MAX_W = 24;
+export const MAX_W = 36;
 export const MIN_H = 4;
 export const MAX_H = 40;
-export const DEFAULT_W = 12;
+export const DEFAULT_W = 18;
 export const DEFAULT_H = 10;
 
 export function newWidgetId(): string {
@@ -94,15 +94,15 @@ export function defaultSize(type: DashWidget['type']): { w: number; h: number } 
     case 'line':
       return { w: DEFAULT_W, h: DEFAULT_H };
     case 'hist':
-      return { w: 12, h: 9 };
+      return { w: 18, h: 9 };
     case 'figure':
-      return { w: 12, h: 10 };
+      return { w: 18, h: 10 };
     case 'text':
-      return { w: 10, h: 8 };
+      return { w: 15, h: 8 };
     case 'table':
-      return { w: 14, h: 12 };
+      return { w: 21, h: 12 };
     case 'media':
-      return { w: 8, h: 8 };
+      return { w: 12, h: 8 };
   }
 }
 
@@ -187,11 +187,11 @@ function parseStep(v: unknown): LatestOrStep | undefined {
   return undefined;
 }
 
-/** 容错解析服务端返回的 layout JSON 串;统一归一为 v2(24 列)语义。
- *  兼容两类历史数据:v1(12 列,w ×2 迁移)与早期 bug 写出的双层包裹
- *  {widgets:{version,widgets:[...]}}(Board 数据损坏自愈)。非法输入返回空布局。 */
+/** 容错解析服务端返回的 layout JSON 串;统一归一为 v3(36 列)语义。
+ *  历史版本按列数比例迁移宽度:v1(12 列)×3、v2(24 列)×1.5;
+ *  并自愈早期 bug 写出的双层包裹 `{widgets:{version,widgets:[...]}}`。非法输入返回空布局。 */
 export function parseLayout(s: string | null | undefined): DashboardLayout {
-  const empty: DashboardLayout = { version: 2, widgets: [] };
+  const empty: DashboardLayout = { version: 3, widgets: [] };
   if (!s) return empty;
   try {
     const obj = JSON.parse(s) as unknown;
@@ -208,27 +208,27 @@ export function parseLayout(s: string | null | undefined): DashboardLayout {
       rawWidgets = (rawWidgets as Record<string, unknown>).widgets;
     }
     if (!Array.isArray(rawWidgets)) return empty;
-    // v1 是 12 列网格,升到 24 列宽度 ×2,视觉比例不变
-    const scale = version === 2 ? 1 : 2;
+    // 按历史网格列数比例缩放宽度,视觉比例不变
+    const scale = version === 2 ? 1.5 : version === 1 ? 3 : 1;
     const seen = new Set<string>();
     const widgets = rawWidgets
       .map(parseWidget)
       .filter((w): w is DashWidget => w !== null)
       .map((w) => {
-        const scaled = scale === 1 ? w : { ...w, w: clampW(w.w * scale) };
+        const scaled = scale === 1 ? w : { ...w, w: clampW(Math.round(w.w * scale)) };
         // id 去重(后端不约束唯一)
         if (seen.has(scaled.id)) return { ...scaled, id: newWidgetId() };
         seen.add(scaled.id);
         return scaled;
       });
-    return { version: 2, widgets };
+    return { version: 3, widgets };
   } catch {
     return empty;
   }
 }
 
 export function serializeLayout(l: DashboardLayout): string {
-  return JSON.stringify({ version: 2, widgets: l.widgets });
+  return JSON.stringify({ version: 3, widgets: l.widgets });
 }
 
 /** 卡片缺省标题:按内容自动生成 */
