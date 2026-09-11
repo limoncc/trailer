@@ -71,6 +71,26 @@
     saveLayout(updated);
   }
 
+  // 工具栏 X 轴切换(Step/Wall Time,同 MetricCard 语义):作用域为本看板所有 line 卡。
+  // 按第一张 line 卡展示,卡间不一致显示 *,点按即统一。
+  let boardXKind = $derived(
+    lineWidgetCount === 0
+      ? 'step'
+      : ((((widgets.find((w) => w.type === 'line') as { xKind?: string })?.xKind ?? 'step') === 'wall_time')
+          ? 'wall_time'
+          : 'step')
+  );
+  let mixedXKind = $derived(
+    lineWidgetCount > 0 &&
+      widgets.some((w) => w.type === 'line' && (((w as { xKind?: string }).xKind ?? 'step') !== boardXKind))
+  );
+
+  function setBoardXKind(next: 'step' | 'wall_time') {
+    const updated = widgets.map((w) => (w.type === 'line' ? { ...w, xKind: next } : w));
+    widgets = updated;
+    saveLayout(updated);
+  }
+
   async function api(url: string, init?: RequestInit) {
     const resp = await fetch(url, init);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -335,6 +355,18 @@
           <span class="text-xs text-destructive">{error}</span>
         {/if}
         {#if activeBoard}
+          {#if lineWidgetCount > 0}
+            <button
+              class="px-2 py-1 text-xs border border-border rounded-md hover:bg-accent"
+              title="X axis for all line cards (Step / Wall Time)"
+              onclick={() => setBoardXKind(boardXKind === 'step' ? 'wall_time' : 'step')}
+            >
+              X: {boardXKind === 'step' ? 'Step' : 'Wall Time'}{#if mixedXKind}<span
+                  class="text-muted-foreground"
+                  title="Cards use different X axis">*</span
+                >{/if}
+            </button>
+          {/if}
           {#if lineWidgetCount > 0}
             <span
               class="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md"
