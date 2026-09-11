@@ -282,15 +282,23 @@
     const id = page.params.id;
     if (id && id !== runId) {
       runId = id; maxStep = 0;
-      // 首次加载:两个加载都完成后才做一次"当前 tab 无数据则切走"的决策。
+      // 首次加载:两个加载都完成后才做一次落点决策。
       // 不能在单个加载完成时就决策——metrics/config 尚在加载会被误判为无数据。
-      // 默认落在 Boards(恒可用);仅当当前 tab 是数据 tab 且无数据时,才切到
-      // 第一个有数据的 tab,Boards 不参与自动切换。
-      Promise.all([loadMetrics(id), loadTabAvailability(id)]).then(() => {
-        if (tab !== 'boards' && !tabs.some(t => t.k === tab && t.has)) {
+      // 默认落在 Boards;没有看板时跳到 Metrics;
+      // 非 Boards 落点时,仅当当前数据 tab 无数据才切到第一个有数据的 tab。
+      Promise.all([loadMetrics(id), loadTabAvailability(id)]).then(async () => {
+        const firstVisible = () => {
           const visible = tabs.filter(t => t.has && t.k !== 'boards');
           if (visible.length > 0) tab = visible[0].k as typeof tab;
+        };
+        if (tab !== 'boards') {
+          if (!tabs.some(t => t.k === tab && t.has)) firstVisible();
+          return;
         }
+        try {
+          const resp = await fetch(`/api/v1/runs/${encodeURIComponent(id)}/dashboards`);
+          if (resp.ok && (await resp.json()).length === 0) tab = 'metrics';
+        } catch { /* 探测失败保持 Boards,避免误跳 */ }
       });
     }
   });
