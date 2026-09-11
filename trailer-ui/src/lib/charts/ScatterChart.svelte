@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
-  import { onChartThemeChange, themeOpts } from './chartTheme.svelte';
+  import { onChartThemeChange, themeOpts, adaptiveTicks } from './chartTheme.svelte';
 
   interface DataPoint {
     x: number;
@@ -87,8 +87,8 @@
         y: scaleY,
       },
       axis: {
-        x: { title: xField, labelAutoHide: true, labelAutoRotate: false },
-        y: { title: yField, labelAutoHide: true, labelAutoRotate: false },
+        x: { title: xField, labelAutoHide: true, labelAutoRotate: false, tickCount: adaptiveTicks(container?.clientWidth ?? 500, 70, 10) },
+        y: { title: yField, labelAutoHide: true, labelAutoRotate: false, tickCount: adaptiveTicks(height, 55, 8) },
       },
       legend: { color: { position: 'bottom', layout: {justifyContent: 'center' } },
       tooltip: {
