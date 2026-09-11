@@ -122,9 +122,9 @@ describe('parseLayout', () => {
     });
     const parsed = parseLayout(s);
     expect(parsed.widgets[0].w).toBe(36);
-    expect(parsed.widgets[0].h).toBe(4);
-    expect(parsed.widgets[1].w).toBe(18);
-    expect(parsed.widgets[1].h).toBe(10);
+    expect(parsed.widgets[0].h).toBe(2);
+    expect(parsed.widgets[1].w).toBe(12);
+    expect(parsed.widgets[1].h).toBe(4);
   });
 
   it('assigns ids when missing and dedupes duplicates', () => {
@@ -186,12 +186,12 @@ describe('clamp helpers', () => {
     expect(clampW(1)).toBe(3);
     expect(clampW(13)).toBe(13);
     expect(clampW(99)).toBe(36);
-    expect(clampW(NaN)).toBe(18);
+    expect(clampW(NaN)).toBe(12);
     expect(clampW(undefined, 8)).toBe(8);
   });
 
   it('clampH bounds', () => {
-    expect(clampH(0)).toBe(4);
+    expect(clampH(0)).toBe(2);
     expect(clampH(999)).toBe(40);
     expect(clampH(undefined, 8)).toBe(8);
   });
@@ -232,7 +232,7 @@ describe('defaultWidgets', () => {
     const widgets = defaultWidgets(metrics);
     expect(widgets).toHaveLength(2);
     const root = widgets.find((w) => (w as any).metrics.length === 2);
-    expect(root).toMatchObject({ type: 'line', w: 18, h: 10 });
+    expect(root).toMatchObject({ type: 'line', w: 12, h: 4 });
   });
 
   it('splits large contexts into chunks of 8', () => {
