@@ -178,7 +178,7 @@
       No histogram frames yet
     </div>
   {:else}
-    <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact />
+    <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact={widget.w < 12} />
   {/if}
 {:else if widget.type === 'figure'}
   {#if !figureRow}
