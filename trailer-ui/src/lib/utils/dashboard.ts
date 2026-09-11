@@ -12,7 +12,7 @@ export interface WidgetBase {
   title?: string;
   /** 卡片头自定义颜色(#rrggbb),缺省无色条 */
   color?: string;
-  /** 24 列网格的跨列数 */
+  /** 36 列网格的跨列数 */
   w: number;
   /** 行数(每行 44px) */
   h: number;
@@ -80,10 +80,10 @@ export interface DashboardLayout {
 
 export const MIN_W = 3;
 export const MAX_W = 36;
-export const MIN_H = 4;
+export const MIN_H = 2;
 export const MAX_H = 40;
-export const DEFAULT_W = 18;
-export const DEFAULT_H = 10;
+export const DEFAULT_W = 12;
+export const DEFAULT_H = 4;
 
 export function newWidgetId(): string {
   return `w_${Math.random().toString(16).slice(2, 10)}`;
@@ -94,15 +94,15 @@ export function defaultSize(type: DashWidget['type']): { w: number; h: number } 
     case 'line':
       return { w: DEFAULT_W, h: DEFAULT_H };
     case 'hist':
-      return { w: 18, h: 9 };
+      return { w: 12, h: 4 };
     case 'figure':
-      return { w: 18, h: 10 };
+      return { w: 12, h: 4 };
     case 'text':
-      return { w: 15, h: 8 };
+      return { w: 9, h: 3 };
     case 'table':
-      return { w: 21, h: 12 };
+      return { w: 12, h: 4 };
     case 'media':
-      return { w: 12, h: 8 };
+      return { w: 9, h: 3 };
   }
 }
 
