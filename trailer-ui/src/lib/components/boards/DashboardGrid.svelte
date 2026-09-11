@@ -52,17 +52,22 @@
     collapsed = next;
   }
 
+  // ─── 平滑调节(工具栏统一控制本看板所有 line 卡):0=原始线,1..20 → SMA 窗口 2n+1 ───
+  // 卡片级别保留各自 smooth 值,但工具栏作用域为整个看板,便于"整体看趋势"。
+  let lineWidgets = $derived(widgets.filter((w) => w.type === 'line'));
+  let boardSmooth = $derived(lineWidgets.length === 0 ? 0 : Math.max(...lineWidgets.map((w) => (w as { smooth?: number }).smooth ?? 0)));
+  let mixedSmooth = $derived(lineWidgets.length > 0 && lineWidgets.some((w) => ((w as { smooth?: number }).smooth ?? 0) !== boardSmooth));
+
+  function setBoardSmooth(next: number) {
+    const v = Math.min(20, Math.max(0, next));
+    onChange(widgets.map((w) => (w.type === 'line' ? { ...w, smooth: v } : w)));
+  }
+
   // ─── 卡片头取色(编辑态,onChange 持久化) ───
   function setColor(widget: DashWidget, color: string | undefined) {
     onChange(
       widgets.map((w) => (w.id === widget.id ? { ...w, color } : w))
     );
-  }
-
-  // ─── 平滑调节(line 卡,视图/编辑态均可):0=原始,1..20 → SMA 窗口 2n+1,随布局持久化 ───
-  function setSmooth(widget: DashWidget, next: number) {
-    const v = Math.min(20, Math.max(0, next));
-    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, smooth: v } : w)));
   }
 
   // ─── 拖拽换位:pointer 事件 + elementFromPoint 命中检测。
@@ -225,21 +230,6 @@
         </button>
         {#if widget.color}
           <span class="w-2 h-2 rounded-full shrink-0" style="background:{widget.color}"></span>
-        {/if}
-        {#if widget.type === 'line'}
-          <span class="flex items-center shrink-0 text-muted-foreground" title="Smoothing window (±)">
-            <button
-              class="hover:text-foreground disabled:opacity-30"
-              disabled={(widget.smooth ?? 0) === 0}
-              onclick={(e) => { e.stopPropagation(); setSmooth(widget, (widget.smooth ?? 0) - 1); }}
-            >−</button>
-            <span class="w-4 text-center tabular-nums">{widget.smooth ?? 0}</span>
-            <button
-              class="hover:text-foreground disabled:opacity-30"
-              disabled={(widget.smooth ?? 0) >= 20}
-              onclick={(e) => { e.stopPropagation(); setSmooth(widget, (widget.smooth ?? 0) + 1); }}
-            >+</button>
-          </span>
         {/if}
         {#if renameId === widget.id}
           <input
