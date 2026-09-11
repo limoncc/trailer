@@ -142,7 +142,8 @@
 
   onMount(() => {
     loadUserTheme();
-    fetchServerVersion().then((v) => (appVersion = v));
+    // 单一版本号:显示服务端二进制版本;/api/v1 不可达时兜底为构建期注入的 Cargo 版本
+    fetchServerVersion().then((v) => (appVersion = v ?? { name: 'trailer', version: UI_VERSION }));
   });
   let sidebarWidth = $state(224);
   let dragging = $state(false);
@@ -512,8 +513,7 @@
       <h3 class="text-sm font-semibold mb-3">About Trailer</h3>
       <div class="space-y-1.5 text-xs">
         <div class="flex justify-between"><span class="text-muted-foreground">Service</span><span class="font-mono">{appVersion.name}</span></div>
-        <div class="flex justify-between"><span class="text-muted-foreground">Server</span><span class="font-mono">v{appVersion.version}</span></div>
-        <div class="flex justify-between"><span class="text-muted-foreground">UI</span><span class="font-mono">v{UI_VERSION}</span></div>
+        <div class="flex justify-between"><span class="text-muted-foreground">Version</span><span class="font-mono">v{appVersion.version}</span></div>
       </div>
       <div class="flex justify-end mt-4">
         <button onclick={() => showVersionInfo = false} class="px-3 py-1 text-xs border border-border rounded-md">Close</button>
