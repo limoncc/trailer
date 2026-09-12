@@ -36,7 +36,22 @@ impl SqliteStorage {
             .await;
         let _ = sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await;
 
-        let _ = sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await;
+        // 周期性 TRUNCATE checkpoint:把 WAL 合并回主 db 文件并截断 -wal。
+        // 否则"只拷贝主 db 文件"的备份会丢最近写入(尚未 checkpoint 的都在 -wal 里)。
+        // 忙碌时 checkpoint 失败无害,下个周期重试。
+        let checkpoint_pool = pool.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            interval.tick().await; // 首个 tick 立即完成,跳过
+            loop {
+                interval.tick().await;
+                let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                    .execute(&checkpoint_pool)
+                    .await;
+            }
+        });
+
         let store = Self { pool };
         store.run_migrations().await?;
         Ok(store)
