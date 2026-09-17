@@ -6,14 +6,19 @@ import { parseSummaryKey, type MetricRef } from './explore';
 // 3) WidgetContent.svelte 加渲染分支  4) WidgetPickerDialog.svelte 加选择分支
 // parseLayout 对未知 type 返回时直接丢弃(向前兼容旧前端读新数据)。
 
+/** 卡片吸附方向:与该侧相邻卡片的间距归零(legacy snapPrev:true → 'left') */
+export type SnapDir = 'up' | 'down' | 'left' | 'right';
+
+const SNAP_DIRS: readonly string[] = ['up', 'down', 'left', 'right'];
+
 export interface WidgetBase {
   id: string;
   /** 缺省 = 按内容自动生成标题 */
   title?: string;
   /** 卡片头自定义颜色(#rrggbb),缺省无色条 */
   color?: string;
-  /** 吸附到左侧相邻卡片(间距归零) */
-  snapPrev?: boolean;
+  /** 吸附相邻卡片的方向(该侧间距归零);旧数据 snapPrev:true 迁移为 'left' */
+  snap?: SnapDir;
   /** 36 列网格的跨列数 */
   w: number;
   /** 行数(每行 44px) */
@@ -80,9 +85,11 @@ export interface InfoWidget extends WidgetBase {
   items: InfoItem[];
   /** GPU 卡数;缺省自动读 env.hardware.gpus 数量 */
   gpus?: number;
-  /** 单价(元/卡时);缺省只显示累计卡时 */
+  /** 单价(每卡时);缺省只显示累计卡时 */
   unitPrice?: number;
-  /** 模型名的 config 点路径;缺省依次尝试 model_name / model */
+  /** 成本金额币种;缺省 usd */
+  currency?: 'usd' | 'cny';
+  /** 模型名的 config 点路径;缺省依次尝试 model_name / train_model / model */
   modelPath?: string;
 }
 
@@ -121,9 +128,9 @@ export const MAX_H = 40;
 export const DEFAULT_W = 12;
 export const DEFAULT_H = 4;
 
-/** 每类型最小尺寸:info 卡内容多(头部条/瓦片格),过小会出滚动条 */
+/** 每类型最小尺寸:info 卡同样取全局下限(瓦片格自适应换行,过窄单列排布) */
 export function minSize(type: DashWidget['type']): { w: number; h: number } {
-  if (type === 'info') return { w: 4, h: 2 };
+  if (type === 'info') return { w: 3, h: 2 };
   return { w: MIN_W, h: MIN_H };
 }
 
@@ -178,7 +185,11 @@ function parseWidget(raw: unknown): DashWidget | null {
     color: normalizeColor(r.color),
     w: clampW(r.w),
     h: clampH(r.h),
-    snapPrev: r.snapPrev === true ? true : undefined,
+    snap: typeof r.snap === 'string' && SNAP_DIRS.includes(r.snap)
+      ? (r.snap as SnapDir)
+      : r.snapPrev === true
+        ? ('left' as SnapDir)
+        : undefined,
   };
   switch (r.type) {
     case 'line': {
@@ -252,6 +263,7 @@ function parseWidget(raw: unknown): DashWidget | null {
             ? r.unitPrice
             : undefined,
         modelPath: typeof r.modelPath === 'string' && r.modelPath ? r.modelPath : undefined,
+        currency: r.currency === 'cny' || r.currency === 'usd' ? r.currency : undefined,
       };
     }
     default:

@@ -24,6 +24,8 @@ export interface InfoCellInput {
   /** GPU 卡数(widget 手填优先于 env 识别值,由调用方合并) */
   gpus?: number;
   unitPrice?: number;
+  /** 成本金额币种 */
+  currency?: Currency;
   config?: Record<string, unknown> | null;
   metrics: InfoMetrics[];
 }
@@ -55,13 +57,19 @@ export function formatElapsed(totalSeconds: number): string {
   return d > 0 ? `${d}d ${hhmmss}` : hhmmss;
 }
 
-/** 金额 → "$1,063,883";小额保留两位小数 */
-export function formatMoney(amount: number): string {
-  if (!Number.isFinite(amount)) return '$0.00';
+/** 成本金额币种($ 缺省 / ¥ 可选,信息卡 picker 里切换) */
+export type Currency = 'usd' | 'cny';
+
+const CURRENCY_SYMBOL: Record<Currency, string> = { usd: '$', cny: '¥' };
+
+/** 金额 → "$1,063,883";小额保留两位小数;currency 切换 ¥ */
+export function formatMoney(amount: number, currency: Currency = 'usd'): string {
+  const sym = CURRENCY_SYMBOL[currency] ?? '$';
+  if (!Number.isFinite(amount)) return `${sym}0.00`;
   if (Math.abs(amount) >= 1000) {
-    return `$${Math.round(amount).toLocaleString('en-US')}`;
+    return `${sym}${Math.round(amount).toLocaleString('en-US')}`;
   }
-  return `$${amount.toFixed(2)}`;
+  return `${sym}${amount.toFixed(2)}`;
 }
 
 /** 指标 Δ(最后一点 - 第一点);不足两个点返回 null */
@@ -95,13 +103,14 @@ export function statusFromRunState(state: string): string {
   }
 }
 
-/** config 里取模型名:显式路径优先,再试常见 key;取到对象时走点路径 */
+/** config 里取模型名:显式路径优先,再试常见 key(train_model 兜底);取到对象时走点路径 */
 export function modelNameFromConfig(
   config: Record<string, unknown> | null | undefined,
   modelPath?: string
 ): string | undefined {
   if (!config) return undefined;
-  const candidates = modelPath ? [modelPath, 'model_name', 'model'] : ['model_name', 'model'];
+  const common = ['model_name', 'train_model', 'model'];
+  const candidates = modelPath ? [modelPath, ...common] : common;
   for (const path of candidates) {
     const v = resolveConfigValue(config, path);
     if (v !== undefined && v !== '') return v;
@@ -191,7 +200,7 @@ export function formatCell(input: InfoCellInput): InfoCell {
       const gpuHours = sec !== null ? round2((sec / 3600) * gpus) : null;
       if (gpuHours === null) return { label: 'train cost', value: '—' };
       if (typeof input.unitPrice === 'number' && input.unitPrice >= 0) {
-        return { label: 'train cost', value: formatMoney(gpuHours * input.unitPrice) };
+        return { label: 'train cost', value: formatMoney(gpuHours * input.unitPrice, input.currency) };
       }
       return { label: 'train cost', value: `${gpuHours.toFixed(2)} GPU·h` };
     }
@@ -207,9 +216,9 @@ export function formatCell(input: InfoCellInput): InfoCell {
   }
 }
 
-/** 模型名类 config 单元(model_name/model):由头部条展示,不再重复瓦片 */
+/** 模型名类 config 单元(model_name/train_model/model):由头部条展示,不再重复瓦片 */
 export function isModelCell(item: InfoItem): boolean {
-  return item.src === 'config' && /^(model_name|model)$/.test(item.path);
+  return item.src === 'config' && /^(model_name|train_model|model)$/.test(item.path);
 }
 
 /** 是否渲染状态头部条:显式 status 项,或卡片含模型名 cell(自动升级为状态卡) */
@@ -218,6 +227,7 @@ export function hasStatusHeader(widget: InfoWidget): boolean {
 }
 
 /** 信息卡自动高度估算(行数):status 头部条 + 瓦片按 130px 最小宽换行。
+ *  窄卡(内容宽 <200px)头部条左右两列放不下会换行成三行,按 124px 估算。
  *  用于让 info 卡贴合内容——不留大片空白也不出滚动条。 */
 export function infoRowsNeeded(
   widget: InfoWidget,
@@ -228,6 +238,7 @@ export function infoRowsNeeded(
   const hasStatus = widget.items.some((i) => i.src === 'status');
   const cellCount = widget.items.filter((i) => i.src !== 'status').length;
   const tilesPerRow = Math.max(1, Math.floor((cardWidthPx - 20) / 110));
-  const contentPx = (hasStatus ? 62 : 0) + Math.ceil(cellCount / tilesPerRow) * 72;
+  const headerPx = hasStatus ? (cardWidthPx - 20 < 200 ? 124 : 62) : 0;
+  const contentPx = headerPx + Math.ceil(cellCount / tilesPerRow) * 72;
   return Math.max(2, Math.ceil((contentPx + 16) / (rowPx + gapPx)));
 }
