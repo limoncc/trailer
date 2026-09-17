@@ -1,7 +1,8 @@
 import type { InfoItem } from './dashboard';
 
-// ─── Boards 信息卡纯逻辑:时长格式化 / 成本计算 / config 取值 / 行渲染 ───
-// 全部纯函数,便于 TDD;InfoCard.svelte 只负责组装与 tick。
+// ─── Boards 信息卡纯逻辑(TDD,用例见 infoCard.test.ts) ───
+// 头部条:状态点 + 模型名 + in progress + step + elapsed/started;
+// 主体:大数字瓦片格(指标带 Δ vs step 1 / 成本 / config 值)。全英文展示。
 
 export interface InfoMetrics {
   key: string;
@@ -9,9 +10,9 @@ export interface InfoMetrics {
   points: Array<{ step: number; value: number; idx: number; wall_time?: number }>;
 }
 
-export interface InfoRowInput {
+export interface InfoCellInput {
   item: InfoItem;
-  /** 当前时刻(ms);运行中时长/成本按它跳动 */
+  /** 当前时刻(ms);运行中成本按它跳动 */
   now?: number;
   /** run 创建时刻(秒) */
   createdAt?: number;
@@ -25,41 +26,101 @@ export interface InfoRowInput {
   metrics: InfoMetrics[];
 }
 
-export interface InfoRow {
+export interface InfoCell {
   label: string;
   value: string;
+  /** 指标升降(Δ vs step 1),箭头+绝对值;deltaUp 区分颜色 */
+  delta?: string;
+  deltaUp?: boolean;
 }
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
-/** 秒 → "X天X小时X分钟X秒",前导零单位省略,全零/负数 → "0秒" */
-export function formatDuration(totalSeconds: number): string {
+const fmtMetric = (v: number): string => {
+  const s = String(v);
+  const dot = s.indexOf('.');
+  return dot === -1 || s.length - dot - 1 <= 6 ? s : v.toFixed(6);
+};
+
+/** 秒 → "HH:MM:SS",超过一天前缀 "Xd "(参考图 2d 03:45:12 样式) */
+export function formatElapsed(totalSeconds: number): string {
   const sec = Math.floor(Number.isFinite(totalSeconds) ? Math.max(0, totalSeconds) : 0);
   const d = Math.floor(sec / 86400);
   const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  const parts: string[] = [];
-  if (d > 0) parts.push(`${d}天`);
-  if (h > 0) parts.push(`${h}小时`);
-  if (m > 0) parts.push(`${m}分钟`);
-  if (s > 0) parts.push(`${s}秒`);
-  return parts.length > 0 ? parts.join('') : '0秒';
+  const hhmmss = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return d > 0 ? `${d}d ${hhmmss}` : hhmmss;
 }
 
-/** 成本 = 时长(h) × 卡数 → 累计卡时;单价存在时折算金额(元) */
-export function computeCost(input: {
-  seconds: number;
-  gpus?: number;
-  unitPrice?: number;
-}): { gpuHours: number; amount?: number } {
-  const gpus = input.gpus && input.gpus > 0 ? input.gpus : 0;
-  const seconds = Number.isFinite(input.seconds) ? Math.max(0, input.seconds) : 0;
-  const gpuHours = round2((seconds / 3600) * gpus);
-  if (typeof input.unitPrice === 'number' && input.unitPrice >= 0) {
-    return { gpuHours, amount: round2(gpuHours * input.unitPrice) };
+/** 金额 → "$1,063,883";小额保留两位小数 */
+export function formatMoney(amount: number): string {
+  if (!Number.isFinite(amount)) return '$0.00';
+  if (Math.abs(amount) >= 1000) {
+    return `$${Math.round(amount).toLocaleString('en-US')}`;
   }
-  return { gpuHours };
+  return `$${amount.toFixed(2)}`;
+}
+
+/** 指标 Δ(最后一点 - 第一点);不足两个点返回 null */
+export function metricDelta(
+  points: Array<{ step: number; value: number; idx: number; wall_time?: number }>
+): number | null {
+  if (points.length < 2) return null;
+  return points[points.length - 1].value - points[0].value;
+}
+
+/** Δ → "▲x"/"▼x";零变化返回 null(不显示)。浮点噪声截到 4 位小数 */
+export function formatDelta(delta: number): string | null {
+  if (!Number.isFinite(delta) || delta === 0) return null;
+  const mag = Math.round(Math.abs(delta) * 10000) / 10000;
+  return `${delta > 0 ? '▲' : '▼'}${fmtMetric(mag)}`;
+}
+
+/** run 状态 → 英文状态文本 */
+export function statusFromRunState(state: string): string {
+  switch (state) {
+    case 'running':
+      return 'in progress';
+    case 'finished':
+      return 'finished';
+    case 'crashed':
+      return 'crashed';
+    case 'killed':
+      return 'killed';
+    default:
+      return '';
+  }
+}
+
+/** config 里取模型名:显式路径优先,再试常见 key;取到对象时走点路径 */
+export function modelNameFromConfig(
+  config: Record<string, unknown> | null | undefined,
+  modelPath?: string
+): string | undefined {
+  if (!config) return undefined;
+  const candidates = modelPath ? [modelPath, 'model_name', 'model'] : ['model_name', 'model'];
+  for (const path of candidates) {
+    const v = resolveConfigValue(config, path);
+    if (v !== undefined && v !== '') return v;
+  }
+  return undefined;
+}
+
+/** 把 config 扁平化成点路径叶子 key 列表(空对象跳过,输出排序)——信息卡 picker 用 */
+export function flattenConfigKeys(obj: Record<string, unknown> | null | undefined, prefix = ''): string[] {
+  if (!obj) return [];
+  const keys: string[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      if (Object.keys(v).length > 0) keys.push(...flattenConfigKeys(v as Record<string, unknown>, path));
+      // 空对象无展示价值,跳过
+    } else {
+      keys.push(path);
+    }
+  }
+  return keys.sort((a, b) => a.localeCompare(b));
 }
 
 /** config 点路径取值("train.lr" → 嵌套对象);对象/数组 JSON 化,原始值 String() */
@@ -80,49 +141,43 @@ export function resolveConfigValue(
   return String(cur);
 }
 
-const fmtMetric = (v: number): string => {
-  const s = String(v);
-  const dot = s.indexOf('.');
-  return dot === -1 || s.length - dot - 1 <= 6 ? s : v.toFixed(6);
-};
+function elapsedSeconds(input: InfoCellInput): number | null {
+  if (typeof input.createdAt !== 'number') return null;
+  const nowSec = (input.now ?? Date.now()) / 1000;
+  const endSec = input.running ? nowSec : (input.endAt ?? nowSec);
+  return Math.max(0, endSec - input.createdAt);
+}
 
-/** 单个信息行渲染:标签 + 展示值(值缺失统一 '—') */
-export function formatInfoValue(input: InfoRowInput): InfoRow {
+/** 主体瓦片格单格渲染(指标带 Δ;成本=卡时或金额;config=k/v) */
+export function formatCell(input: InfoCellInput): InfoCell {
   const { item } = input;
   switch (item.src) {
-    case 'step': {
-      let maxStep: number | null = null;
-      for (const series of input.metrics) {
-        for (const p of series.points) {
-          if (maxStep === null || p.step > maxStep) maxStep = p.step;
-        }
-      }
-      return { label: '当前步数', value: maxStep === null ? '—' : String(maxStep) };
-    }
     case 'metric': {
       const label = item.label ?? (item.context ? `${item.key} [${item.context}]` : item.key);
       const series = input.metrics.find((m) => m.key === item.key && m.context === item.context);
-      const last = series && series.points.length > 0 ? series.points[series.points.length - 1] : null;
-      return { label, value: last ? fmtMetric(last.value) : '—' };
-    }
-    case 'elapsed': {
-      if (typeof input.createdAt !== 'number') return { label: '训练时长', value: '—' };
-      const nowSec = (input.now ?? Date.now()) / 1000;
-      const endSec = input.running ? nowSec : (input.endAt ?? nowSec);
-      return { label: '训练时长', value: formatDuration(endSec - input.createdAt) };
+      const points = series?.points ?? [];
+      const last = points.length > 0 ? points[points.length - 1] : null;
+      const delta = metricDelta(points);
+      const cell: InfoCell = {
+        label: `${label} · Δ vs step 1`,
+        value: last ? fmtMetric(last.value) : '—',
+      };
+      const deltaText = delta !== null ? formatDelta(delta) : null;
+      if (deltaText) {
+        cell.delta = deltaText;
+        cell.deltaUp = delta > 0;
+      }
+      return cell;
     }
     case 'cost': {
-      if (typeof input.createdAt !== 'number') return { label: '训练成本', value: '—' };
-      const nowSec = (input.now ?? Date.now()) / 1000;
-      const endSec = input.running ? nowSec : (input.endAt ?? nowSec);
-      const { gpuHours, amount } = computeCost({
-        seconds: endSec - input.createdAt,
-        gpus: input.gpus,
-        unitPrice: input.unitPrice,
-      });
-      let value = `${gpuHours.toFixed(2)} GPU·h`;
-      if (typeof amount === 'number') value += ` · ¥${amount.toFixed(2)}`;
-      return { label: '训练成本', value };
+      const sec = elapsedSeconds(input);
+      const gpus = input.gpus && input.gpus > 0 ? input.gpus : 0;
+      const gpuHours = sec !== null ? round2((sec / 3600) * gpus) : null;
+      if (gpuHours === null) return { label: 'cost so far', value: '—' };
+      if (typeof input.unitPrice === 'number' && input.unitPrice >= 0) {
+        return { label: 'cost so far', value: formatMoney(gpuHours * input.unitPrice) };
+      }
+      return { label: 'cost so far', value: `${gpuHours.toFixed(2)} GPU·h` };
     }
     case 'config': {
       return {
@@ -130,21 +185,8 @@ export function formatInfoValue(input: InfoRowInput): InfoRow {
         value: resolveConfigValue(input.config, item.path) ?? '—',
       };
     }
+    default:
+      // status 由卡片头部条渲染,不走瓦片格
+      return { label: '', value: '—' };
   }
-}
-
-/** 把 config 扁平化成点路径叶子 key 列表(空对象跳过,输出排序)——信息卡 picker 用 */
-export function flattenConfigKeys(obj: Record<string, unknown> | null | undefined, prefix = ''): string[] {
-  if (!obj) return [];
-  const keys: string[] = [];
-  for (const [k, v] of Object.entries(obj)) {
-    const path = prefix ? `${prefix}.${k}` : k;
-    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-      if (Object.keys(v).length > 0) keys.push(...flattenConfigKeys(v as Record<string, unknown>, path));
-      // 空对象无展示价值,跳过
-    } else {
-      keys.push(path);
-    }
-  }
-  return keys.sort((a, b) => a.localeCompare(b));
 }

@@ -453,6 +453,7 @@
         {metrics}
         data={boardsData}
         running={runState === 'running'}
+        {runState}
         {runInfo}
         onChange={onWidgetsChange}
         onEditContent={openEditContent}

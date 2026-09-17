@@ -201,25 +201,21 @@
 
     <div class="flex-1 overflow-auto px-4 py-3">
       {#if activeType === 'info'}
-        <!-- 固定项 -->
+        <!-- status header + cost cell(model/status/step/elapsed 也可以只勾 status 作为独立状态卡) -->
         <div class="space-y-0.5 mb-4">
           <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50 cursor-pointer text-xs">
-            <input type="checkbox" checked={selectedFixed.includes('step')} onchange={() => (selectedFixed = toggleIn(selectedFixed, 'step'))} class="accent-primary" />
-            <span>当前步数</span>
-          </label>
-          <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50 cursor-pointer text-xs">
-            <input type="checkbox" checked={selectedFixed.includes('elapsed')} onchange={() => (selectedFixed = toggleIn(selectedFixed, 'elapsed'))} class="accent-primary" />
-            <span>训练时长（运行中每秒跳动）</span>
+            <input type="checkbox" checked={selectedFixed.includes('status')} onchange={() => (selectedFixed = toggleIn(selectedFixed, 'status'))} class="accent-primary" />
+            <span>Model &amp; training status (name, state, step, elapsed, started)</span>
           </label>
           <div class="px-2 py-1.5 rounded hover:bg-accent/50">
             <label class="flex items-center gap-2 cursor-pointer text-xs">
               <input type="checkbox" checked={selectedFixed.includes('cost')} onchange={() => (selectedFixed = toggleIn(selectedFixed, 'cost'))} class="accent-primary" />
-              <span>训练成本（时长 × 卡数）</span>
+              <span>Training cost (elapsed × GPUs)</span>
             </label>
             {#if selectedFixed.includes('cost')}
               <div class="flex items-center gap-3 mt-1.5 pl-6 text-xs text-muted-foreground">
                 <label class="flex items-center gap-1">
-                  卡数
+                  GPUs
                   <input
                     type="number"
                     min="0"
@@ -230,13 +226,13 @@
                   />
                 </label>
                 <label class="flex items-center gap-1">
-                  单价（元/卡时）
+                  Price ($/GPU·h)
                   <input
                     type="number"
                     min="0"
                     step="0.1"
                     bind:value={infoUnitPrice}
-                    placeholder="不折算金额"
+                    placeholder="GPU·h only"
                     class="w-24 px-1.5 py-0.5 border border-border rounded bg-background"
                   />
                 </label>

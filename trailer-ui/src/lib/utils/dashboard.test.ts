@@ -269,11 +269,12 @@ describe('info widgets', () => {
         h: 6,
         gpus: 8,
         unitPrice: 6.5,
+        modelPath: 'run.model_name',
         items: [
+          { src: 'status' },
           { src: 'step' },
-          { src: 'elapsed' },
           { src: 'cost' },
-          { src: 'config', path: 'train.lr', label: '学习率' },
+          { src: 'config', path: 'train.lr', label: 'lr' },
           { src: 'metric', key: 'loss', context: 'train' },
           { src: 'bogus' },
         ],
@@ -288,10 +289,12 @@ describe('info widgets', () => {
     expect(w.type).toBe('info');
     expect(w.gpus).toBe(8);
     expect(w.unitPrice).toBe(6.5);
-    // 未知 src 丢弃,其余 5 条保留且顺序不变
-    expect(w.items.map((i: any) => i.src)).toEqual(['step', 'elapsed', 'cost', 'config', 'metric']);
-    expect(w.items[3]).toMatchObject({ path: 'train.lr', label: '学习率' });
-    expect(w.items[4]).toMatchObject({ key: 'loss', context: 'train' });
+    expect(w.modelPath).toBe('run.model_name');
+    // step/elapsed 由卡片头部固定展示,items 里丢弃;未知 src 丢弃
+    // step/elapsed(旧版遗留)丢弃;status/cost/config/metric 保留且顺序不变
+    expect(w.items.map((i: any) => i.src)).toEqual(['status', 'cost', 'config', 'metric']);
+    expect(w.items[2]).toMatchObject({ path: 'train.lr', label: 'lr' });
+    expect(w.items[3]).toMatchObject({ key: 'loss', context: 'train' });
   });
 
   it('drops invalid gpus/unitPrice', () => {
@@ -306,12 +309,12 @@ describe('info widgets', () => {
   it('round-trips through serializeLayout', () => {
     const parsed = parseLayout(JSON.stringify(layout));
     const again = parseLayout(serializeLayout(parsed));
-    expect(again.widgets[0]).toMatchObject({ type: 'info', gpus: 8, unitPrice: 6.5 });
-    expect((again.widgets[0] as any).items).toHaveLength(5);
+    expect(again.widgets[0]).toMatchObject({ type: 'info', gpus: 8, unitPrice: 6.5, modelPath: 'run.model_name' });
+    expect((again.widgets[0] as any).items).toHaveLength(4);
   });
 
   it('defaultSize and defaultWidgetTitle', () => {
     expect(defaultSize('info')).toEqual({ w: 9, h: 6 });
-    expect(defaultWidgetTitle({ id: 'i', type: 'info', items: [], w: 9, h: 6 })).toBe('训练信息');
+    expect(defaultWidgetTitle({ id: 'i', type: 'info', items: [], w: 9, h: 6 })).toBe('Training Info');
   });
 });
