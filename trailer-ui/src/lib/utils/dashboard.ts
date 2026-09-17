@@ -6,10 +6,19 @@ import { parseSummaryKey, type MetricRef } from './explore';
 // 3) WidgetContent.svelte 加渲染分支  4) WidgetPickerDialog.svelte 加选择分支
 // parseLayout 对未知 type 返回时直接丢弃(向前兼容旧前端读新数据)。
 
-/** 卡片吸附方向:与该侧相邻卡片的间距归零(legacy snapPrev:true → 'left') */
+/** 卡片吸附方向:与该侧相邻卡片的间距归零;可多选(如 up+left 组合)。
+ *  legacy:snapPrev:true → ['left'],#48 的单字符串 → [字符串]。 */
 export type SnapDir = 'up' | 'down' | 'left' | 'right';
 
 const SNAP_DIRS: readonly string[] = ['up', 'down', 'left', 'right'];
+
+const OPPOSITE_SNAP: Record<SnapDir, SnapDir> = { left: 'right', right: 'left', up: 'down', down: 'up' };
+
+function parseSnapDirs(v: unknown): SnapDir[] | undefined {
+  const list = Array.isArray(v) ? v : typeof v === 'string' ? [v] : [];
+  const dirs = [...new Set(list.filter((x): x is SnapDir => typeof x === 'string' && SNAP_DIRS.includes(x)))];
+  return dirs.length > 0 ? dirs : undefined;
+}
 
 export interface WidgetBase {
   id: string;
@@ -17,8 +26,8 @@ export interface WidgetBase {
   title?: string;
   /** 卡片头自定义颜色(#rrggbb),缺省无色条 */
   color?: string;
-  /** 吸附相邻卡片的方向(该侧间距归零);旧数据 snapPrev:true 迁移为 'left' */
-  snap?: SnapDir;
+  /** 吸附相邻卡片的方向列表(该侧间距归零,缝线合并为单线并去圆角) */
+  snap?: SnapDir[];
   /** 36 列网格的跨列数 */
   w: number;
   /** 行数(每行 44px) */
@@ -185,11 +194,7 @@ function parseWidget(raw: unknown): DashWidget | null {
     color: normalizeColor(r.color),
     w: clampW(r.w),
     h: clampH(r.h),
-    snap: typeof r.snap === 'string' && SNAP_DIRS.includes(r.snap)
-      ? (r.snap as SnapDir)
-      : r.snapPrev === true
-        ? ('left' as SnapDir)
-        : undefined,
+    snap: parseSnapDirs(r.snap) ?? (r.snapPrev === true ? (['left'] as SnapDir[]) : undefined),
   };
   switch (r.type) {
     case 'line': {
@@ -321,6 +326,91 @@ export function parseLayout(s: string | null | undefined): DashboardLayout {
 
 export function serializeLayout(l: DashboardLayout): string {
   return JSON.stringify({ version: 3, widgets: l.widgets, compact: l.compact === true });
+}
+
+// ─── 吸附缝线计算:谁去边框、谁去圆角 ───
+// 卡片声明 snap 方向后与相邻卡片贴合,缝线要"合并为一条线且无圆角":
+// 声明方该侧去边框+去圆角;被贴的相邻卡该侧只去圆角、保留边框(即缝线只剩这一条线)。
+// 双方都声明同一条缝时两边都去边框(完全融合,无线)。指向空白处只去圆角不动边框。
+
+interface PlacedWidget {
+  id: string;
+  widget: DashWidget;
+  col: number;
+  row: number;
+  w: number;
+  h: number;
+}
+
+export interface SnapSeams {
+  /** 该侧去掉自身边框(有相邻卡时) */
+  deborder: SnapDir[];
+  /** 该侧拐角改直角 */
+  square: SnapDir[];
+}
+
+/** 按 CSS grid dense 行优先规则模拟卡片落位,推导每张卡的缝线样式 */
+export function computeSnapSeams(
+  widgets: DashWidget[],
+  heights?: Map<string, number>
+): Map<string, SnapSeams> {
+  const seams = new Map<string, SnapSeams>();
+  for (const w of widgets) seams.set(w.id, { deborder: [], square: [] });
+  if (widgets.length === 0) return seams;
+
+  // 模拟 dense 落位(每张卡从头扫描找第一个能放下的位置)
+  const occupied = new Set<string>();
+  const placed: PlacedWidget[] = [];
+  for (const w of widgets) {
+    const ww = Math.min(MAX_W, Math.max(MIN_W, Math.round(w.w)));
+    const wh = Math.max(MIN_H, Math.round(heights?.get(w.id) ?? w.h));
+    let done = false;
+    for (let row = 0; row < 10_000 && !done; row++) {
+      for (let col = 0; col + ww <= MAX_W; col++) {
+        let free = true;
+        for (let r = row; r < row + wh && free; r++) {
+          for (let c = col; c < col + ww && free; c++) {
+            if (occupied.has(`${r}:${c}`)) free = false;
+          }
+        }
+        if (!free) continue;
+        for (let r = row; r < row + wh; r++) {
+          for (let c = col; c < col + ww; c++) occupied.add(`${r}:${c}`);
+        }
+        placed.push({ id: w.id, widget: w, col, row, w: ww, h: wh });
+        done = true;
+        break;
+      }
+    }
+  }
+
+  const rowsOverlap = (a: PlacedWidget, b: PlacedWidget) => a.row < b.row + b.h && b.row < a.row + a.h;
+  const colsOverlap = (a: PlacedWidget, b: PlacedWidget) => a.col < b.col + b.w && b.col < a.col + a.w;
+  const dedupe = (dirs: SnapDir[]) => [...new Set(dirs)];
+
+  for (const p of placed) {
+    const dirs = p.widget.snap ?? [];
+    const mine = seams.get(p.id)!;
+    for (const d of dirs) {
+      mine.square.push(d);
+      const neighbor = placed.find((q) => {
+        if (q === p) return false;
+        if (d === 'left') return q.col + q.w === p.col && rowsOverlap(p, q);
+        if (d === 'right') return q.col === p.col + p.w && rowsOverlap(p, q);
+        if (d === 'up') return q.row + q.h === p.row && colsOverlap(p, q);
+        return q.row === p.row + p.h && colsOverlap(p, q);
+      });
+      if (neighbor) {
+        mine.deborder.push(d);
+        seams.get(neighbor.id)!.square.push(OPPOSITE_SNAP[d]);
+      }
+    }
+  }
+  for (const s of seams.values()) {
+    s.deborder = dedupe(s.deborder);
+    s.square = dedupe(s.square);
+  }
+  return seams;
 }
 
 /** 卡片缺省标题:按内容自动生成 */

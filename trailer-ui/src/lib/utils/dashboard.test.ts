@@ -8,10 +8,12 @@ import {
   clampW,
   clampH,
   minSize,
+  computeSnapSeams,
   MIN_H,
   MIN_W,
   newWidgetId,
   type DashboardLayout,
+  type SnapDir,
 } from './dashboard';
 
 describe('parseLayout', () => {
@@ -316,29 +318,31 @@ describe('info widgets', () => {
     expect((again.widgets[0] as any).items).toHaveLength(4);
   });
 
-  it('parses snap direction on widgets; legacy snapPrev maps to left', () => {
+  it('parses snap directions; legacy string/bool migrate to arrays', () => {
     const parsed = parseLayout(JSON.stringify({
       version: 3,
       widgets: [
-        { id: 'a', type: 'line', metrics: [{ key: 'a', context: '' }], w: 12, h: 4, snap: 'up' },
-        { id: 'b', type: 'line', metrics: [{ key: 'b', context: '' }], w: 12, h: 4, snapPrev: true },
-        { id: 'c', type: 'line', metrics: [{ key: 'c', context: '' }], w: 12, h: 4, snap: 'diagonal' },
-        { id: 'd', type: 'line', metrics: [{ key: 'd', context: '' }], w: 12, h: 4 },
+        { id: 'a', type: 'line', metrics: [{ key: 'a', context: '' }], w: 12, h: 4, snap: ['up', 'left', 'up', 'diag'] },
+        { id: 'b', type: 'line', metrics: [{ key: 'b', context: '' }], w: 12, h: 4, snap: 'up' },
+        { id: 'c', type: 'line', metrics: [{ key: 'c', context: '' }], w: 12, h: 4, snapPrev: true },
+        { id: 'd', type: 'line', metrics: [{ key: 'd', context: '' }], w: 12, h: 4, snap: 'diagonal' },
+        { id: 'e', type: 'line', metrics: [{ key: 'e', context: '' }], w: 12, h: 4 },
       ],
     }));
-    expect(parsed.widgets[0].snap).toBe('up');
-    expect(parsed.widgets[1].snap).toBe('left');
-    expect(parsed.widgets[2].snap).toBeUndefined();
+    expect(parsed.widgets[0].snap).toEqual(['up', 'left']);
+    expect(parsed.widgets[1].snap).toEqual(['up']);
+    expect(parsed.widgets[2].snap).toEqual(['left']);
     expect(parsed.widgets[3].snap).toBeUndefined();
+    expect(parsed.widgets[4].snap).toBeUndefined();
   });
 
-  it('round-trips snap through serializeLayout', () => {
+  it('round-trips snap arrays through serializeLayout', () => {
     const parsed = parseLayout(JSON.stringify({
       version: 3,
-      widgets: [{ id: 'a', type: 'line', metrics: [{ key: 'a', context: '' }], w: 12, h: 4, snap: 'right' }],
+      widgets: [{ id: 'a', type: 'line', metrics: [{ key: 'a', context: '' }], w: 12, h: 4, snap: ['up', 'right'] }],
     }));
     const again = parseLayout(serializeLayout(parsed));
-    expect(again.widgets[0].snap).toBe('right');
+    expect(again.widgets[0].snap).toEqual(['up', 'right']);
   });
 
   it('parses info currency (usd default dropped, cny kept, others dropped)', () => {
@@ -393,5 +397,50 @@ describe('layout compact (snap)', () => {
   it('round-trips compact through serializeLayout', () => {
     const again = parseLayout(serializeLayout({ version: 3, widgets: [], compact: true }));
     expect(again.compact).toBe(true);
+  });
+});
+
+describe('computeSnapSeams', () => {
+  const line = (id: string, w: number, h: number, snap?: SnapDir[]) =>
+    ({ id, type: 'line' as const, metrics: [{ key: id, context: '' }], w, h, snap });
+
+  it('left snap: declarer drops left border, neighbor squares right corners', () => {
+    const seams = computeSnapSeams([line('a', 6, 4), line('b', 6, 4, ['left'])]);
+    expect(seams.get('b')).toEqual({ deborder: ['left'], square: ['left'] });
+    expect(seams.get('a')).toEqual({ deborder: [], square: ['right'] });
+  });
+
+  it('up+left combo: up has no neighbor at top row (no deborder), left seam works', () => {
+    const seams = computeSnapSeams([line('a', 6, 8), line('b', 6, 4, ['up', 'left'])]);
+    expect(seams.get('b')).toEqual({ deborder: ['left'], square: ['up', 'left'] });
+    expect(seams.get('a')).toEqual({ deborder: [], square: ['right'] });
+  });
+
+  it('mutual snap: both sides drop their borders (fully merged seam)', () => {
+    const seams = computeSnapSeams([line('a', 6, 4, ['right']), line('b', 6, 4, ['left'])]);
+    expect(seams.get('a')).toEqual({ deborder: ['right'], square: ['right'] });
+    expect(seams.get('b')).toEqual({ deborder: ['left'], square: ['left'] });
+  });
+
+  it('snap toward empty space squares but keeps the border', () => {
+    const seams = computeSnapSeams([line('a', 6, 4, ['up'])]);
+    expect(seams.get('a')).toEqual({ deborder: [], square: ['up'] });
+  });
+
+  it('up snap squares the card above downward', () => {
+    // a 满宽占满第一行,b 才会被挤到下一行
+    const seams = computeSnapSeams([line('a', 36, 2), line('b', 12, 2, ['up'])]);
+    expect(seams.get('b')).toEqual({ deborder: ['up'], square: ['up'] });
+    expect(seams.get('a')).toEqual({ deborder: [], square: ['down'] });
+  });
+
+  it('uses provided effective heights for vertical adjacency', () => {
+    // b 存储高度 4,实际渲染 2:heights 覆盖后才与 a(2 行)贴行
+    const seams = computeSnapSeams(
+      [line('a', 36, 2), line('b', 12, 4, ['up'])],
+      new Map([['b', 2]])
+    );
+    expect(seams.get('b')).toEqual({ deborder: ['up'], square: ['up'] });
+    expect(seams.get('a')).toEqual({ deborder: [], square: ['down'] });
   });
 });

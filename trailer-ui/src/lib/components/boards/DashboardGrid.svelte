@@ -5,7 +5,7 @@
   // 布局即数组顺序:卡片 span w 列 × h 行,grid-auto-flow: dense 自动填洞。
   import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight, Magnet, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-svelte';
   import type { DashWidget, RunInfo, SnapDir } from '$lib/utils/dashboard';
-  import { clampH, clampW, defaultWidgetTitle, minSize } from '$lib/utils/dashboard';
+  import { clampH, clampW, computeSnapSeams, defaultWidgetTitle, minSize } from '$lib/utils/dashboard';
   import { infoRowsNeeded } from '$lib/utils/infoCard';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import type { BoardsData, MetricSeries } from './boardsData';
@@ -202,7 +202,9 @@ import { onMount } from 'svelte';
     onChange(widgets.map((w) => (w.id === id ? { ...w, title: t } : w)));
   }
 
-  // ─── 卡片级吸附:该侧与相邻卡片的间距归零。点磁铁弹浮层选方向,再点同方向取消。
+  // ─── 卡片级吸附:可多选方向(如 up+left),该侧与相邻卡片间距归零。
+  // 点磁铁弹浮层,方向按钮为多选开关(保持浮层开着方便组合),X 清空并关闭。
+  // 缝线合并:声明侧去边框+直角,被贴侧直角保留边框(computeSnapSeams 推导)。
   // 浮层用 fixed 定位(记录按钮位置),避免被卡片的 overflow-hidden 裁剪。 ───
   let snapMenu = $state<{ id: string; x: number; y: number } | null>(null);
 
@@ -212,20 +214,43 @@ import { onMount } from 'svelte';
     snapMenu = { id: widget.id, x: r.left, y: r.bottom + 4 };
   }
 
-  function setSnap(widget: DashWidget, dir: SnapDir | undefined) {
-    snapMenu = null;
-    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, snap: dir } : w)));
+  function toggleSnapDir(widget: DashWidget, dir: SnapDir) {
+    const cur = widget.snap ?? [];
+    const next = cur.includes(dir) ? cur.filter((x) => x !== dir) : [...cur, dir];
+    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, snap: next.length > 0 ? next : undefined } : w)));
   }
 
-  /** 吸附方向的负 margin(该侧间距归零);整体吸附(compact)时不重复生效 */
-  function snapMargin(widget: DashWidget): string {
-    if (!widget.snap || compact) return '';
-    switch (widget.snap) {
-      case 'up': return `margin-top: -${GAP_PX}px;`;
-      case 'down': return `margin-bottom: -${GAP_PX}px;`;
-      case 'left': return `margin-left: -${GAP_PX}px;`;
-      case 'right': return `margin-right: -${GAP_PX}px;`;
+  function clearSnap(widget: DashWidget) {
+    snapMenu = null;
+    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, snap: undefined } : w)));
+  }
+
+  // 缝线样式(margin + 去边框 + 直角);整体吸附(compact)模式维持原状不处理缝线
+  let snapSeams = $derived.by(() => {
+    const heights = new Map(widgets.map((w) => [w.id, effectiveH(w)]));
+    return computeSnapSeams(widgets, heights);
+  });
+
+  const SNAP_CSS_SIDE: Record<SnapDir, string> = { up: 'top', down: 'bottom', left: 'left', right: 'right' };
+  const SNAP_CSS_CORNERS: Record<SnapDir, string[]> = {
+    up: ['top-left', 'top-right'],
+    down: ['bottom-left', 'bottom-right'],
+    left: ['top-left', 'bottom-left'],
+    right: ['top-right', 'bottom-right'],
+  };
+
+  function snapStyle(widget: DashWidget): string {
+    if (compact) return '';
+    const parts: string[] = [];
+    for (const d of widget.snap ?? []) parts.push(`margin-${SNAP_CSS_SIDE[d]}: -${GAP_PX}px;`);
+    const seams = snapSeams.get(widget.id);
+    if (seams) {
+      for (const d of seams.deborder) parts.push(`border-${SNAP_CSS_SIDE[d]}-width: 0;`);
+      for (const d of seams.square) {
+        for (const corner of SNAP_CSS_CORNERS[d]) parts.push(`border-${corner}-radius: 0;`);
+      }
     }
+    return parts.join(' ');
   }
 
   /** 双击 info 卡 label 改名:更新对应 item 的 label 并持久化 */
@@ -238,6 +263,13 @@ import { onMount } from 'svelte';
       return { ...it, label: l || undefined };
     });
     onChange(widgets.map((w) => (w.id === widget.id ? { ...w, items } : w)));
+  }
+
+  /** 编辑态双击模型名:设置模型名的 config 点路径(空 = 回退自动链) */
+  function handleInfoModelPathEdit(widget: DashWidget, path: string) {
+    if (widget.type !== 'info') return;
+    const p = path.trim();
+    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, modelPath: p || undefined } : w)));
   }
 
   function focusOnMount(node: HTMLInputElement) {
@@ -263,7 +295,7 @@ import { onMount } from 'svelte';
         : ''}"
       style="grid-column: span {effectiveW(widget)}; grid-row: span {isCollapsed ? 1 : effectiveH(widget)}; {widget.color
         ? `box-shadow: inset 0 2px 0 0 ${widget.color};`
-        : ''} {snapMargin(widget)}"
+        : ''} {snapStyle(widget)}"
       role="{editing ? 'button' : 'presentation'}"
       tabindex={editing ? 0 : -1}
       onkeydown={(e) => {
@@ -320,8 +352,8 @@ import { onMount } from 'svelte';
         {/if}
         {#if editing}
           <button
-            class="shrink-0 {widget.snap ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
-            title={widget.snap ? `Snap: ${widget.snap} (click to change)` : 'Snap to neighbor card'}
+            class="shrink-0 {widget.snap && widget.snap.length > 0 ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+            title={widget.snap && widget.snap.length > 0 ? `Snap: ${widget.snap.join('+')} (click to change)` : 'Snap to neighbor cards'}
             onclick={(e) => openSnapMenu(e, widget)}
           >
             <Magnet size={12} />
@@ -363,7 +395,7 @@ import { onMount } from 'svelte';
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
         <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} />
+          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelPathEdit={(path) => handleInfoModelPathEdit(widget, path)} />
         </div>
 
         <!-- Resize handle -->
@@ -403,30 +435,30 @@ import { onMount } from 'svelte';
     >
       <span class="text-[10px] text-muted-foreground px-1">Snap</span>
       <button
-        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'up' ? 'text-primary' : 'text-muted-foreground'}"
+        class="p-1 rounded hover:bg-accent {snapWidget.snap?.includes('up') ? 'text-primary' : 'text-muted-foreground'}"
         title="Close gap above"
-        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'up' ? undefined : 'up'); }}
+        onclick={(e) => { e.stopPropagation(); toggleSnapDir(snapWidget, 'up'); }}
       ><ArrowUp size={12} /></button>
       <button
-        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'down' ? 'text-primary' : 'text-muted-foreground'}"
+        class="p-1 rounded hover:bg-accent {snapWidget.snap?.includes('down') ? 'text-primary' : 'text-muted-foreground'}"
         title="Close gap below"
-        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'down' ? undefined : 'down'); }}
+        onclick={(e) => { e.stopPropagation(); toggleSnapDir(snapWidget, 'down'); }}
       ><ArrowDown size={12} /></button>
       <button
-        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'left' ? 'text-primary' : 'text-muted-foreground'}"
+        class="p-1 rounded hover:bg-accent {snapWidget.snap?.includes('left') ? 'text-primary' : 'text-muted-foreground'}"
         title="Close gap to the left"
-        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'left' ? undefined : 'left'); }}
+        onclick={(e) => { e.stopPropagation(); toggleSnapDir(snapWidget, 'left'); }}
       ><ArrowLeft size={12} /></button>
       <button
-        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'right' ? 'text-primary' : 'text-muted-foreground'}"
+        class="p-1 rounded hover:bg-accent {snapWidget.snap?.includes('right') ? 'text-primary' : 'text-muted-foreground'}"
         title="Close gap to the right"
-        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'right' ? undefined : 'right'); }}
+        onclick={(e) => { e.stopPropagation(); toggleSnapDir(snapWidget, 'right'); }}
       ><ArrowRight size={12} /></button>
       <span class="w-px h-4 bg-border mx-0.5"></span>
       <button
         class="p-1 rounded hover:bg-accent text-muted-foreground"
         title="No snap"
-        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, undefined); }}
+        onclick={(e) => { e.stopPropagation(); clearSnap(snapWidget); }}
       ><X size={12} /></button>
     </div>
   {/if}
