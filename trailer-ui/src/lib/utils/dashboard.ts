@@ -12,6 +12,8 @@ export interface WidgetBase {
   title?: string;
   /** 卡片头自定义颜色(#rrggbb),缺省无色条 */
   color?: string;
+  /** 吸附到左侧相邻卡片(间距归零) */
+  snapPrev?: boolean;
   /** 36 列网格的跨列数 */
   w: number;
   /** 行数(每行 44px) */
@@ -121,7 +123,7 @@ export const DEFAULT_H = 4;
 
 /** 每类型最小尺寸:info 卡内容多(头部条/瓦片格),过小会出滚动条 */
 export function minSize(type: DashWidget['type']): { w: number; h: number } {
-  if (type === 'info') return { w: 6, h: 3 };
+  if (type === 'info') return { w: 4, h: 2 };
   return { w: MIN_W, h: MIN_H };
 }
 
@@ -176,6 +178,7 @@ function parseWidget(raw: unknown): DashWidget | null {
     color: normalizeColor(r.color),
     w: clampW(r.w),
     h: clampH(r.h),
+    snapPrev: r.snapPrev === true ? true : undefined,
   };
   switch (r.type) {
     case 'line': {

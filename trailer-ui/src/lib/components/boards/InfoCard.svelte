@@ -107,10 +107,12 @@
   <!-- 头部条:状态点 + 模型名 + 状态 | step + elapsed/started(勾选 status 项才显示) -->
   {#if hasStatus}
     <div class="flex items-start gap-3 px-3 py-2 {cellDefs.length > 0 ? 'border-b border-border' : ''}">
-      <div class="flex items-center gap-2 min-w-0 flex-1">
-        <span class="w-2 h-2 rounded-full shrink-0 {statusDot}"></span>
-        <span class="font-semibold truncate" title={modelName}>{modelName}</span>
-        <span class="text-xs text-muted-foreground truncate">{statusText}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="w-2 h-2 rounded-full shrink-0 {statusDot}"></span>
+          <span class="font-semibold truncate" title={modelName}>{modelName}</span>
+        </div>
+        <div class="text-xs text-muted-foreground truncate">{statusText}</div>
       </div>
       <div class="text-right shrink-0">
         <div class="font-semibold">step {maxStep ?? '—'}</div>
@@ -132,7 +134,7 @@
       No items selected
     </div>
   {:else}
-    <div class="flex-1 min-h-0 overflow-auto grid gap-px bg-border" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
+    <div class="flex-1 min-h-0 overflow-auto grid gap-px bg-border" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 110px), 1fr));">
       {#each cellDefs as d, i (i)}
         <div class="bg-card p-2.5 flex flex-col justify-center min-h-[64px]">
           <div class="text-[11px] text-muted-foreground truncate" title={d.cell.label}>
