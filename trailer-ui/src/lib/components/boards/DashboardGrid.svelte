@@ -5,7 +5,7 @@
   // 布局即数组顺序:卡片 span w 列 × h 行,grid-auto-flow: dense 自动填洞。
   import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight } from 'lucide-svelte';
   import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
-  import { clampH, clampW, defaultWidgetTitle } from '$lib/utils/dashboard';
+  import { clampH, clampW, defaultWidgetTitle, minSize } from '$lib/utils/dashboard';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import type { BoardsData, MetricSeries } from './boardsData';
   import WidgetContent from './WidgetContent.svelte';
@@ -31,7 +31,7 @@
   let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, onChange, onEditContent }: Props = $props();
 
   const ROW_PX = 44;
-  const GAP_PX = 12;
+  const GAP_PX = 8;
   const HEADER_PX = 32;
   /** 36 列网格列数 */
   const COLS = 36;
@@ -139,10 +139,11 @@
     const onMove = (ev: MouseEvent) => {
       const dw = Math.round((ev.clientX - startX) / colStep);
       const dh = Math.round((ev.clientY - startY) / (ROW_PX + GAP_PX));
+      const min = minSize(widget.type);
       resizing = {
         id: widget.id,
-        w: clampW(startW + dw),
-        h: clampH(startH + dh),
+        w: Math.max(min.w, clampW(startW + dw)),
+        h: Math.max(min.h, clampH(startH + dh)),
       };
     };
     const onUp = () => {

@@ -49,6 +49,16 @@
   );
   let infoGpus = $state<number | null>(initInfo?.gpus ?? null);
   let infoUnitPrice = $state<number | null>(initInfo?.unitPrice ?? null);
+  // 自定义标签(config 按 path、metric 按 metricId),空 = 用默认名
+  let infoLabels = $state<Record<string, string>>(
+    initInfo
+      ? Object.fromEntries(
+          initInfo.items
+            .filter((i) => (i.src === 'config' || i.src === 'metric') && i.label)
+            .map((i) => [i.src === 'config' ? i.path : metricId(i), i.label ?? ''])
+        )
+      : {}
+  );
 
   const configKeys = $derived(flattenConfigKeys(runInfo?.config));
   const filteredConfigKeys = $derived(
@@ -142,8 +152,14 @@
           else if (src === 'elapsed') items.push({ src: 'elapsed' });
           else items.push({ src: 'cost' });
         }
-        for (const path of selectedConfigPaths) items.push({ src: 'config', path });
-        for (const m of selectedInfoMetrics) items.push({ src: 'metric', key: m.key, context: m.context });
+        for (const path of selectedConfigPaths) {
+          const label = infoLabels[path]?.trim();
+          items.push({ src: 'config', path, label: label || undefined });
+        }
+        for (const m of selectedInfoMetrics) {
+          const label = infoLabels[metricId(m)]?.trim();
+          items.push({ src: 'metric', key: m.key, context: m.context, label: label || undefined });
+        }
         const content: Record<string, unknown> = { items };
         if (infoGpus !== null && Number.isFinite(infoGpus) && infoGpus > 0) content.gpus = Math.round(infoGpus);
         if (infoUnitPrice !== null && Number.isFinite(infoUnitPrice) && infoUnitPrice >= 0) {
@@ -248,10 +264,19 @@
         {:else}
           <div class="space-y-0.5 mb-4 max-h-48 overflow-auto">
             {#each filteredConfigKeys as key (key)}
-              <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-accent/50 cursor-pointer text-xs font-mono">
-                <input type="checkbox" checked={selectedConfigPaths.includes(key)} onchange={() => (selectedConfigPaths = toggleIn(selectedConfigPaths, key))} class="accent-primary" />
-                <span class="truncate">{key}</span>
-              </label>
+              <div>
+                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-accent/50 cursor-pointer text-xs font-mono">
+                  <input type="checkbox" checked={selectedConfigPaths.includes(key)} onchange={() => (selectedConfigPaths = toggleIn(selectedConfigPaths, key))} class="accent-primary" />
+                  <span class="truncate">{key}</span>
+                </label>
+                {#if selectedConfigPaths.includes(key)}
+                  <input
+                    placeholder="custom label (optional)"
+                    bind:value={infoLabels[key]}
+                    class="ml-6 mb-1 px-1.5 py-0.5 text-xs border border-border rounded bg-background w-48"
+                  />
+                {/if}
+              </div>
             {/each}
           </div>
         {/if}
@@ -264,10 +289,19 @@
           <div class="space-y-0.5 max-h-48 overflow-auto">
             {#each infoMetrics as m (metricId(m))}
               {@const checked = selectedInfoMetrics.some((s) => metricId(s) === metricId(m))}
-              <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-accent/50 cursor-pointer text-xs font-mono">
-                <input type="checkbox" checked={checked} onchange={() => toggleInfoMetric(m)} class="accent-primary" />
-                <span class="truncate">{displayName(m)}</span>
-              </label>
+              <div>
+                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-accent/50 cursor-pointer text-xs font-mono">
+                  <input type="checkbox" checked={checked} onchange={() => toggleInfoMetric(m)} class="accent-primary" />
+                  <span class="truncate">{displayName(m)}</span>
+                </label>
+                {#if checked}
+                  <input
+                    placeholder="custom label (optional)"
+                    bind:value={infoLabels[metricId(m)]}
+                    class="ml-6 mb-1 px-1.5 py-0.5 text-xs border border-border rounded bg-background w-48"
+                  />
+                {/if}
+              </div>
             {/each}
           </div>
         {/if}
