@@ -6,6 +6,7 @@ import {
   metricDelta,
   statusFromRunState,
   modelNameFromConfig,
+  trainingSeconds,
   flattenConfigKeys,
   resolveConfigValue,
   formatCell,
@@ -121,10 +122,48 @@ describe('resolveConfigValue', () => {
   });
 });
 
+describe('trainingSeconds', () => {
+  const wallMetrics = [
+    { key: 'loss', context: 'train', points: [
+      { step: 1, value: 2.5, idx: 0, wall_time: 1000 },
+      { step: 9, value: 0.615, idx: 1, wall_time: 4600 },
+    ] },
+  ];
+
+  it('derives duration from metric wall_time span', () => {
+    expect(trainingSeconds({ item: { src: 'cost' }, metrics: wallMetrics })).toBe(3600);
+  });
+
+  it('ignores now entirely when wall_time exists', () => {
+    expect(trainingSeconds({ item: { src: 'cost' }, metrics: wallMetrics, now: 999_999_000, running: true })).toBe(3600);
+  });
+
+  it('spans across multiple series', () => {
+    const two = [
+      wallMetrics[0],
+      { key: 'acc', context: 'eval', points: [{ step: 8, value: 0.9, idx: 0, wall_time: 8200 }] },
+    ];
+    expect(trainingSeconds({ item: { src: 'cost' }, metrics: two })).toBe(7200);
+  });
+
+  it('falls back to now/endAt when points lack wall_time', () => {
+    const noWall = [{ key: 'loss', context: 'train', points: [{ step: 1, value: 1, idx: 0 }] }];
+    expect(trainingSeconds({ item: { src: 'cost' }, metrics: noWall, createdAt: 0, now: 3600_000, running: true })).toBe(3600);
+    expect(trainingSeconds({ item: { src: 'cost' }, metrics: noWall, createdAt: 0, endAt: 1800, running: false })).toBe(1800);
+  });
+
+  it('returns null with no data at all', () => {
+    expect(trainingSeconds({ item: { src: 'cost' }, metrics: [] })).toBeNull();
+  });
+});
+
 describe('formatCell', () => {
   const metrics = [
-    { key: 'loss', context: 'train', points: [{ step: 1, value: 2.5, idx: 0 }, { step: 9, value: 0.615, idx: 1 }] },
-    { key: 'acc', context: 'eval', points: [{ step: 8, value: 0.9, idx: 0 }] },
+    { key: 'loss', context: 'train', points: [
+      { step: 1, value: 2.5, idx: 0, wall_time: 1000 },
+      { step: 9, value: 0.615, idx: 1, wall_time: 4600 },
+    ] },
+    { key: 'acc', context: 'eval', points: [{ step: 8, value: 0.9, idx: 0, wall_time: 4600 }] },
   ];
 
   const base: InfoCellInput = {
@@ -155,15 +194,15 @@ describe('formatCell', () => {
     expect(row.value).toBe('—');
   });
 
-  it('renders cost cell as money with unit price', () => {
-    const row = formatCell({ ...base, item: { src: 'cost' }, unitPrice: 5, running: true });
+  it('renders cost cell as money from wall_time span', () => {
+    const row = formatCell({ ...base, item: { src: 'cost' }, metrics: base.metrics, unitPrice: 5, running: true });
     expect(row.label).toBe('cost so far');
-    expect(row.value).toBe('$2.80');
+    expect(row.value).toBe('$10.00');
   });
 
   it('renders cost cell as gpu-hours without price', () => {
     const row = formatCell({ ...base, item: { src: 'cost' }, running: true });
-    expect(row.value).toBe('0.56 GPU·h');
+    expect(row.value).toBe('2.00 GPU·h');
   });
 
   it('renders config cells via resolveConfigValue', () => {

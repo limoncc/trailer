@@ -7,6 +7,9 @@ import {
   defaultSize,
   clampW,
   clampH,
+  minSize,
+  MIN_H,
+  MIN_W,
   newWidgetId,
   type DashboardLayout,
 } from './dashboard';
@@ -316,5 +319,24 @@ describe('info widgets', () => {
   it('defaultSize and defaultWidgetTitle', () => {
     expect(defaultSize('info')).toEqual({ w: 9, h: 6 });
     expect(defaultWidgetTitle({ id: 'i', type: 'info', items: [], w: 9, h: 6 })).toBe('Training Info');
+  });
+});
+
+describe('minSize', () => {
+  it('info cards have a larger floor to avoid scrollbars', () => {
+    expect(minSize('info')).toEqual({ w: 6, h: 3 });
+  });
+
+  it('other types keep the global floor', () => {
+    expect(minSize('line')).toEqual({ w: MIN_W, h: MIN_H });
+    expect(minSize('media')).toEqual({ w: MIN_W, h: MIN_H });
+  });
+
+  it('parse bumps undersized info cards to the floor', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [{ id: 'i', type: 'info', items: [{ src: 'status' }], w: 3, h: 2 }],
+    }));
+    expect(parsed.widgets[0]).toMatchObject({ type: 'info', w: 6, h: 3 });
   });
 });

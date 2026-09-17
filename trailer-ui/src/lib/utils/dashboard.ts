@@ -117,6 +117,12 @@ export const MAX_H = 40;
 export const DEFAULT_W = 12;
 export const DEFAULT_H = 4;
 
+/** 每类型最小尺寸:info 卡内容多(头部条/瓦片格),过小会出滚动条 */
+export function minSize(type: DashWidget['type']): { w: number; h: number } {
+  if (type === 'info') return { w: 6, h: 3 };
+  return { w: MIN_W, h: MIN_H };
+}
+
 export function newWidgetId(): string {
   return `w_${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -233,6 +239,8 @@ function parseWidget(raw: unknown): DashWidget | null {
         ...base,
         type: 'info',
         items,
+        w: Math.max(minSize('info').w, base.w),
+        h: Math.max(minSize('info').h, base.h),
         gpus: typeof r.gpus === 'number' && Number.isFinite(r.gpus) && r.gpus > 0 ? Math.round(r.gpus) : undefined,
         unitPrice:
           typeof r.unitPrice === 'number' && Number.isFinite(r.unitPrice) && r.unitPrice >= 0
