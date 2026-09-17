@@ -4,6 +4,7 @@ import {
   serializeLayout,
   defaultWidgets,
   defaultWidgetTitle,
+  defaultSize,
   clampW,
   clampH,
   newWidgetId,
@@ -254,5 +255,63 @@ describe('newWidgetId', () => {
     const b = newWidgetId();
     expect(a).toMatch(/^w_[0-9a-f]+$/);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('info widgets', () => {
+  const layout = {
+    version: 3 as const,
+    widgets: [
+      {
+        id: 'info1',
+        type: 'info',
+        w: 9,
+        h: 6,
+        gpus: 8,
+        unitPrice: 6.5,
+        items: [
+          { src: 'step' },
+          { src: 'elapsed' },
+          { src: 'cost' },
+          { src: 'config', path: 'train.lr', label: '学习率' },
+          { src: 'metric', key: 'loss', context: 'train' },
+          { src: 'bogus' },
+        ],
+      },
+    ],
+  };
+
+  it('parses info widgets with items tolerantly', () => {
+    const parsed = parseLayout(JSON.stringify(layout));
+    expect(parsed.widgets).toHaveLength(1);
+    const w = parsed.widgets[0] as any;
+    expect(w.type).toBe('info');
+    expect(w.gpus).toBe(8);
+    expect(w.unitPrice).toBe(6.5);
+    // 未知 src 丢弃,其余 5 条保留且顺序不变
+    expect(w.items.map((i: any) => i.src)).toEqual(['step', 'elapsed', 'cost', 'config', 'metric']);
+    expect(w.items[3]).toMatchObject({ path: 'train.lr', label: '学习率' });
+    expect(w.items[4]).toMatchObject({ key: 'loss', context: 'train' });
+  });
+
+  it('drops invalid gpus/unitPrice', () => {
+    const bad = JSON.parse(JSON.stringify(layout));
+    bad.widgets[0].gpus = -3;
+    bad.widgets[0].unitPrice = 'free';
+    const parsed = parseLayout(JSON.stringify(bad));
+    expect((parsed.widgets[0] as any).gpus).toBeUndefined();
+    expect((parsed.widgets[0] as any).unitPrice).toBeUndefined();
+  });
+
+  it('round-trips through serializeLayout', () => {
+    const parsed = parseLayout(JSON.stringify(layout));
+    const again = parseLayout(serializeLayout(parsed));
+    expect(again.widgets[0]).toMatchObject({ type: 'info', gpus: 8, unitPrice: 6.5 });
+    expect((again.widgets[0] as any).items).toHaveLength(5);
+  });
+
+  it('defaultSize and defaultWidgetTitle', () => {
+    expect(defaultSize('info')).toEqual({ w: 9, h: 6 });
+    expect(defaultWidgetTitle({ id: 'i', type: 'info', items: [], w: 9, h: 6 })).toBe('训练信息');
   });
 });

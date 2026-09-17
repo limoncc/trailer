@@ -14,6 +14,7 @@
     defaultWidgets,
     defaultSize,
     type DashWidget,
+    type RunInfo,
   } from '$lib/utils/dashboard';
   import type { BoardsData, MetricSeries } from './boardsData';
   import { EMPTY_BOARDS_DATA, fetchBoardsData } from './boardsData';
@@ -34,9 +35,10 @@
     metrics: MetricSeries[];
     metricOptions: MetricOption[];
     runState: string;
+    runInfo?: RunInfo;
   }
 
-  let { runId, metrics, metricOptions, runState }: Props = $props();
+  let { runId, metrics, metricOptions, runState, runInfo }: Props = $props();
 
   let dashes = $state<BoardItem[]>([]);
   let activeId = $state<string | null>(null);
@@ -451,6 +453,7 @@
         {metrics}
         data={boardsData}
         running={runState === 'running'}
+        {runInfo}
         onChange={onWidgetsChange}
         onEditContent={openEditContent}
       />
@@ -463,6 +466,7 @@
     editWidget={pickerEdit}
     {metricOptions}
     boardsData={boardsData}
+    {runInfo}
     onConfirm={onPickerConfirm}
     onClose={() => (pickerOpen = false)}
   />
