@@ -15,6 +15,7 @@ uv.lock
 *.pyd
 
 # Frontend
+node_modules/
 trailer-ui/node_modules/
 trailer-ui/build/
 trailer-ui/.svelte-kit/
