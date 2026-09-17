@@ -22,12 +22,13 @@
     running?: boolean;
     runState?: string;
     runInfo?: RunInfo;
-    /** 编辑态:瓦片 label 双击改名 */
+    /** 编辑态:瓦片 label 双击改名,模型名双击改 config 路径 */
     editing?: boolean;
     onLabelEdit?: (itemIdx: number, label: string) => void;
+    onModelPathEdit?: (path: string) => void;
   }
 
-  let { widget, metrics, running = false, runState = '', runInfo, editing = false, onLabelEdit }: Props = $props();
+  let { widget, metrics, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelPathEdit }: Props = $props();
 
   // 双击 label 改名(编辑态):Enter/失焦提交,Escape 取消
   let editIdx = $state<number | null>(null);
@@ -44,6 +45,22 @@
     if (editIdx === idx) onLabelEdit?.(idx, draft);
     editIdx = null;
   }
+
+  // 双击模型名改 modelPath(编辑态):空 = 回退自动链 model_name/train_model/model
+  let editingModelPath = $state(false);
+  let modelPathDraft = $state('');
+  function startModelPathEdit() {
+    modelPathDraft = widget.modelPath ?? '';
+    editingModelPath = true;
+  }
+  function commitModelPath() {
+    if (editingModelPath) onModelPathEdit?.(modelPathDraft.trim());
+    editingModelPath = false;
+  }
+
+  // 卡片实际宽度:窄卡头部条右列换行到下一行,不与模型名抢宽度
+  let cardW = $state(0);
+  const narrow = $derived(cardW > 0 && cardW - 20 < 200);
 
   const gpus = $derived(widget.gpus ?? runInfo?.gpuCount);
   const endAt = $derived(running ? undefined : runInfo?.heartbeatAt);
@@ -81,13 +98,14 @@
 
   const modelName = $derived(modelNameFromConfig(runInfo?.config, widget.modelPath) ?? '—');
   const statusText = $derived(statusFromRunState(running ? 'running' : runState));
+  // 配色与 run 列表页一致(running 绿/finished 灰/crashed 浅红),running 绿点闪烁
   const statusDot = $derived(
     running
-      ? 'bg-amber-500'
+      ? 'bg-green-500'
       : runState === 'finished'
-        ? 'bg-emerald-500'
+        ? 'bg-gray-400'
         : runState === 'crashed'
-          ? 'bg-red-500'
+          ? 'bg-red-400'
           : 'bg-zinc-400'
   );
   const maxStep = $derived.by(() => {
@@ -104,18 +122,44 @@
   });
 </script>
 
-<div class="h-full flex flex-col font-mono">
-  <!-- 头部条:状态点 + 模型名 + 状态 | step + elapsed/started(勾选 status 项才显示) -->
+<div class="h-full flex flex-col font-mono" bind:clientWidth={cardW}>
+  <!-- 头部条:状态点 + 模型名 + 状态 | step + elapsed/started(勾选 status 项才显示;
+       窄卡右列整体换行,不再挤占模型名宽度) -->
   {#if hasStatus}
     <div class="flex flex-wrap items-start gap-x-3 gap-y-1 px-3 py-2 {cellDefs.length > 0 ? 'border-b border-border' : ''}">
       <div class="min-w-0 flex-1 min-w-[60px]">
         <div class="flex items-center gap-2 min-w-0">
-          <span class="w-2 h-2 rounded-full shrink-0 {statusDot}"></span>
-          <span class="font-semibold truncate" title={modelName}>{modelName}</span>
+          <span class="relative flex w-2 h-2 shrink-0">
+            {#if running}
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            {/if}
+            <span class="relative inline-flex w-2 h-2 rounded-full {statusDot}"></span>
+          </span>
+          {#if editing && editingModelPath}
+            <input
+              use:focusOnMount
+              bind:value={modelPathDraft}
+              onblur={commitModelPath}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') commitModelPath();
+                if (e.key === 'Escape') editingModelPath = false;
+              }}
+              placeholder="config path: model_name / train_model / model"
+              class="flex-1 min-w-0 px-1 py-0.5 text-[11px] border border-border rounded bg-background"
+            />
+          {:else}
+            <span
+              class="font-semibold truncate {editing ? 'cursor-text hover:text-foreground underline decoration-dotted' : ''}"
+              title="{modelName} (config path: {widget.modelPath ?? 'auto'}){editing ? ' — double-click to change' : ''}"
+              ondblclick={editing ? () => startModelPathEdit() : undefined}
+            >
+              {modelName}
+            </span>
+          {/if}
         </div>
         <div class="text-xs text-muted-foreground truncate">{statusText}</div>
       </div>
-      <div class="text-right min-w-0 shrink max-w-[60%]">
+      <div class="text-right min-w-0 {narrow ? 'basis-full' : 'shrink max-w-[60%]'}">
         <div class="font-semibold truncate">step {maxStep ?? '—'}</div>
         {#if elapsedText}
           <div class="tabular-nums truncate">{elapsedText}</div>
