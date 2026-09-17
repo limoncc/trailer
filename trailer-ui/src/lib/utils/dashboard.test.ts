@@ -316,18 +316,45 @@ describe('info widgets', () => {
     expect((again.widgets[0] as any).items).toHaveLength(4);
   });
 
-  it('parses snapPrev on widgets', () => {
+  it('parses snap direction on widgets; legacy snapPrev maps to left', () => {
     const parsed = parseLayout(JSON.stringify({
       version: 3,
       widgets: [
-        { id: 'a', type: 'line', metrics: [{ key: 'a', context: '' }], w: 12, h: 4, snapPrev: true },
-        { id: 'b', type: 'line', metrics: [{ key: 'b', context: '' }], w: 12, h: 4, snapPrev: false },
-        { id: 'c', type: 'line', metrics: [{ key: 'c', context: '' }], w: 12, h: 4 },
+        { id: 'a', type: 'line', metrics: [{ key: 'a', context: '' }], w: 12, h: 4, snap: 'up' },
+        { id: 'b', type: 'line', metrics: [{ key: 'b', context: '' }], w: 12, h: 4, snapPrev: true },
+        { id: 'c', type: 'line', metrics: [{ key: 'c', context: '' }], w: 12, h: 4, snap: 'diagonal' },
+        { id: 'd', type: 'line', metrics: [{ key: 'd', context: '' }], w: 12, h: 4 },
       ],
     }));
-    expect(parsed.widgets[0].snapPrev).toBe(true);
-    expect(parsed.widgets[1].snapPrev).toBeUndefined();
-    expect(parsed.widgets[2].snapPrev).toBeUndefined();
+    expect(parsed.widgets[0].snap).toBe('up');
+    expect(parsed.widgets[1].snap).toBe('left');
+    expect(parsed.widgets[2].snap).toBeUndefined();
+    expect(parsed.widgets[3].snap).toBeUndefined();
+  });
+
+  it('round-trips snap through serializeLayout', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [{ id: 'a', type: 'line', metrics: [{ key: 'a', context: '' }], w: 12, h: 4, snap: 'right' }],
+    }));
+    const again = parseLayout(serializeLayout(parsed));
+    expect(again.widgets[0].snap).toBe('right');
+  });
+
+  it('parses info currency (usd default dropped, cny kept, others dropped)', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'i1', type: 'info', w: 9, h: 6, items: [{ src: 'cost' }], currency: 'cny' },
+        { id: 'i2', type: 'info', w: 9, h: 6, items: [{ src: 'cost' }], currency: 'eur' },
+        { id: 'i3', type: 'info', w: 9, h: 6, items: [{ src: 'cost' }] },
+      ],
+    }));
+    expect((parsed.widgets[0] as any).currency).toBe('cny');
+    expect((parsed.widgets[1] as any).currency).toBeUndefined();
+    expect((parsed.widgets[2] as any).currency).toBeUndefined();
+    const again = parseLayout(serializeLayout(parsed));
+    expect((again.widgets[0] as any).currency).toBe('cny');
   });
 
   it('defaultSize and defaultWidgetTitle', () => {
@@ -337,8 +364,8 @@ describe('info widgets', () => {
 });
 
 describe('minSize', () => {
-  it('info cards have a larger floor to avoid scrollbars', () => {
-    expect(minSize('info')).toEqual({ w: 4, h: 2 });
+  it('info cards keep a compact floor', () => {
+    expect(minSize('info')).toEqual({ w: 3, h: 2 });
   });
 
   it('other types keep the global floor', () => {
@@ -349,9 +376,9 @@ describe('minSize', () => {
   it('parse bumps undersized info cards to the floor', () => {
     const parsed = parseLayout(JSON.stringify({
       version: 3,
-      widgets: [{ id: 'i', type: 'info', items: [{ src: 'status' }], w: 3, h: 2 }],
+      widgets: [{ id: 'i', type: 'info', items: [{ src: 'status' }], w: 2, h: 2 }],
     }));
-    expect(parsed.widgets[0]).toMatchObject({ type: 'info', w: 4, h: 2 });
+    expect(parsed.widgets[0]).toMatchObject({ type: 'info', w: 3, h: 2 });
   });
 });
 

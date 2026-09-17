@@ -3,8 +3,8 @@
   // 编辑态:把手 pointer 拖拽换位(不用 HTML5 DnD——真实拖拽不可靠且与缩放手柄冲突)、
   // 右下角手柄调宽/高、标题重命名、头部取色;视图态:卡片可折叠(同 Metrics 卡片)。
   // 布局即数组顺序:卡片 span w 列 × h 行,grid-auto-flow: dense 自动填洞。
-  import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight, Magnet } from 'lucide-svelte';
-  import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
+  import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight, Magnet, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-svelte';
+  import type { DashWidget, RunInfo, SnapDir } from '$lib/utils/dashboard';
   import { clampH, clampW, defaultWidgetTitle, minSize } from '$lib/utils/dashboard';
   import { infoRowsNeeded } from '$lib/utils/infoCard';
   import { displayMetricName } from '$lib/utils/systemMetrics';
@@ -26,15 +26,13 @@ import { onMount } from 'svelte';
     runInfo?: RunInfo;
     /** 吸附模式:卡片间无间距 */
     compact?: boolean;
-    /** 编辑中:info 卡瓦片 label 可双击改名 */
-    onInfoLabelEdit?: (widget: DashWidget, itemIdx: number, label: string) => void;
     /** 拖拽/缩放/删除/取色等布局变更 */
     onChange: (widgets: DashWidget[]) => void;
     /** 「编辑内容」按钮 → 父组件打开选择弹窗 */
     onEditContent: (widget: DashWidget) => void;
   }
 
-  let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, compact = false, onInfoLabelEdit, onChange, onEditContent }: Props = $props();
+  let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, compact = false, onChange, onEditContent }: Props = $props();
 
   const ROW_PX = 44;
   const GAP_PX = 8;
@@ -204,9 +202,30 @@ import { onMount } from 'svelte';
     onChange(widgets.map((w) => (w.id === id ? { ...w, title: t } : w)));
   }
 
-  /** 卡片级吸附:与左侧相邻卡片间距归零 */
-  function toggleSnapPrev(widget: DashWidget) {
-    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, snapPrev: !w.snapPrev } : w)));
+  // ─── 卡片级吸附:该侧与相邻卡片的间距归零。点磁铁弹浮层选方向,再点同方向取消。
+  // 浮层用 fixed 定位(记录按钮位置),避免被卡片的 overflow-hidden 裁剪。 ───
+  let snapMenu = $state<{ id: string; x: number; y: number } | null>(null);
+
+  function openSnapMenu(e: MouseEvent, widget: DashWidget) {
+    e.stopPropagation();
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    snapMenu = { id: widget.id, x: r.left, y: r.bottom + 4 };
+  }
+
+  function setSnap(widget: DashWidget, dir: SnapDir | undefined) {
+    snapMenu = null;
+    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, snap: dir } : w)));
+  }
+
+  /** 吸附方向的负 margin(该侧间距归零);整体吸附(compact)时不重复生效 */
+  function snapMargin(widget: DashWidget): string {
+    if (!widget.snap || compact) return '';
+    switch (widget.snap) {
+      case 'up': return `margin-top: -${GAP_PX}px;`;
+      case 'down': return `margin-bottom: -${GAP_PX}px;`;
+      case 'left': return `margin-left: -${GAP_PX}px;`;
+      case 'right': return `margin-right: -${GAP_PX}px;`;
+    }
   }
 
   /** 双击 info 卡 label 改名:更新对应 item 的 label 并持久化 */
@@ -244,7 +263,7 @@ import { onMount } from 'svelte';
         : ''}"
       style="grid-column: span {effectiveW(widget)}; grid-row: span {isCollapsed ? 1 : effectiveH(widget)}; {widget.color
         ? `box-shadow: inset 0 2px 0 0 ${widget.color};`
-        : ''} {widget.snapPrev && !compact ? `margin-left: -${GAP_PX}px;` : ''}"
+        : ''} {snapMargin(widget)}"
       role="{editing ? 'button' : 'presentation'}"
       tabindex={editing ? 0 : -1}
       onkeydown={(e) => {
@@ -301,9 +320,9 @@ import { onMount } from 'svelte';
         {/if}
         {#if editing}
           <button
-            class="shrink-0 {widget.snapPrev ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
-            title="Snap to previous card (no gap)"
-            onclick={(e) => { e.stopPropagation(); toggleSnapPrev(widget); }}
+            class="shrink-0 {widget.snap ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+            title={widget.snap ? `Snap: ${widget.snap} (click to change)` : 'Snap to neighbor card'}
+            onclick={(e) => openSnapMenu(e, widget)}
           >
             <Magnet size={12} />
           </button>
@@ -344,7 +363,7 @@ import { onMount } from 'svelte';
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
         <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => onInfoLabelEdit?.(widget, itemIdx, label)} />
+          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} />
         </div>
 
         <!-- Resize handle -->
@@ -366,3 +385,49 @@ import { onMount } from 'svelte';
     </div>
   {/each}
 </div>
+
+<!-- 卡片吸附方向浮层:渲染在网格外层,固定定位不被卡片 overflow-hidden 裁剪 -->
+{#if snapMenu}
+  {@const menuAt = snapMenu}
+  {@const snapWidget = widgets.find((w) => w.id === menuAt.id)}
+  {#if snapWidget}
+    <div
+      class="fixed inset-0 z-40"
+      role="presentation"
+      onclick={() => (snapMenu = null)}
+      onkeydown={(e) => { if (e.key === 'Escape') snapMenu = null; }}
+    ></div>
+    <div
+      class="fixed z-50 flex items-center gap-0.5 bg-popover border border-border rounded-md shadow-lg p-1"
+      style="left: {Math.min(menuAt.x, (typeof window !== 'undefined' ? window.innerWidth : 1280) - 170)}px; top: {menuAt.y}px;"
+    >
+      <span class="text-[10px] text-muted-foreground px-1">Snap</span>
+      <button
+        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'up' ? 'text-primary' : 'text-muted-foreground'}"
+        title="Close gap above"
+        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'up' ? undefined : 'up'); }}
+      ><ArrowUp size={12} /></button>
+      <button
+        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'down' ? 'text-primary' : 'text-muted-foreground'}"
+        title="Close gap below"
+        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'down' ? undefined : 'down'); }}
+      ><ArrowDown size={12} /></button>
+      <button
+        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'left' ? 'text-primary' : 'text-muted-foreground'}"
+        title="Close gap to the left"
+        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'left' ? undefined : 'left'); }}
+      ><ArrowLeft size={12} /></button>
+      <button
+        class="p-1 rounded hover:bg-accent {snapWidget.snap === 'right' ? 'text-primary' : 'text-muted-foreground'}"
+        title="Close gap to the right"
+        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, snapWidget.snap === 'right' ? undefined : 'right'); }}
+      ><ArrowRight size={12} /></button>
+      <span class="w-px h-4 bg-border mx-0.5"></span>
+      <button
+        class="p-1 rounded hover:bg-accent text-muted-foreground"
+        title="No snap"
+        onclick={(e) => { e.stopPropagation(); setSnap(snapWidget, undefined); }}
+      ><X size={12} /></button>
+    </div>
+  {/if}
+{/if}

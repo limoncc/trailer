@@ -42,6 +42,12 @@ describe('formatMoney', () => {
     expect(formatMoney(42.5)).toBe('$42.50');
     expect(formatMoney(0)).toBe('$0.00');
   });
+
+  it('supports cny via ¥', () => {
+    expect(formatMoney(1063883.42, 'cny')).toBe('¥1,063,883');
+    expect(formatMoney(42.5, 'cny')).toBe('¥42.50');
+    expect(formatMoney(0, 'cny')).toBe('¥0.00');
+  });
 });
 
 describe('formatDelta / metricDelta', () => {
@@ -79,6 +85,15 @@ describe('modelNameFromConfig', () => {
     expect(modelNameFromConfig({ model_name: 'gpt' }, undefined)).toBe('gpt');
     expect(modelNameFromConfig({ model: 'resnet50' }, undefined)).toBe('resnet50');
     expect(modelNameFromConfig({ model: { path: 'org/resnet' } }, 'model.path')).toBe('org/resnet');
+  });
+
+  it('falls back to train_model when model_name is absent', () => {
+    expect(modelNameFromConfig({ train_model: 'bert-base' }, undefined)).toBe('bert-base');
+  });
+
+  it('ranks model_name > train_model > model', () => {
+    expect(modelNameFromConfig({ model_name: 'a', train_model: 'b' }, undefined)).toBe('a');
+    expect(modelNameFromConfig({ model: 'c', train_model: 'b' }, undefined)).toBe('b');
   });
 
   it('returns undefined when nothing matches', () => {
@@ -210,6 +225,18 @@ describe('formatCell', () => {
     expect(row.value).toBe('$10.00');
   });
 
+  it('renders cost cell as cny when currency is cny', () => {
+    const row = formatCell({
+      ...base,
+      item: { src: 'cost' },
+      metrics: base.metrics,
+      unitPrice: 5,
+      currency: 'cny',
+      running: true,
+    });
+    expect(row.value).toBe('¥10.00');
+  });
+
   it('renders cost cell as gpu-hours without price', () => {
     const row = formatCell({ ...base, item: { src: 'cost' }, running: true });
     expect(row.value).toBe('2.00 GPU·h');
@@ -258,6 +285,12 @@ describe('infoRowsNeeded', () => {
     expect(infoRowsNeeded(threeCells, 130)).toBeGreaterThanOrEqual(4);
   });
 
+  it('narrow status cards budget the wrapped 3-line header', () => {
+    // 130px 宽 → 头部条换行成 124px(宽卡 62px 会导致 3px 滚动条)
+    expect(infoRowsNeeded(statusOnly, 130)).toBe(3);
+    expect(infoRowsNeeded(statusOnly, 590)).toBe(2);
+  });
+
   it('floor is 2 rows', () => {
     expect(infoRowsNeeded({ id: 'i', type: 'info', w: 6, h: 3, items: [] }, 590)).toBe(2);
   });
@@ -271,6 +304,7 @@ describe('hasStatusHeader', () => {
   it('is true when a model_name config cell exists (auto-upgrade)', () => {
     expect(hasStatusHeader({ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'config', path: 'model_name' }] })).toBe(true);
     expect(hasStatusHeader({ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'config', path: 'model' }] })).toBe(true);
+    expect(hasStatusHeader({ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'config', path: 'train_model' }] })).toBe(true);
   });
 
   it('is false for ordinary cells', () => {
@@ -279,6 +313,7 @@ describe('hasStatusHeader', () => {
 
   it('isModelCell matches only exact model paths', () => {
     expect(isModelCell({ src: 'config', path: 'model_name' })).toBe(true);
+    expect(isModelCell({ src: 'config', path: 'train_model' })).toBe(true);
     expect(isModelCell({ src: 'config', path: 'model' })).toBe(true);
     expect(isModelCell({ src: 'config', path: 'train.model_name' })).toBe(false);
     expect(isModelCell({ src: 'cost' })).toBe(false);
