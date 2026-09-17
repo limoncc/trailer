@@ -12,7 +12,9 @@ export interface InfoMetrics {
 
 export interface InfoCellInput {
   item: InfoItem;
-  /** 当前时刻(ms);运行中成本按它跳动 */
+  /** 训练时长(秒),由 trainingSeconds 从训练数据算出;缺省时内部自行计算 */
+  seconds?: number | null;
+  /** 回退用:无 wall_time 数据时的当前时刻(ms) */
   now?: number;
   /** run 创建时刻(秒) */
   createdAt?: number;
@@ -141,7 +143,21 @@ export function resolveConfigValue(
   return String(cur);
 }
 
-function elapsedSeconds(input: InfoCellInput): number | null {
+/** 训练时长(秒)来源于训练数据本身:全部指标点的 wall_time 跨度——
+ *  数据在涨时间才在涨,训练结束/crash 后不再有新点,自然停止计数。
+ *  点位缺 wall_time 时回退 createdAt→now(运行中)/heartbeat(终态);完全无数据返回 null。 */
+export function trainingSeconds(input: Pick<InfoCellInput, 'metrics' | 'createdAt' | 'endAt' | 'running' | 'now'>): number | null {
+  let start: number | null = null;
+  let end: number | null = null;
+  for (const s of input.metrics) {
+    for (const p of s.points) {
+      const w = p.wall_time;
+      if (typeof w !== 'number' || !Number.isFinite(w)) continue;
+      if (start === null || w < start) start = w;
+      if (end === null || w > end) end = w;
+    }
+  }
+  if (start !== null && end !== null) return Math.max(0, end - start);
   if (typeof input.createdAt !== 'number') return null;
   const nowSec = (input.now ?? Date.now()) / 1000;
   const endSec = input.running ? nowSec : (input.endAt ?? nowSec);
@@ -170,7 +186,7 @@ export function formatCell(input: InfoCellInput): InfoCell {
       return cell;
     }
     case 'cost': {
-      const sec = elapsedSeconds(input);
+      const sec = typeof input.seconds === 'number' ? input.seconds : trainingSeconds(input);
       const gpus = input.gpus && input.gpus > 0 ? input.gpus : 0;
       const gpuHours = sec !== null ? round2((sec / 3600) * gpus) : null;
       if (gpuHours === null) return { label: 'cost so far', value: '—' };
