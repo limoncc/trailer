@@ -14,7 +14,7 @@ export interface WidgetTypeMeta {
 }
 
 export const WIDGET_TYPES: WidgetTypeMeta[] = [
-  { type: 'info', label: 'Info', emptyHint: '勾选要展示的超参数 / 指标 / 时长 / 成本' },
+  { type: 'info', label: 'Info', emptyHint: 'Select metrics, hyperparameters and cost to display' },
   { type: 'line', label: 'Metrics', emptyHint: 'Run has no metrics yet' },
   { type: 'hist', label: 'Histograms', emptyHint: 'Run has no histograms yet' },
   { type: 'figure', label: 'Figures', emptyHint: 'Run has no figures yet' },

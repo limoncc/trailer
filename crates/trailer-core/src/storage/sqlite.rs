@@ -509,6 +509,10 @@ impl Storage for SqliteStorage {
             .bind(run_id)
             .execute(&self.pool)
             .await?;
+        sqlx::query("DELETE FROM run_dashboards WHERE run_id = ?")
+            .bind(run_id)
+            .execute(&self.pool)
+            .await?;
         sqlx::query("DELETE FROM runs WHERE run_id = ?")
             .bind(run_id)
             .execute(&self.pool)
