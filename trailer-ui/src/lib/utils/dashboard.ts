@@ -108,6 +108,8 @@ export interface DashboardLayout {
   /** v1 = 12 列网格,v2 = 24 列网格(历史);v3 = 36 列网格(当前)。parseLayout 统一返回 v3 语义 */
   version: 1 | 2 | 3;
   widgets: DashWidget[];
+  /** 吸附模式:卡片间无间距 */
+  compact?: boolean;
 }
 
 export const MIN_W = 3;
@@ -282,6 +284,7 @@ export function parseLayout(s: string | null | undefined): DashboardLayout {
       rawWidgets = (rawWidgets as Record<string, unknown>).widgets;
     }
     if (!Array.isArray(rawWidgets)) return empty;
+    const compact = (obj as Record<string, unknown>).compact === true;
     // 按历史网格列数比例缩放宽度,视觉比例不变
     const scale = version === 2 ? 1.5 : version === 1 ? 3 : 1;
     const seen = new Set<string>();
@@ -295,14 +298,14 @@ export function parseLayout(s: string | null | undefined): DashboardLayout {
         seen.add(scaled.id);
         return scaled;
       });
-    return { version: 3, widgets };
+    return { version: 3, widgets, compact };
   } catch {
     return empty;
   }
 }
 
 export function serializeLayout(l: DashboardLayout): string {
-  return JSON.stringify({ version: 3, widgets: l.widgets });
+  return JSON.stringify({ version: 3, widgets: l.widgets, compact: l.compact === true });
 }
 
 /** 卡片缺省标题:按内容自动生成 */

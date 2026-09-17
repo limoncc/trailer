@@ -28,9 +28,12 @@
     runState?: string;
     /** 信息卡所需的 run 元信息 */
     runInfo?: RunInfo;
+    /** info 卡编辑态:瓦片 label 双击改名 */
+    editing?: boolean;
+    onLabelEdit?: (itemIdx: number, label: string) => void;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit }: Props = $props();
 
   const PALETTE = ['#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f59e0b', '#6366f1'];
 
@@ -313,5 +316,5 @@
     </audio>
   {/if}
 {:else if widget.type === 'info'}
-  <InfoCard {widget} {metrics} {running} {runState} {runInfo} />
+  <InfoCard {widget} {metrics} {running} {runState} {runInfo} {editing} {onLabelEdit} />
 {/if}

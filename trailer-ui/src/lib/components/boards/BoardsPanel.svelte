@@ -1,7 +1,7 @@
 <script lang="ts">
   // ─── Boards tab:run 下多个命名看板(子标签),12 列网格自由布局 ───
   import { onMount } from 'svelte';
-  import { Plus, Pencil, Check, LayoutDashboard, X } from 'lucide-svelte';
+  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
   import type { MetricRef } from '$lib/utils/explore';
@@ -43,6 +43,8 @@
   let dashes = $state<BoardItem[]>([]);
   let activeId = $state<string | null>(null);
   let widgets = $state<DashWidget[]>([]);
+  /** 吸附模式:卡片间无间距(随看板持久化) */
+  let compact = $state(false);
   let loading = $state(true);
   let editing = $state(false);
   let error = $state('');
@@ -93,6 +95,11 @@
     saveLayout(updated);
   }
 
+  function toggleCompact() {
+    compact = !compact;
+    saveLayout(widgets);
+  }
+
   async function api(url: string, init?: RequestInit) {
     const resp = await fetch(url, init);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -113,10 +120,13 @@
       if (dashes.length > 0) {
         const keep = dashes.find((d) => d.id === activeId) ?? dashes[0];
         activeId = keep.id;
-        widgets = parseLayout(keep.layout).widgets;
+        const parsed = parseLayout(keep.layout);
+        widgets = parsed.widgets;
+        compact = parsed.compact ?? false;
       } else {
         activeId = null;
         widgets = [];
+        compact = false;
       }
       error = '';
     } catch (e) {
@@ -169,7 +179,7 @@
   async function saveLayout(widgetsToSave: DashWidget[], boardId?: string) {
     const id = boardId ?? activeId;
     if (!id) return;
-    const layout = serializeLayout({ version: 1, widgets: widgetsToSave });
+    const layout = serializeLayout({ version: 3, widgets: widgetsToSave, compact });
     const d = dashes.find((x) => x.id === id);
     if (d) d.layout = layout;
     saveChain = saveChain.then(async () => {
@@ -196,7 +206,9 @@
     editing = false;
     activeId = id;
     const d = dashes.find((x) => x.id === id);
-    widgets = parseLayout(d?.layout).widgets;
+    const parsed = parseLayout(d?.layout);
+    widgets = parsed.widgets;
+    compact = parsed.compact ?? false;
   }
 
   async function deleteBoard(board: BoardItem) {
@@ -207,7 +219,9 @@
       dashes = dashes.filter((d) => d.id !== board.id);
       const next = dashes[Math.min(idx, dashes.length - 1)];
       activeId = next?.id ?? null;
-      widgets = next ? parseLayout(next.layout).widgets : [];
+      const parsed = next ? parseLayout(next.layout) : null;
+      widgets = parsed?.widgets ?? [];
+      compact = parsed?.compact ?? false;
       if (activeId === null) editing = false;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to delete board';
@@ -400,6 +414,15 @@
             <Plus size={12} /> Add Chart
           </button>
           <button
+            class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md {compact
+              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+              : 'border border-border hover:bg-accent'}"
+            title="Snap cards together (no gap)"
+            onclick={toggleCompact}
+          >
+            <Magnet size={12} /> Snap
+          </button>
+          <button
             class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md {editing
               ? 'bg-primary text-primary-foreground hover:bg-primary/90'
               : 'border border-border hover:bg-accent'}"
@@ -455,6 +478,7 @@
         running={runState === 'running'}
         {runState}
         {runInfo}
+        {compact}
         onChange={onWidgetsChange}
         onEditContent={openEditContent}
       />
