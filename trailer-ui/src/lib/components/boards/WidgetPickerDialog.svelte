@@ -148,9 +148,8 @@
       case 'info': {
         const items: InfoItem[] = [];
         for (const src of selectedFixed) {
-          if (src === 'step') items.push({ src: 'step' });
-          else if (src === 'elapsed') items.push({ src: 'elapsed' });
-          else items.push({ src: 'cost' });
+          if (src === 'status') items.push({ src: 'status' });
+          else if (src === 'cost') items.push({ src: 'cost' });
         }
         for (const path of selectedConfigPaths) {
           const label = infoLabels[path]?.trim();
@@ -221,7 +220,7 @@
         <div class="space-y-0.5 mb-4">
           <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50 cursor-pointer text-xs">
             <input type="checkbox" checked={selectedFixed.includes('status')} onchange={() => (selectedFixed = toggleIn(selectedFixed, 'status'))} class="accent-primary" />
-            <span>Model &amp; training status (name, state, step, elapsed, started)</span>
+            <span>Model status</span>
           </label>
           <div class="px-2 py-1.5 rounded hover:bg-accent/50">
             <label class="flex items-center gap-2 cursor-pointer text-xs">

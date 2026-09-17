@@ -340,3 +340,17 @@ describe('minSize', () => {
     expect(parsed.widgets[0]).toMatchObject({ type: 'info', w: 6, h: 3 });
   });
 });
+
+describe('layout compact (snap)', () => {
+  it('parses compact flag and defaults to false', () => {
+    const on = parseLayout(JSON.stringify({ version: 3, widgets: [], compact: true }));
+    expect(on.compact).toBe(true);
+    const off = parseLayout(JSON.stringify({ version: 3, widgets: [] }));
+    expect(off.compact).toBe(false);
+  });
+
+  it('round-trips compact through serializeLayout', () => {
+    const again = parseLayout(serializeLayout({ version: 3, widgets: [], compact: true }));
+    expect(again.compact).toBe(true);
+  });
+});

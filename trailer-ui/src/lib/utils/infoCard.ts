@@ -1,4 +1,4 @@
-import type { InfoItem } from './dashboard';
+import type { InfoItem, InfoWidget } from './dashboard';
 
 // ─── Boards 信息卡纯逻辑(TDD,用例见 infoCard.test.ts) ───
 // 头部条:状态点 + 模型名 + in progress + step + elapsed/started;
@@ -169,13 +169,13 @@ export function formatCell(input: InfoCellInput): InfoCell {
   const { item } = input;
   switch (item.src) {
     case 'metric': {
-      const label = item.label ?? (item.context ? `${item.key} [${item.context}]` : item.key);
+      const base = item.label ?? (item.context ? `${item.key} [${item.context}]` : item.key);
       const series = input.metrics.find((m) => m.key === item.key && m.context === item.context);
       const points = series?.points ?? [];
       const last = points.length > 0 ? points[points.length - 1] : null;
       const delta = metricDelta(points);
       const cell: InfoCell = {
-        label: `${label} · Δ vs step 1`,
+        label: `${base} · Δ vs step 1`,
         value: last ? fmtMetric(last.value) : '—',
       };
       const deltaText = delta !== null ? formatDelta(delta) : null;
@@ -189,11 +189,11 @@ export function formatCell(input: InfoCellInput): InfoCell {
       const sec = typeof input.seconds === 'number' ? input.seconds : trainingSeconds(input);
       const gpus = input.gpus && input.gpus > 0 ? input.gpus : 0;
       const gpuHours = sec !== null ? round2((sec / 3600) * gpus) : null;
-      if (gpuHours === null) return { label: 'cost so far', value: '—' };
+      if (gpuHours === null) return { label: 'train cost', value: '—' };
       if (typeof input.unitPrice === 'number' && input.unitPrice >= 0) {
-        return { label: 'cost so far', value: formatMoney(gpuHours * input.unitPrice) };
+        return { label: 'train cost', value: formatMoney(gpuHours * input.unitPrice) };
       }
-      return { label: 'cost so far', value: `${gpuHours.toFixed(2)} GPU·h` };
+      return { label: 'train cost', value: `${gpuHours.toFixed(2)} GPU·h` };
     }
     case 'config': {
       return {
@@ -205,4 +205,29 @@ export function formatCell(input: InfoCellInput): InfoCell {
       // status 由卡片头部条渲染,不走瓦片格
       return { label: '', value: '—' };
   }
+}
+
+/** 模型名类 config 单元(model_name/model):由头部条展示,不再重复瓦片 */
+export function isModelCell(item: InfoItem): boolean {
+  return item.src === 'config' && /^(model_name|model)$/.test(item.path);
+}
+
+/** 是否渲染状态头部条:显式 status 项,或卡片含模型名 cell(自动升级为状态卡) */
+export function hasStatusHeader(widget: InfoWidget): boolean {
+  return widget.items.some((i) => i.src === 'status' || isModelCell(i));
+}
+
+/** 信息卡自动高度估算(行数):status 头部条 + 瓦片按 130px 最小宽换行。
+ *  用于让 info 卡贴合内容——不留大片空白也不出滚动条。 */
+export function infoRowsNeeded(
+  widget: InfoWidget,
+  cardWidthPx: number,
+  rowPx = 44,
+  gapPx = 8
+): number {
+  const hasStatus = widget.items.some((i) => i.src === 'status');
+  const cellCount = widget.items.filter((i) => i.src !== 'status').length;
+  const tilesPerRow = Math.max(1, Math.floor((cardWidthPx - 20) / 130));
+  const contentPx = (hasStatus ? 62 : 0) + Math.ceil(cellCount / tilesPerRow) * 72;
+  return Math.max(2, Math.ceil((contentPx + 16) / (rowPx + gapPx)));
 }
