@@ -227,7 +227,7 @@ export function infoRowsNeeded(
 ): number {
   const hasStatus = widget.items.some((i) => i.src === 'status');
   const cellCount = widget.items.filter((i) => i.src !== 'status').length;
-  const tilesPerRow = Math.max(1, Math.floor((cardWidthPx - 20) / 130));
+  const tilesPerRow = Math.max(1, Math.floor((cardWidthPx - 20) / 110));
   const contentPx = (hasStatus ? 62 : 0) + Math.ceil(cellCount / tilesPerRow) * 72;
   return Math.max(2, Math.ceil((contentPx + 16) / (rowPx + gapPx)));
 }

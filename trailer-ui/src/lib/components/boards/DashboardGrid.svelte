@@ -3,7 +3,7 @@
   // 编辑态:把手 pointer 拖拽换位(不用 HTML5 DnD——真实拖拽不可靠且与缩放手柄冲突)、
   // 右下角手柄调宽/高、标题重命名、头部取色;视图态:卡片可折叠(同 Metrics 卡片)。
   // 布局即数组顺序:卡片 span w 列 × h 行,grid-auto-flow: dense 自动填洞。
-  import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight } from 'lucide-svelte';
+  import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight, Magnet } from 'lucide-svelte';
   import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
   import { clampH, clampW, defaultWidgetTitle, minSize } from '$lib/utils/dashboard';
   import { infoRowsNeeded } from '$lib/utils/infoCard';
@@ -204,6 +204,11 @@ import { onMount } from 'svelte';
     onChange(widgets.map((w) => (w.id === id ? { ...w, title: t } : w)));
   }
 
+  /** 卡片级吸附:与左侧相邻卡片间距归零 */
+  function toggleSnapPrev(widget: DashWidget) {
+    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, snapPrev: !w.snapPrev } : w)));
+  }
+
   /** 双击 info 卡 label 改名:更新对应 item 的 label 并持久化 */
   function handleInfoLabelEdit(widget: DashWidget, itemIdx: number, label: string) {
     if (widget.type !== 'info') return;
@@ -239,7 +244,7 @@ import { onMount } from 'svelte';
         : ''}"
       style="grid-column: span {effectiveW(widget)}; grid-row: span {isCollapsed ? 1 : effectiveH(widget)}; {widget.color
         ? `box-shadow: inset 0 2px 0 0 ${widget.color};`
-        : ''}"
+        : ''} {widget.snapPrev && !compact ? `margin-left: -${GAP_PX}px;` : ''}"
       role="{editing ? 'button' : 'presentation'}"
       tabindex={editing ? 0 : -1}
       onkeydown={(e) => {
@@ -295,6 +300,13 @@ import { onMount } from 'svelte';
           </span>
         {/if}
         {#if editing}
+          <button
+            class="shrink-0 {widget.snapPrev ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+            title="Snap to previous card (no gap)"
+            onclick={(e) => { e.stopPropagation(); toggleSnapPrev(widget); }}
+          >
+            <Magnet size={12} />
+          </button>
           <input
             type="color"
             value={widget.color ?? '#6b7280'}
