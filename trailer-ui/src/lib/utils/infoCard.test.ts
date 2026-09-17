@@ -7,11 +7,15 @@ import {
   statusFromRunState,
   modelNameFromConfig,
   trainingSeconds,
+  infoRowsNeeded,
+  hasStatusHeader,
+  isModelCell,
   flattenConfigKeys,
   resolveConfigValue,
   formatCell,
   type InfoCellInput,
 } from './infoCard';
+import type { InfoWidget } from './dashboard';
 
 describe('formatElapsed', () => {
   it('formats as HH:MM:SS under a day', () => {
@@ -183,6 +187,12 @@ describe('formatCell', () => {
     expect(row.deltaUp).toBe(false);
   });
 
+  it('keeps delta hint with custom label', () => {
+    const row = formatCell({ ...base, item: { src: 'metric', key: 'loss', context: 'train', label: 'Val Acc' } });
+    expect(row.label).toBe('Val Acc · Δ vs step 1');
+    expect(row.value).toBe('0.615');
+  });
+
   it('omits delta with fewer than 2 points', () => {
     const row = formatCell({ ...base, item: { src: 'metric', key: 'acc', context: 'eval' } });
     expect(row.value).toBe('0.9');
@@ -196,7 +206,7 @@ describe('formatCell', () => {
 
   it('renders cost cell as money from wall_time span', () => {
     const row = formatCell({ ...base, item: { src: 'cost' }, metrics: base.metrics, unitPrice: 5, running: true });
-    expect(row.label).toBe('cost so far');
+    expect(row.label).toBe('train cost');
     expect(row.value).toBe('$10.00');
   });
 
@@ -218,5 +228,59 @@ describe('formatCell', () => {
   it('falls back label for config without label to its path', () => {
     const row = formatCell({ ...base, item: { src: 'config', path: 'train.lr' }, config: { train: { lr: 1 } } });
     expect(row.label).toBe('train.lr');
+  });
+});
+
+describe('infoRowsNeeded', () => {
+  const statusOnly: InfoWidget = { id: 'i', type: 'info', w: 18, h: 4, items: [{ src: 'status' }] };
+  const threeCells: InfoWidget = {
+    id: 'i', type: 'info', w: 18, h: 4,
+    items: [{ src: 'cost' }, { src: 'config', path: 'a' }, { src: 'metric', key: 'x', context: '' }],
+  };
+
+  it('status-only card hugs the header (2 rows)', () => {
+    expect(infoRowsNeeded(statusOnly, 590)).toBe(2);
+  });
+
+  it('cells wrap by estimated tiles per row', () => {
+    // 590px 宽 → 每行 ~4 个瓦片,3 个 cell 一行 + 无头部 → 2 行
+    expect(infoRowsNeeded(threeCells, 590)).toBe(2);
+  });
+
+  it('many cells stack rows', () => {
+    const many: InfoWidget = { ...threeCells, items: Array.from({ length: 8 }, () => ({ src: 'cost' as const })) };
+    // 8 cells / 4 per row = 2 tile rows = 144px → 4 rows
+    expect(infoRowsNeeded(many, 590)).toBe(4);
+  });
+
+  it('narrow cards fit one tile per row', () => {
+    // 130px 宽 → 每行 1 个,3 cells → 3 tile rows
+    expect(infoRowsNeeded(threeCells, 130)).toBeGreaterThanOrEqual(4);
+  });
+
+  it('floor is 2 rows', () => {
+    expect(infoRowsNeeded({ id: 'i', type: 'info', w: 6, h: 3, items: [] }, 590)).toBe(2);
+  });
+});
+
+describe('hasStatusHeader', () => {
+  it('is true for explicit status item', () => {
+    expect(hasStatusHeader({ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'status' }] })).toBe(true);
+  });
+
+  it('is true when a model_name config cell exists (auto-upgrade)', () => {
+    expect(hasStatusHeader({ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'config', path: 'model_name' }] })).toBe(true);
+    expect(hasStatusHeader({ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'config', path: 'model' }] })).toBe(true);
+  });
+
+  it('is false for ordinary cells', () => {
+    expect(hasStatusHeader({ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'config', path: 'train.lr' }, { src: 'cost' }] })).toBe(false);
+  });
+
+  it('isModelCell matches only exact model paths', () => {
+    expect(isModelCell({ src: 'config', path: 'model_name' })).toBe(true);
+    expect(isModelCell({ src: 'config', path: 'model' })).toBe(true);
+    expect(isModelCell({ src: 'config', path: 'train.model_name' })).toBe(false);
+    expect(isModelCell({ src: 'cost' })).toBe(false);
   });
 });

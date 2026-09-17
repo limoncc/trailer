@@ -6,9 +6,11 @@
   import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight } from 'lucide-svelte';
   import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
   import { clampH, clampW, defaultWidgetTitle, minSize } from '$lib/utils/dashboard';
+  import { infoRowsNeeded } from '$lib/utils/infoCard';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import type { BoardsData, MetricSeries } from './boardsData';
   import WidgetContent from './WidgetContent.svelte';
+import { onMount } from 'svelte';
 
   interface Props {
     widgets: DashWidget[];
@@ -22,16 +24,30 @@
     runState?: string;
     /** 信息卡所需的 run 元信息(时长/成本/超参/卡数) */
     runInfo?: RunInfo;
+    /** 吸附模式:卡片间无间距 */
+    compact?: boolean;
+    /** 编辑中:info 卡瓦片 label 可双击改名 */
+    onInfoLabelEdit?: (widget: DashWidget, itemIdx: number, label: string) => void;
     /** 拖拽/缩放/删除/取色等布局变更 */
     onChange: (widgets: DashWidget[]) => void;
     /** 「编辑内容」按钮 → 父组件打开选择弹窗 */
     onEditContent: (widget: DashWidget) => void;
   }
 
-  let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, onChange, onEditContent }: Props = $props();
+  let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, compact = false, onInfoLabelEdit, onChange, onEditContent }: Props = $props();
 
   const ROW_PX = 44;
   const GAP_PX = 8;
+  /** 看板容器实际宽度(info 卡自动高度估算用) */
+  let gridW = $state(0);
+  onMount(() => {
+    if (gridEl && typeof ResizeObserver !== 'undefined') {
+      gridW = gridEl.clientWidth;
+      const ro = new ResizeObserver(() => (gridW = gridEl?.clientWidth ?? 0));
+      ro.observe(gridEl);
+      return () => ro.disconnect();
+    }
+  });
   const HEADER_PX = 32;
   /** 36 列网格列数 */
   const COLS = 36;
@@ -122,7 +138,13 @@
     return resizing?.id === widget.id ? resizing.w : widget.w;
   }
   function effectiveH(widget: DashWidget): number {
-    return resizing?.id === widget.id ? resizing.h : widget.h;
+    // info 卡高度贴合内容(头部条 + 瓦片换行),不留空白也不出滚动条;
+    // 优先于 resizing —— 缩放手柄对 info 卡只调宽度
+    if (widget.type === 'info') {
+      const cardW = gridW > 0 ? (gridW * widget.w) / COLS : 0;
+      if (cardW > 0) return infoRowsNeeded(widget, cardW, ROW_PX, GAP_PX);
+    }
+    return widget.h;
   }
 
   function onResizeStart(e: MouseEvent, widget: DashWidget) {
@@ -182,6 +204,18 @@
     onChange(widgets.map((w) => (w.id === id ? { ...w, title: t } : w)));
   }
 
+  /** 双击 info 卡 label 改名:更新对应 item 的 label 并持久化 */
+  function handleInfoLabelEdit(widget: DashWidget, itemIdx: number, label: string) {
+    if (widget.type !== 'info') return;
+    const l = label.trim();
+    const items = widget.items.map((it, i) => {
+      if (i !== itemIdx) return it;
+      if (it.src !== 'config' && it.src !== 'metric') return it;
+      return { ...it, label: l || undefined };
+    });
+    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, items } : w)));
+  }
+
   function focusOnMount(node: HTMLInputElement) {
     node.focus();
     node.select();
@@ -192,7 +226,7 @@
   bind:this={gridEl}
   class="grid"
   class:select-none={draggingAny}
-  style="grid-template-columns: repeat({COLS}, minmax(0, 1fr)); grid-auto-rows: {ROW_PX}px; grid-auto-flow: dense; gap: {GAP_PX}px;"
+  style="grid-template-columns: repeat({COLS}, minmax(0, 1fr)); grid-auto-rows: {ROW_PX}px; grid-auto-flow: dense; gap: {compact ? 0 : GAP_PX}px;"
 >
   {#each widgets as widget, idx (widget.id)}
     {@const isCollapsed = collapsed.has(widget.id)}
@@ -297,8 +331,8 @@
 
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
-        <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} />
+        <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' ? 'pointer-events-none' : ''}">
+          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => onInfoLabelEdit?.(widget, itemIdx, label)} />
         </div>
 
         <!-- Resize handle -->
