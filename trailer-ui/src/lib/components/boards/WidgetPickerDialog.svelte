@@ -49,6 +49,7 @@
   );
   let infoGpus = $state<number | null>(initInfo?.gpus ?? null);
   let infoUnitPrice = $state<number | null>(initInfo?.unitPrice ?? null);
+  let infoCurrency = $state<'usd' | 'cny'>(initInfo?.currency === 'cny' ? 'cny' : 'usd');
   // 自定义标签(config 按 path、metric 按 metricId),空 = 用默认名
   let infoLabels = $state<Record<string, string>>(
     initInfo
@@ -159,7 +160,7 @@
           const label = infoLabels[metricId(m)]?.trim();
           items.push({ src: 'metric', key: m.key, context: m.context, label: label || undefined });
         }
-        const content: Record<string, unknown> = { items };
+        const content: Record<string, unknown> = { items, currency: infoCurrency };
         if (infoGpus !== null && Number.isFinite(infoGpus) && infoGpus > 0) content.gpus = Math.round(infoGpus);
         if (infoUnitPrice !== null && Number.isFinite(infoUnitPrice) && infoUnitPrice >= 0) {
           content.unitPrice = infoUnitPrice;
@@ -241,7 +242,7 @@
                   />
                 </label>
                 <label class="flex items-center gap-1">
-                  Price ($/GPU·h)
+                  Price ({infoCurrency === 'cny' ? '¥' : '$'}/GPU·h)
                   <input
                     type="number"
                     min="0"
@@ -251,6 +252,18 @@
                     class="w-24 px-1.5 py-0.5 border border-border rounded bg-background"
                   />
                 </label>
+                <div class="flex items-center rounded border border-border overflow-hidden" title="Currency">
+                  <button
+                    type="button"
+                    class="px-1.5 py-0.5 {infoCurrency === 'usd' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent text-muted-foreground'}"
+                    onclick={() => (infoCurrency = 'usd')}
+                  >$</button>
+                  <button
+                    type="button"
+                    class="px-1.5 py-0.5 {infoCurrency === 'cny' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent text-muted-foreground'}"
+                    onclick={() => (infoCurrency = 'cny')}
+                  >¥</button>
+                </div>
               </div>
             {/if}
           </div>

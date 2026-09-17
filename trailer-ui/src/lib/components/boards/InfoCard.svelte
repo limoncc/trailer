@@ -72,6 +72,7 @@
           running,
           gpus,
           unitPrice: widget.unitPrice,
+          currency: widget.currency,
           config: runInfo?.config,
           metrics: metrics as InfoMetrics[],
         }),
@@ -106,29 +107,29 @@
 <div class="h-full flex flex-col font-mono">
   <!-- 头部条:状态点 + 模型名 + 状态 | step + elapsed/started(勾选 status 项才显示) -->
   {#if hasStatus}
-    <div class="flex items-start gap-3 px-3 py-2 {cellDefs.length > 0 ? 'border-b border-border' : ''}">
-      <div class="min-w-0 flex-1">
+    <div class="flex flex-wrap items-start gap-x-3 gap-y-1 px-3 py-2 {cellDefs.length > 0 ? 'border-b border-border' : ''}">
+      <div class="min-w-0 flex-1 min-w-[60px]">
         <div class="flex items-center gap-2 min-w-0">
           <span class="w-2 h-2 rounded-full shrink-0 {statusDot}"></span>
           <span class="font-semibold truncate" title={modelName}>{modelName}</span>
         </div>
         <div class="text-xs text-muted-foreground truncate">{statusText}</div>
       </div>
-      <div class="text-right shrink-0">
-        <div class="font-semibold">step {maxStep ?? '—'}</div>
+      <div class="text-right min-w-0 shrink max-w-[60%]">
+        <div class="font-semibold truncate">step {maxStep ?? '—'}</div>
         {#if elapsedText}
-          <div class="tabular-nums">{elapsedText}</div>
+          <div class="tabular-nums truncate">{elapsedText}</div>
         {/if}
         {#if startedText}
-          <div class="text-[10px] text-muted-foreground">started {startedText}</div>
+          <div class="text-[10px] text-muted-foreground truncate">started {startedText}</div>
         {/if}
       </div>
     </div>
   {/if}
 
-  <!-- 主体瓦片格(status 卡只显示头部条) -->
-  {#if hasStatus}
-    <!-- 状态卡只显示头部条,不带瓦片 -->
+  <!-- 主体瓦片格:纯状态卡只有头部条;status+瓦片混合卡两者都渲染 -->
+  {#if hasStatus && cellDefs.length === 0}
+    <!-- 纯状态卡只显示头部条,不带瓦片 -->
   {:else if cellDefs.length === 0}
     <div class="flex-1 flex items-center justify-center text-xs text-muted-foreground">
       No items selected
