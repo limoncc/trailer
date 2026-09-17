@@ -64,22 +64,24 @@ export interface MediaWidget extends WidgetBase {
   mediaId: number;
 }
 
-/** 信息卡数据行来源:config 超参 / 当前步数下的指标值 / 当前步数 / 训练时长 / 训练成本 */
+/** 信息卡主体瓦片来源:status=头部条(模型名+状态+step+时长,一张卡勾一次) /
+ *  config 超参 / 当前步数下的指标值(带 Δ) / 训练成本。 */
 export type InfoItem =
+  | { src: 'status' }
   | { src: 'config'; path: string; label?: string }
   | { src: 'metric'; key: string; context: string; label?: string }
-  | { src: 'step' }
-  | { src: 'elapsed' }
   | { src: 'cost' };
 
 export interface InfoWidget extends WidgetBase {
   type: 'info';
-  /** 展示行与顺序 */
+  /** 展示瓦片与顺序 */
   items: InfoItem[];
   /** GPU 卡数;缺省自动读 env.hardware.gpus 数量 */
   gpus?: number;
   /** 单价(元/卡时);缺省只显示累计卡时 */
   unitPrice?: number;
+  /** 模型名的 config 点路径;缺省依次尝试 model_name / model */
+  modelPath?: string;
 }
 
 export type DashWidget =
@@ -222,10 +224,10 @@ function parseWidget(raw: unknown): DashWidget | null {
             context: typeof it.context === 'string' ? it.context : '',
             label: typeof it.label === 'string' && it.label ? it.label : undefined,
           });
-        } else if (it.src === 'step' || it.src === 'elapsed' || it.src === 'cost') {
+        } else if (it.src === 'cost' || it.src === 'status') {
           items.push({ src: it.src });
         }
-        // 未知 src 丢弃
+        // 未知 src(含旧版 step/elapsed,已移入卡片头部)丢弃
       }
       return {
         ...base,
@@ -236,6 +238,7 @@ function parseWidget(raw: unknown): DashWidget | null {
           typeof r.unitPrice === 'number' && Number.isFinite(r.unitPrice) && r.unitPrice >= 0
             ? r.unitPrice
             : undefined,
+        modelPath: typeof r.modelPath === 'string' && r.modelPath ? r.modelPath : undefined,
       };
     }
     default:
@@ -309,7 +312,7 @@ export function defaultWidgetTitle(w: DashWidget, display?: (m: MetricRef) => st
     case 'media':
       return `Media #${w.mediaId}`;
     case 'info':
-      return '训练信息';
+      return 'Training Info';
   }
 }
 

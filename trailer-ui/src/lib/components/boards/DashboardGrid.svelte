@@ -18,6 +18,8 @@
     boardsData: BoardsData;
     /** run 运行中:line 图最新点显示绿色脉冲标记(同 Metrics 卡片) */
     running?: boolean;
+    /** 信息卡状态文本用 */
+    runState?: string;
     /** 信息卡所需的 run 元信息(时长/成本/超参/卡数) */
     runInfo?: RunInfo;
     /** 拖拽/缩放/删除/取色等布局变更 */
@@ -26,7 +28,7 @@
     onEditContent: (widget: DashWidget) => void;
   }
 
-  let { widgets, editing, runId, metrics, boardsData, running = false, runInfo, onChange, onEditContent }: Props = $props();
+  let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, onChange, onEditContent }: Props = $props();
 
   const ROW_PX = 44;
   const GAP_PX = 12;
@@ -209,7 +211,8 @@
         if (editing && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
       }}
     >
-      <!-- Header -->
+      <!-- Header(info 卡视图态隐藏,整卡即信息面板;编辑态保留以便拖拽/改名/删除) -->
+      {#if editing || widget.type !== 'info'}
       <div class="flex items-center gap-1.5 px-2.5 border-b border-border bg-muted/20 shrink-0" style="height: {HEADER_PX}px;">
         {#if editing}
           <span
@@ -289,11 +292,12 @@
           </button>
         {/if}
       </div>
+      {/if}
 
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
-        <div class="flex-1 min-h-0 p-2 {editing ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runInfo} />
+        <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing ? 'pointer-events-none' : ''}">
+          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} />
         </div>
 
         <!-- Resize handle -->
