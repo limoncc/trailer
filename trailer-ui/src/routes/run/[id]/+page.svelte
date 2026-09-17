@@ -16,6 +16,7 @@
   import MetricPicker from '$lib/components/MetricPicker.svelte';
   import BoardsPanel from '$lib/components/boards/BoardsPanel.svelte';
   import type { MetricRef } from '$lib/utils/explore';
+  import type { RunInfo } from '$lib/utils/dashboard';
 
   interface MetricGroup {
     key: string;
@@ -27,6 +28,8 @@
   let runId = $state('');
   let runState = $state('');
   let runConfig = $state<Record<string, unknown> | null>(null);
+  // 信息卡(Boards)所需的 run 元信息:起点/终点/超参/卡数
+  let runInfo = $state<RunInfo>({ config: null });
   // run env.hardware(SDK 注册时上报):context(system/nvidia/gpu0) → GPU 型号名
   let gpuNames = $state<Map<string, string>>(new Map());
   let metrics = $state<MetricGroup[]>([]);
@@ -212,6 +215,12 @@
         if (r) {
           runState = r.state;
           runConfig = r.config || null;
+          runInfo = {
+            createdAt: r.created_at,
+            heartbeatAt: r.heartbeat_at ?? undefined,
+            config: r.config || null,
+            gpuCount: Array.isArray(r.env?.hardware?.gpus) ? r.env.hardware.gpus.length : undefined,
+          };
           const gpus = r.env?.hardware?.gpus;
           if (Array.isArray(gpus)) {
             gpuNames = new Map(
@@ -421,7 +430,7 @@
         <ModelExplorer {runId} />
       {/key}
     {:else if tab === 'boards'}
-      <BoardsPanel {runId} {metrics} metricOptions={metricOptions} {runState} />
+      <BoardsPanel {runId} {metrics} metricOptions={metricOptions} {runState} {runInfo} />
     {:else if tab === 'config'}
       <Card>
         <div class="p-4">

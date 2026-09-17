@@ -11,8 +11,9 @@
     isSystemContext,
   } from '$lib/utils/systemMetrics';
   import { metricId } from '$lib/utils/metricGroups';
-  import type { DashWidget } from '$lib/utils/dashboard';
+  import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
   import type { BoardsData, MediaRow, MetricSeries } from './boardsData';
+  import InfoCard from './InfoCard.svelte';
 
   interface Props {
     widget: DashWidget;
@@ -23,9 +24,11 @@
     heightPx: number;
     /** run 运行中:line 图最新点显示绿色脉冲标记(同 Metrics 卡片) */
     running?: boolean;
+    /** 信息卡所需的 run 元信息 */
+    runInfo?: RunInfo;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runInfo }: Props = $props();
 
   const PALETTE = ['#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f59e0b', '#6366f1'];
 
@@ -307,4 +310,6 @@
       <source src={blobUrls.get(mediaRow.id)} />
     </audio>
   {/if}
+{:else if widget.type === 'info'}
+  <InfoCard {widget} {metrics} {running} {runInfo} />
 {/if}

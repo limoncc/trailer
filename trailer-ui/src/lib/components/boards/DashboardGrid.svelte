@@ -4,7 +4,7 @@
   // 右下角手柄调宽/高、标题重命名、头部取色;视图态:卡片可折叠(同 Metrics 卡片)。
   // 布局即数组顺序:卡片 span w 列 × h 行,grid-auto-flow: dense 自动填洞。
   import { GripHorizontal, Pencil, X, ChevronDown, ChevronRight } from 'lucide-svelte';
-  import type { DashWidget } from '$lib/utils/dashboard';
+  import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
   import { clampH, clampW, defaultWidgetTitle } from '$lib/utils/dashboard';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import type { BoardsData, MetricSeries } from './boardsData';
@@ -18,13 +18,15 @@
     boardsData: BoardsData;
     /** run 运行中:line 图最新点显示绿色脉冲标记(同 Metrics 卡片) */
     running?: boolean;
+    /** 信息卡所需的 run 元信息(时长/成本/超参/卡数) */
+    runInfo?: RunInfo;
     /** 拖拽/缩放/删除/取色等布局变更 */
     onChange: (widgets: DashWidget[]) => void;
     /** 「编辑内容」按钮 → 父组件打开选择弹窗 */
     onEditContent: (widget: DashWidget) => void;
   }
 
-  let { widgets, editing, runId, metrics, boardsData, running = false, onChange, onEditContent }: Props = $props();
+  let { widgets, editing, runId, metrics, boardsData, running = false, runInfo, onChange, onEditContent }: Props = $props();
 
   const ROW_PX = 44;
   const GAP_PX = 12;
@@ -291,7 +293,7 @@
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
         <div class="flex-1 min-h-0 p-2 {editing ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} />
+          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runInfo} />
         </div>
 
         <!-- Resize handle -->

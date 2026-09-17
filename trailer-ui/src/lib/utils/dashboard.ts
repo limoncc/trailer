@@ -64,13 +64,43 @@ export interface MediaWidget extends WidgetBase {
   mediaId: number;
 }
 
+/** 信息卡数据行来源:config 超参 / 当前步数下的指标值 / 当前步数 / 训练时长 / 训练成本 */
+export type InfoItem =
+  | { src: 'config'; path: string; label?: string }
+  | { src: 'metric'; key: string; context: string; label?: string }
+  | { src: 'step' }
+  | { src: 'elapsed' }
+  | { src: 'cost' };
+
+export interface InfoWidget extends WidgetBase {
+  type: 'info';
+  /** 展示行与顺序 */
+  items: InfoItem[];
+  /** GPU 卡数;缺省自动读 env.hardware.gpus 数量 */
+  gpus?: number;
+  /** 单价(元/卡时);缺省只显示累计卡时 */
+  unitPrice?: number;
+}
+
 export type DashWidget =
   | LineWidget
   | HistWidget
   | FigureWidget
   | TextWidget
   | TableWidget
-  | MediaWidget;
+  | MediaWidget
+  | InfoWidget;
+
+/** 信息卡所需的 run 元信息(run 页 /api/v1/runs 已有,向下传递避免重复请求) */
+export interface RunInfo {
+  /** run 创建时刻(秒),时长/成本起点 */
+  createdAt?: number;
+  /** 最后心跳(秒);终态 run 用它近似训练终点 */
+  heartbeatAt?: number;
+  config: Record<string, unknown> | null;
+  /** env.hardware.gpus 数量(未上报时 undefined,由卡片手填兜底) */
+  gpuCount?: number;
+}
 
 export interface DashboardLayout {
   /** v1 = 12 列网格,v2 = 24 列网格(历史);v3 = 36 列网格(当前)。parseLayout 统一返回 v3 语义 */
@@ -103,6 +133,8 @@ export function defaultSize(type: DashWidget['type']): { w: number; h: number } 
       return { w: 12, h: 4 };
     case 'media':
       return { w: 9, h: 3 };
+    case 'info':
+      return { w: 9, h: 6 };
   }
 }
 
@@ -175,6 +207,37 @@ function parseWidget(raw: unknown): DashWidget | null {
     case 'media':
       if (typeof r.mediaId !== 'number' || !Number.isFinite(r.mediaId)) return null;
       return { ...base, type: 'media', mediaId: r.mediaId };
+    case 'info': {
+      const rawItems = Array.isArray(r.items) ? r.items : [];
+      const items: InfoItem[] = [];
+      for (const raw of rawItems) {
+        if (typeof raw !== 'object' || raw === null) continue;
+        const it = raw as Record<string, unknown>;
+        if (it.src === 'config' && typeof it.path === 'string' && it.path) {
+          items.push({ src: 'config', path: it.path, label: typeof it.label === 'string' && it.label ? it.label : undefined });
+        } else if (it.src === 'metric' && typeof it.key === 'string' && it.key) {
+          items.push({
+            src: 'metric',
+            key: it.key,
+            context: typeof it.context === 'string' ? it.context : '',
+            label: typeof it.label === 'string' && it.label ? it.label : undefined,
+          });
+        } else if (it.src === 'step' || it.src === 'elapsed' || it.src === 'cost') {
+          items.push({ src: it.src });
+        }
+        // 未知 src 丢弃
+      }
+      return {
+        ...base,
+        type: 'info',
+        items,
+        gpus: typeof r.gpus === 'number' && Number.isFinite(r.gpus) && r.gpus > 0 ? Math.round(r.gpus) : undefined,
+        unitPrice:
+          typeof r.unitPrice === 'number' && Number.isFinite(r.unitPrice) && r.unitPrice >= 0
+            ? r.unitPrice
+            : undefined,
+      };
+    }
     default:
       // 未知类型(更新版前端写入)——旧前端跳过渲染,不破坏整体布局
       return null;
@@ -245,6 +308,8 @@ export function defaultWidgetTitle(w: DashWidget, display?: (m: MetricRef) => st
       return `Table #${w.tableId}`;
     case 'media':
       return `Media #${w.mediaId}`;
+    case 'info':
+      return '训练信息';
   }
 }
 
