@@ -3,6 +3,7 @@
   import PCA3DChart from './PCA3DChart.svelte';
   import { parsePcaBody } from '$lib/pca/pca';
   import type { PcaGroup, PcaData } from '$lib/pca/pcaTypes';
+  import { followIndex } from '$lib/utils/replay';
 
   interface Props {
     group: PcaGroup;
@@ -14,9 +15,11 @@
     chromeless?: boolean;
     /** 覆盖图表高度(缺省 compact ? 300 : 400) */
     chartHeight?: number;
+    /** 全局回放步(Boards 回放):提供时选中帧跟随到 ≤ 该步的最近帧 */
+    followStep?: number | null;
   }
 
-  let { group, onMoveUp, onMoveDown, onRemove, compact = false, chromeless = false, chartHeight }: Props = $props();
+  let { group, onMoveUp, onMoveDown, onRemove, compact = false, chromeless = false, chartHeight, followStep = null }: Props = $props();
 
   let expanded = $state(true);
   // 默认选最新 step（group 按 name 重建时初始化一次）
@@ -36,6 +39,13 @@
       init = false;
       selectedIndex = group.rows.length - 1;
     }
+  });
+
+  // 全局回放跟随:写内部 selectedIndex(回放结束 followStep 置空后停留在最后跟随帧=最新)
+  $effect(() => {
+    if (followStep == null || group.rows.length === 0) return;
+    selectedIndex = followIndex(group.rows.map((r) => r.step), followStep);
+    init = false;
   });
 
   let sliderWrap = $state<HTMLDivElement | null>(null);

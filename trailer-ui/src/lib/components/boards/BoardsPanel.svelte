@@ -1,12 +1,13 @@
 <script lang="ts">
   // ─── Boards tab:run 下多个命名看板(子标签),12 列网格自由布局 ───
   import { onMount } from 'svelte';
-  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X } from 'lucide-svelte';
+  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
   import type { MetricRef } from '$lib/utils/explore';
   import type { MetricOption } from '$lib/utils/metricGroups';
   import { displayMetricName } from '$lib/utils/systemMetrics';
+  import { clipBoardsData, clipMetrics, dataStepRange } from '$lib/utils/replay';
   import {
     parseLayout,
     serializeLayout,
@@ -153,6 +154,90 @@
     const timer = setInterval(() => loadLogData(), $refreshInterval * 1000);
     return () => clearInterval(timer);
   });
+
+  // ─── 训练回放:全局步进,截断注入 widget 的数据重放训练过程 ───
+  // 1× = 全程 20 秒播完;100ms 一 tick;播完停在终点,✕ 退出回到实时数据。状态不持久化。
+  const REPLAY_BASE_SECONDS = 20;
+  const REPLAY_TICK_MS = 100;
+  const REPLAY_SPEEDS = [1, 2, 4, 8, 16, 32];
+  let replayActive = $state(false);
+  let replayPlaying = $state(false);
+  let replayStep = $state(0);
+  let replaySpeed = $state(1);
+  let replayDragging = false; // 非响应式:仅进度条指针事件内使用
+
+  let stepRange = $derived(dataStepRange(metrics, boardsData));
+  let replayMin = $derived(stepRange?.min ?? 0);
+  let replayMax = $derived(stepRange?.max ?? 0);
+  let replayProgressPct = $derived(
+    replayMax > replayMin ? ((replayStep - replayMin) / (replayMax - replayMin)) * 100 : 0
+  );
+
+  // 回放视图:截断后的数据(非回放态原引用透传,零额外渲染);
+  // 回放中强制 running=false,抑制 line 最新点脉冲与 info 头部 "in progress"。
+  let viewMetrics = $derived(replayActive ? clipMetrics(metrics, replayStep) : metrics);
+  let viewBoardsData = $derived(replayActive ? clipBoardsData(boardsData, replayStep) : boardsData);
+  let viewRunning = $derived(replayActive ? false : runState === 'running');
+
+  // 回放推进定时器(外部副作用,同上轮询模式)。
+  // 墙钟锚定:每 tick 按 Date.now() 换算应处 step——定时器被浏览器限流时
+  // (后台 tab 钳到 1s)也能自校正,全程仍按真实 REPLAY_BASE_SECONDS 完成。
+  let replayAnchor = 0; // 锚点:replayStartWall 时刻对应的 step
+  let replayStartWall = 0; // 锚点墙上时刻(ms)
+  $effect(() => {
+    if (!replayActive || !replayPlaying) return;
+    const speed = replaySpeed; // 同步读取注册依赖:变速时重锚,不跳变
+    replayAnchor = replayStep;
+    replayStartWall = Date.now();
+    const timer = setInterval(() => {
+      const elapsedReplayMs = (Date.now() - replayStartWall) * speed;
+      const step = Math.round(replayAnchor + (elapsedReplayMs / (REPLAY_BASE_SECONDS * 1000)) * (replayMax - replayMin));
+      if (step >= replayMax) {
+        replayStep = replayMax;
+        replayPlaying = false;
+      } else if (step > replayStep) {
+        replayStep = Math.max(replayMin, step);
+      }
+    }, REPLAY_TICK_MS);
+    return () => clearInterval(timer);
+  });
+
+  function startReplay() {
+    if (!stepRange) return;
+    replayActive = true;
+    replayPlaying = true;
+    replayStep = stepRange.min;
+  }
+  function exitReplay() {
+    replayActive = false;
+    replayPlaying = false;
+  }
+  function toggleReplayPlay() {
+    if (!replayActive || !stepRange) return;
+    // 终点处再按 ▶ = 从头重播
+    if (!replayPlaying && replayStep >= replayMax) replayStep = replayMin;
+    replayPlaying = !replayPlaying;
+  }
+  function seekReplay(step: number) {
+    replayStep = Math.min(replayMax, Math.max(replayMin, Math.round(step)));
+    // 播放中拖拽/跳转:以新位置重锚,避免下一 tick 被旧锚点拉回
+    replayAnchor = replayStep;
+    replayStartWall = Date.now();
+  }
+  function seekReplayFromPointer(clientX: number, el: HTMLElement | null) {
+    if (!el || replayMax <= replayMin) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    seekReplay(replayMin + ratio * (replayMax - replayMin));
+  }
+  function replaySliderKey(e: KeyboardEvent) {
+    const span = replayMax - replayMin;
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? Math.max(1, Math.round(span / 50))
+      : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -Math.max(1, Math.round(span / 50)) : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    seekReplay(replayStep + step);
+  }
 
   // ─── 看板 CRUD ───
   async function createBoard() {
@@ -371,11 +456,71 @@
         <Plus size={13} /> New Board
       </button>
 
-      <div class="ml-auto flex items-center gap-2 pb-1">
+      <div class="ml-auto flex items-center gap-2 pb-1 flex-wrap">
         {#if error}
           <span class="text-xs text-destructive">{error}</span>
         {/if}
         {#if activeBoard}
+          <!-- 训练回放(X: Step 前):未激活一键开启;激活后展开 播放/进度/速度/退出 -->
+          {#if replayActive}
+            <span class="flex items-center gap-2 px-2 py-1 border border-border rounded-md">
+              <button
+                class="text-xs text-muted-foreground hover:text-foreground disabled:opacity-30"
+                disabled={replayMax <= replayMin}
+                title={replayPlaying ? 'Pause replay' : replayStep >= replayMax ? 'Replay from start' : 'Play replay'}
+                onclick={toggleReplayPlay}
+              >
+                {#if replayPlaying}<Pause size={12} />{:else}<Play size={12} />{/if}
+              </button>
+              <div
+                role="slider"
+                tabindex="0"
+                aria-label="Replay progress"
+                aria-valuemin={replayMin}
+                aria-valuemax={replayMax}
+                aria-valuenow={replayStep}
+                aria-valuetext={`Step ${replayStep} of ${replayMax}`}
+                class="trailer-slider relative h-5 w-36 cursor-pointer touch-none select-none"
+                onpointerdown={(e) => { replayDragging = true; seekReplayFromPointer(e.clientX, e.currentTarget); }}
+                onpointermove={(e) => { if (replayDragging) seekReplayFromPointer(e.clientX, e.currentTarget); }}
+                onpointerup={() => { replayDragging = false; }}
+                onpointerleave={() => { replayDragging = false; }}
+                onkeydown={replaySliderKey}
+              >
+                <div class="absolute inset-y-0 left-0 my-auto h-1 w-full rounded-full bg-border"></div>
+                <div class="absolute inset-y-0 left-0 my-auto h-1 rounded-full bg-primary" style="width: {replayProgressPct}%"></div>
+                <div
+                  class="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-primary shadow"
+                  style="left: {replayProgressPct}%"
+                ></div>
+              </div>
+              <span class="shrink-0 text-xs text-muted-foreground tabular-nums">step {replayStep}/{replayMax}</span>
+              <span class="flex items-center gap-px border border-border rounded-md overflow-hidden" title="Replay speed (1× = full run in {REPLAY_BASE_SECONDS}s)">
+                {#each REPLAY_SPEEDS as s (s)}
+                  <button
+                    class="px-1.5 py-0.5 text-[11px] {replaySpeed === s ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50'}"
+                    onclick={() => (replaySpeed = s)}
+                  >{s}×</button>
+                {/each}
+              </span>
+              <button
+                class="text-muted-foreground hover:text-foreground"
+                title="Exit replay (back to live data)"
+                onclick={exitReplay}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          {:else}
+            <button
+              class="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-md hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+              disabled={!stepRange}
+              title="Replay the training process (data sweeps from first to last step)"
+              onclick={startReplay}
+            >
+              <Play size={12} /> Replay
+            </button>
+          {/if}
           {#if lineWidgetCount > 0}
             <button
               class="px-2 py-1 text-xs border border-border rounded-md hover:bg-accent"
@@ -478,12 +623,13 @@
         {widgets}
         {editing}
         {runId}
-        {metrics}
-        {boardsData}
-        running={runState === 'running'}
+        metrics={viewMetrics}
+        boardsData={viewBoardsData}
+        running={viewRunning}
         {runState}
         {runInfo}
         {compact}
+        replayStep={replayActive ? replayStep : null}
         onChange={onWidgetsChange}
         onEditContent={openEditContent}
       />

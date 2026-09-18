@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { Chart } from '@antv/g2';
   import { adaptiveTicks, formatAxisTick, onChartThemeChange, themeOpts } from './chartTheme.svelte';
+  import { followIndex } from '$lib/utils/replay';
 
   export interface HistogramPoint {
     run_id: string;
@@ -32,8 +33,8 @@
     return r === '-0.0000' ? '0.0000' : r;
   };
 
-  interface Props { data: HistogramPoint[]; key: string; context?: string; compact?: boolean; }
-  let { data, key, context = '', compact = false }: Props = $props();
+  interface Props { data: HistogramPoint[]; key: string; context?: string; compact?: boolean; /** 全局回放步(Boards 回放):提供时选中帧跟随到 ≤ 该步的最近帧 */ followStep?: number | null; }
+  let { data, key, context = '', compact = false, followStep = null }: Props = $props();
 
   let selectedStep = $state(0);
   let sliderWrap = $state<HTMLDivElement | null>(null);
@@ -60,6 +61,13 @@
       selectedStep = sorted[sorted.length - 1].step;
       initStep = false;
     }
+  });
+
+  // 全局回放跟随:写内部 selectedStep(回放结束 followStep 置空后停留在最后跟随帧=最新)
+  $effect(() => {
+    if (followStep == null || sorted.length === 0) return;
+    selectedStep = sorted[followIndex(sorted.map((h) => h.step), followStep)].step;
+    initStep = false;
   });
 
   // 自动播放：循环切换 step
