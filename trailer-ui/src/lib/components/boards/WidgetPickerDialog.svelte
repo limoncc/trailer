@@ -33,7 +33,9 @@
     initWidget?.type === 'hist' ? (initWidget.context ? `${initWidget.key}[${initWidget.context}]` : initWidget.key) : ''
   );
   let selectedName = $state(
-    initWidget && (initWidget.type === 'figure' || initWidget.type === 'text') ? initWidget.name : ''
+    initWidget && (initWidget.type === 'figure' || initWidget.type === 'pca' || initWidget.type === 'text')
+      ? initWidget.name
+      : ''
   );
   let selectedNumericId = $state<number | null>(
     initWidget?.type === 'table' ? initWidget.tableId : initWidget?.type === 'media' ? initWidget.mediaId : null
@@ -116,6 +118,7 @@
   }
 
   const figureNames = $derived(uniqueNames(boardsData.figures.filter((f) => f.kind === 'png' || f.kind === 'g2')));
+  const pcaNames = $derived(uniqueNames(boardsData.figures.filter((f) => f.kind === 'pca')));
   const textNames = $derived(uniqueNames(boardsData.texts));
 
   function toggleMetric(m: MetricRef) {
@@ -136,6 +139,7 @@
       case 'hist':
         return selectedHistId !== '';
       case 'figure':
+      case 'pca':
       case 'text':
         return selectedName !== '';
       case 'table':
@@ -186,6 +190,7 @@
         break;
       }
       case 'figure':
+      case 'pca':
       case 'text':
         onConfirm(activeType, { name: selectedName });
         break;
@@ -431,6 +436,29 @@
                 <input type="radio" name="hist-pick" checked={selectedHistId === g.id} onchange={() => (selectedHistId = g.id)} class="accent-primary" />
                 <span class="truncate flex-1">{g.id}</span>
                 <span class="text-[10px] text-muted-foreground">{g.frames} frames</span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+      {:else if activeType === 'pca'}
+        {#if selectedName}
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground font-mono">Selected</span>
+            <button class={chipCls} title="Click to clear" onclick={() => (selectedName = '')}>
+              <span class={chipLabelCls}>{selectedName}</span>
+              <X size={10} class="shrink-0" />
+            </button>
+          </div>
+        {/if}
+        {#if pcaNames.length === 0}
+          <p class="text-xs text-muted-foreground text-center py-6">Run has no PCA data yet</p>
+        {:else}
+          <div class="space-y-0.5">
+            {#each pcaNames as f (f.name)}
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50 cursor-pointer text-xs font-mono {selectedName === f.name ? 'bg-accent' : ''}">
+                <input type="radio" name="pca-pick" checked={selectedName === f.name} onchange={() => (selectedName = f.name)} class="accent-primary" />
+                <span class="truncate flex-1">{f.name}</span>
+                <span class="text-[10px] text-muted-foreground">{f.count} · step {f.latestStep}</span>
               </label>
             {/each}
           </div>

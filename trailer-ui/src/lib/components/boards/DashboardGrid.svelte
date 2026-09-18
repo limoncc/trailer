@@ -407,7 +407,15 @@ import { onMount } from 'svelte';
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
         <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} />
+          <!-- 单卡渲染失败只在卡内显示错误,不让异常冒泡拖垮整个看板 -->
+          <svelte:boundary onerror={() => {}}>
+            <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} />
+            {#snippet failed(error: unknown)}
+              <div class="h-full flex items-center justify-center text-xs text-destructive text-center px-2">
+                Widget failed to render: {(error as Error)?.message ?? String(error)}
+              </div>
+            {/snippet}
+          </svelte:boundary>
         </div>
 
         <!-- Resize handle -->

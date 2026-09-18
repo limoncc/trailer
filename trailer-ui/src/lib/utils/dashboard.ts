@@ -70,6 +70,13 @@ export interface TextWidget extends WidgetBase {
   step?: LatestOrStep;
 }
 
+/** PCA 3D 聚簇卡(figures 表 kind='pca',按 name 取该组全部 step,卡内滑块浏览) */
+export interface PcaWidget extends WidgetBase {
+  type: 'pca';
+  name: string;
+  step?: LatestOrStep;
+}
+
 export interface TableWidget extends WidgetBase {
   type: 'table';
   tableId: number;
@@ -110,6 +117,7 @@ export type DashWidget =
   | LineWidget
   | HistWidget
   | FigureWidget
+  | PcaWidget
   | TextWidget
   | TableWidget
   | MediaWidget
@@ -156,9 +164,11 @@ export function defaultSize(type: DashWidget['type']): { w: number; h: number } 
     case 'line':
       return { w: DEFAULT_W, h: DEFAULT_H };
     case 'hist':
-      return { w: 12, h: 4 };
+      return { w: 12, h: 8 };
     case 'figure':
       return { w: 12, h: 4 };
+    case 'pca':
+      return { w: 12, h: 7 };
     case 'text':
       return { w: 9, h: 3 };
     case 'table':
@@ -230,6 +240,7 @@ function parseWidget(raw: unknown): DashWidget | null {
       };
     }
     case 'figure':
+    case 'pca':
     case 'text': {
       if (typeof r.name !== 'string' || !r.name) return null;
       return { ...base, type: r.type, name: r.name, step: parseStep(r.step) };
@@ -432,6 +443,8 @@ export function defaultWidgetTitle(w: DashWidget, display?: (m: MetricRef) => st
       return w.context ? `${w.key} [${w.context}]` : w.key;
     case 'figure':
     case 'text':
+      return w.name;
+    case 'pca':
       return w.name;
     case 'table':
       return `Table #${w.tableId}`;
