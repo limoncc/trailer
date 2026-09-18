@@ -37,9 +37,11 @@
     onLabelEdit?: (itemIdx: number, label: string) => void;
     /** info 卡编辑态:双击模型名改显示别名 */
     onModelLabelEdit?: (label: string) => void;
+    /** 全局回放步(Boards 回放);null = 非回放态 */
+    replayStep?: number | null;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, replayStep = null }: Props = $props();
 
   // ─── 视口内懒挂载:G2/Three 实例创建贵(单卡 100ms+),新增卡/整板加载时
   // 只渲染视口附近的卡,滚到附近(300px 预载)才挂载真实内容;一次性闩,之后保持
@@ -283,7 +285,7 @@
   {:else}
     <!-- 完整分布视图可能高于卡片:容器可滚动;≤12 列(约 1/3 板宽)用 compact 模式隐藏坐标轴,挤成竖排不可读 -->
     <div class="h-full overflow-auto">
-      <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact={widget.w <= 12} />
+      <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact={widget.w <= 12} followStep={replayStep} />
     </div>
   {/if}
 {:else if widget.type === 'pca'}
@@ -292,7 +294,7 @@
       PCA data not found
     </div>
   {:else}
-    <PCACard group={pcaGroup} chromeless chartHeight={Math.max(160, heightPx - 120)} />
+    <PCACard group={pcaGroup} chromeless chartHeight={Math.max(160, heightPx - 120)} followStep={replayStep} />
   {/if}
 {:else if widget.type === 'landscape'}
   {#if !landscapeGroup || landscapeGroup.rows.length === 0}
@@ -300,7 +302,7 @@
       Landscape data not found
     </div>
   {:else}
-    <LandscapeCard group={landscapeGroup} chromeless chartHeight={Math.max(160, heightPx - 130)} />
+    <LandscapeCard group={landscapeGroup} chromeless chartHeight={Math.max(160, heightPx - 130)} followStep={replayStep} />
   {/if}
 {:else if widget.type === 'figure'}
   {#if !figureRow}
