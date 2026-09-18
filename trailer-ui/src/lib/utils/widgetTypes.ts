@@ -24,3 +24,29 @@ export const WIDGET_TYPES: WidgetTypeMeta[] = [
   { type: 'table', label: 'Tables', emptyHint: 'Run has no tables yet' },
   { type: 'media', label: 'Media', emptyHint: 'Run has no media yet' },
 ];
+
+/** 各类型 tab 的数据可用性:没数据的 tab 不渲染(9 个 tab 全排开必然换行)。
+ *  info 算「有数据」只要 metrics 或 config 任一存在。 */
+export function widgetTypeAvailability(counts: {
+  metrics: number;
+  config: number;
+  hists: number;
+  pca: number;
+  landscape: number;
+  figures: number;
+  texts: number;
+  tables: number;
+  media: number;
+}): Record<WidgetTypeMeta['type'], boolean> {
+  return {
+    info: counts.metrics > 0 || counts.config > 0,
+    line: counts.metrics > 0,
+    hist: counts.hists > 0,
+    pca: counts.pca > 0,
+    landscape: counts.landscape > 0,
+    figure: counts.figures > 0,
+    text: counts.texts > 0,
+    table: counts.tables > 0,
+    media: counts.media > 0,
+  };
+}
