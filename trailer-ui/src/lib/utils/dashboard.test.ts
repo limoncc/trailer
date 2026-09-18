@@ -230,6 +230,50 @@ describe('defaultWidgetTitle', () => {
   it('pca title uses figure name', () => {
     expect(defaultWidgetTitle({ id: 'w', type: 'pca', name: 'tok_emb', w: 6, h: 8 })).toBe('tok_emb');
   });
+
+  it('landscape title uses figure name', () => {
+    expect(defaultWidgetTitle({ id: 'w', type: 'landscape', name: 'loss_landscape', w: 6, h: 8 })).toBe('loss_landscape');
+  });
+});
+
+describe('landscape widgets', () => {
+  it('parses landscape widget with name and optional step, round-trips', () => {
+    const s = JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'w1', type: 'landscape', name: 'loss_landscape', w: 12, h: 7 },
+        { id: 'w2', type: 'landscape', name: 'proj', step: 10, w: 12, h: 7 },
+      ],
+    });
+    const parsed = parseLayout(s);
+    expect(parsed.widgets).toHaveLength(2);
+    expect(parsed.widgets[0]).toMatchObject({ type: 'landscape', name: 'loss_landscape' });
+    expect(parsed.widgets[1]).toMatchObject({ type: 'landscape', name: 'proj', step: 10 });
+    const again = parseLayout(serializeLayout(parsed));
+    expect(again.widgets[0]).toMatchObject({ type: 'landscape', name: 'loss_landscape' });
+  });
+
+  it('drops landscape widgets without a name', () => {
+    const s = JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'w1', type: 'landscape', w: 12, h: 7 },
+        { id: 'w2', type: 'landscape', name: '', w: 12, h: 7 },
+      ],
+    });
+    expect(parseLayout(s).widgets).toHaveLength(0);
+  });
+
+  it('defaultSize landscape is 12x7', () => {
+    expect(defaultSize('landscape')).toEqual({ w: 12, h: 7 });
+  });
+
+  it('WIDGET_TYPES registers Landscape tab', async () => {
+    const { WIDGET_TYPES } = await import('./widgetTypes');
+    const ls = WIDGET_TYPES.find((t) => t.type === 'landscape');
+    expect(ls).toBeDefined();
+    expect(ls!.label).toBe('Landscape');
+  });
 });
 
 describe('pca widgets', () => {

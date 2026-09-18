@@ -6,6 +6,8 @@
   import G2SpecChart from '$lib/charts/G2SpecChart.svelte';
   import PCACard from '$lib/charts/PCACard.svelte';
   import type { PcaFigureRow, PcaGroup } from '$lib/pca/pcaTypes';
+  import LandscapeCard from '$lib/charts/landscape/LandscapeCard.svelte';
+  import type { LandscapeFigureRow, LandscapeGroup } from '$lib/charts/landscape/landscape';
   import MarkdownRenderer from '$lib/components/MarkdownRenderer.svelte';
   import {
     displayMetricName,
@@ -156,6 +158,19 @@
     return group;
   });
 
+  // ─── landscape:figures 表 kind='landscape',结构与 pca 同法 ───
+  let landscapeGroup = $derived.by(() => {
+    if (widget.type !== 'landscape') return null;
+    const rows: LandscapeFigureRow[] = data.figures
+      .filter((f) => f.kind === 'landscape' && f.name === widget.name)
+      .sort((a, b) => a.step - b.step);
+    const group: LandscapeGroup = {
+      name: widget.name,
+      rows: typeof widget.step === 'number' ? rows.filter((r) => r.step === widget.step) : rows,
+    };
+    return group;
+  });
+
   // ─── figure / text:name(+step,'latest'/缺省取最新) ───
   function resolveByName<T extends { name: string; step: number }>(
     rows: T[],
@@ -254,6 +269,14 @@
     </div>
   {:else}
     <PCACard group={pcaGroup} chromeless chartHeight={Math.max(160, heightPx - 120)} />
+  {/if}
+{:else if widget.type === 'landscape'}
+  {#if !landscapeGroup || landscapeGroup.rows.length === 0}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">
+      Landscape data not found
+    </div>
+  {:else}
+    <LandscapeCard group={landscapeGroup} chromeless chartHeight={Math.max(160, heightPx - 130)} />
   {/if}
 {:else if widget.type === 'figure'}
   {#if !figureRow}

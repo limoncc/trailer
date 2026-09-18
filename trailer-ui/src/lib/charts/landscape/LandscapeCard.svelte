@@ -19,9 +19,13 @@
     onMoveDown?: () => void;
     onRemove?: () => void;
     compact?: boolean;
+    /** 嵌入宿主容器(如 Boards 卡片)时:去掉自带边框/阴影/头部行,只留滑块+视图切换+图 */
+    chromeless?: boolean;
+    /** 覆盖图表高度(缺省 compact ? 300 : 400) */
+    chartHeight?: number;
   }
 
-  let { group, onMoveUp, onMoveDown, onRemove, compact = false }: Props = $props();
+  let { group, onMoveUp, onMoveDown, onRemove, compact = false, chromeless = false, chartHeight }: Props = $props();
 
   type ViewMode = 'heat' | 'contour' | 'both' | 'surf';
   const VIEW_TABS: [ViewMode, string][] = [
@@ -129,8 +133,9 @@
   });
 </script>
 
-<div class="rounded-xl border border-border bg-card text-card-foreground shadow-sm">
+<div class="{chromeless ? '' : 'rounded-xl border border-border bg-card text-card-foreground shadow-sm'}">
   <!-- header -->
+  {#if !chromeless}
   <div class="flex items-center gap-2 px-3 py-2">
     <button
       type="button"
@@ -154,9 +159,10 @@
       <button type="button" class="text-xs text-muted-foreground hover:text-destructive" onclick={onRemove} aria-label="Remove">✕</button>
     {/if}
   </div>
+  {/if}
 
-  {#if expanded}
-    <div class="px-3 pb-3 space-y-3">
+  {#if expanded || chromeless}
+    <div class="{chromeless ? 'space-y-2' : 'px-3 pb-3 space-y-3'}">
       <!-- step 滑块（1 step 时禁用但保留高度，与多 step 卡片对齐） -->
       <div class="flex items-center gap-3 px-1 {group.rows.length < 2 ? 'opacity-40' : ''}">
         <span class="shrink-0 text-xs text-muted-foreground font-medium">Step {steps[idx]}</span>
@@ -273,7 +279,7 @@
         <LandscapeSurface
           bind:this={surfaceChart}
           data={current}
-          height={compact ? 300 : 400}
+          height={chartHeight ?? (compact ? 300 : 400)}
           keepView
           {wireframe}
           {cmap}
@@ -282,7 +288,7 @@
       {:else}
         <LandscapeHeatmap
           data={current}
-          height={compact ? 300 : 400}
+          height={chartHeight ?? (compact ? 300 : 400)}
           contourLevels={view === 'contour' || view === 'both' ? levels : []}
           contourRings={view === 'contour' || view === 'both' ? rings : []}
           fillHeat={view !== 'contour'}
