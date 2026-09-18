@@ -141,6 +141,11 @@
     }
   });
 
+  // 已选 chip 的公共样式(点击整颗 = 取消该项)
+  const chipCls =
+    'inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full border border-border bg-accent/40 text-xs hover:bg-accent/70 max-w-full text-left';
+  const chipLabelCls = 'truncate';
+
   function confirm() {
     switch (activeType) {
       case 'line':
@@ -233,6 +238,34 @@
           </div>
           <span class="text-xs text-muted-foreground shrink-0">{selectedConfigPaths.length + selectedInfoMetrics.length} selected</span>
         </div>
+        <!-- 已选区域:置顶汇总,点 chip 即取消,免去滚动查找 -->
+        {#if selectedFixed.length > 0 || selectedConfigPaths.length > 0 || selectedInfoMetrics.length > 0}
+          <div class="sticky top-0 z-10 bg-card pb-2 mb-2 border-b border-border/60">
+            <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1 font-mono">
+              Selected ({selectedFixed.length + selectedConfigPaths.length + selectedInfoMetrics.length})
+            </div>
+            <div class="flex flex-wrap gap-1 max-h-24 overflow-auto">
+              {#each selectedFixed as src (src)}
+                <button class={chipCls} title="Click to remove" onclick={() => (selectedFixed = toggleIn(selectedFixed, src))}>
+                  <span class={chipLabelCls}>{src === 'status' ? 'Model status' : src === 'cost' ? 'Training cost' : src}</span>
+                  <X size={10} class="shrink-0" />
+                </button>
+              {/each}
+              {#each selectedConfigPaths as path (path)}
+                <button class={chipCls} title="Click to remove" onclick={() => (selectedConfigPaths = toggleIn(selectedConfigPaths, path))}>
+                  <span class={chipLabelCls}>{infoLabels[path]?.trim() || path}</span>
+                  <X size={10} class="shrink-0" />
+                </button>
+              {/each}
+              {#each selectedInfoMetrics as m (metricId(m))}
+                <button class={chipCls} title="Click to remove" onclick={() => toggleInfoMetric(m)}>
+                  <span class={chipLabelCls}>{displayName(m)}</span>
+                  <X size={10} class="shrink-0" />
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
         <!-- status header + cost cell(model/status/step/elapsed 也可以只勾 status 作为独立状态卡) -->
         <div class="space-y-0.5 mb-4">
           <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50 cursor-pointer text-xs">
@@ -345,6 +378,19 @@
           </div>
           <span class="text-xs text-muted-foreground shrink-0">{selectedMetrics.length} selected</span>
         </div>
+        <!-- 已选区域:置顶汇总,点 chip 即取消 -->
+        {#if selectedMetrics.length > 0}
+          <div class="sticky top-0 z-10 bg-card pb-2 mb-2 border-b border-border/60">
+            <div class="flex flex-wrap gap-1 max-h-24 overflow-auto">
+              {#each selectedMetrics as m (metricId(m))}
+                <button class={chipCls} title="Click to remove" onclick={() => toggleMetric(m)}>
+                  <span class={chipLabelCls}>{displayName(m)}</span>
+                  <X size={10} class="shrink-0" />
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
         <div class="space-y-3">
           {#each metricGroups as g (g.context)}
             <div>
@@ -364,6 +410,15 @@
           {/each}
         </div>
       {:else if activeType === 'hist'}
+        {#if selectedHistId}
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground font-mono">Selected</span>
+            <button class={chipCls} title="Click to clear" onclick={() => (selectedHistId = '')}>
+              <span class={chipLabelCls}>{selectedHistId}</span>
+              <X size={10} class="shrink-0" />
+            </button>
+          </div>
+        {/if}
         {#if histGroups.length === 0}
           <p class="text-xs text-muted-foreground text-center py-6">Run has no histograms yet</p>
         {:else}
@@ -378,6 +433,15 @@
           </div>
         {/if}
       {:else if activeType === 'figure'}
+        {#if selectedName}
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground font-mono">Selected</span>
+            <button class={chipCls} title="Click to clear" onclick={() => (selectedName = '')}>
+              <span class={chipLabelCls}>{selectedName}</span>
+              <X size={10} class="shrink-0" />
+            </button>
+          </div>
+        {/if}
         {#if figureNames.length === 0}
           <p class="text-xs text-muted-foreground text-center py-6">Run has no figures yet</p>
         {:else}
@@ -392,6 +456,15 @@
           </div>
         {/if}
       {:else if activeType === 'text'}
+        {#if selectedName}
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground font-mono">Selected</span>
+            <button class={chipCls} title="Click to clear" onclick={() => (selectedName = '')}>
+              <span class={chipLabelCls}>{selectedName}</span>
+              <X size={10} class="shrink-0" />
+            </button>
+          </div>
+        {/if}
         {#if textNames.length === 0}
           <p class="text-xs text-muted-foreground text-center py-6">Run has no text entries yet</p>
         {:else}
@@ -406,6 +479,15 @@
           </div>
         {/if}
       {:else if activeType === 'table'}
+        {#if selectedNumericId !== null}
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground font-mono">Selected</span>
+            <button class={chipCls} title="Click to clear" onclick={() => (selectedNumericId = null)}>
+              <span class={chipLabelCls}>{boardsData.tables.find((t) => t.id === selectedNumericId)?.name ?? `#${selectedNumericId}`}</span>
+              <X size={10} class="shrink-0" />
+            </button>
+          </div>
+        {/if}
         {#if boardsData.tables.length === 0}
           <p class="text-xs text-muted-foreground text-center py-6">Run has no tables yet</p>
         {:else}
@@ -420,6 +502,15 @@
           </div>
         {/if}
       {:else if activeType === 'media'}
+        {#if selectedNumericId !== null}
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground font-mono">Selected</span>
+            <button class={chipCls} title="Click to clear" onclick={() => (selectedNumericId = null)}>
+              <span class={chipLabelCls}>{boardsData.media.find((m) => m.id === selectedNumericId)?.name ?? `#${selectedNumericId}`}</span>
+              <X size={10} class="shrink-0" />
+            </button>
+          </div>
+        {/if}
         {#if boardsData.media.length === 0}
           <p class="text-xs text-muted-foreground text-center py-6">Run has no media yet</p>
         {:else}
