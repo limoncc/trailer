@@ -386,6 +386,22 @@ describe('info widgets', () => {
     expect((again.widgets[0] as any).modelLabel).toBe('My Model');
   });
 
+  it('parses hFixed (manual height) only as true', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'a', type: 'info', w: 9, h: 8, items: [{ src: 'cost' }], hFixed: true },
+        { id: 'b', type: 'info', w: 9, h: 6, items: [{ src: 'cost' }], hFixed: false },
+        { id: 'c', type: 'info', w: 9, h: 6, items: [{ src: 'cost' }] },
+      ],
+    }));
+    expect((parsed.widgets[0] as any).hFixed).toBe(true);
+    expect((parsed.widgets[1] as any).hFixed).toBeUndefined();
+    expect((parsed.widgets[2] as any).hFixed).toBeUndefined();
+    const again = parseLayout(serializeLayout(parsed));
+    expect((again.widgets[0] as any).hFixed).toBe(true);
+  });
+
   it('defaultSize and defaultWidgetTitle', () => {
     expect(defaultSize('info')).toEqual({ w: 9, h: 6 });
     expect(defaultWidgetTitle({ id: 'i', type: 'info', items: [], w: 9, h: 6 })).toBe('Training Info');

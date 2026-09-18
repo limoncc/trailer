@@ -102,6 +102,8 @@ export interface InfoWidget extends WidgetBase {
   modelLabel?: string;
   /** 模型名的 config 点路径;缺省依次尝试 model_name / train_model / model */
   modelPath?: string;
+  /** 用户手动拖拽过高度:true = 高度取手动值(下限仍为内容自适应高度),false = 纯自适应 */
+  hFixed?: boolean;
 }
 
 export type DashWidget =
@@ -274,6 +276,7 @@ function parseWidget(raw: unknown): DashWidget | null {
         modelPath: typeof r.modelPath === 'string' && r.modelPath ? r.modelPath : undefined,
         modelLabel:
           typeof r.modelLabel === 'string' && r.modelLabel.trim() ? r.modelLabel.trim() : undefined,
+        hFixed: r.hFixed === true ? true : undefined,
         currency: r.currency === 'cny' || r.currency === 'usd' ? r.currency : undefined,
       };
     }
