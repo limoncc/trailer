@@ -136,13 +136,17 @@ import { onMount } from 'svelte';
     return resizing?.id === widget.id ? resizing.w : widget.w;
   }
   function effectiveH(widget: DashWidget): number {
-    // info 卡高度贴合内容(头部条 + 瓦片换行),不留空白也不出滚动条;
-    // 优先于 resizing —— 缩放手柄对 info 卡只调宽度
+    // info 卡默认高度贴合内容(头部条 + 瓦片换行),不留空白也不出滚动条;
+    // 用户拖拽过(hFixed)或正在拖拽时取手动值,下限仍为自适应高度(拖不出滚动条)
     if (widget.type === 'info') {
       const cardW = gridW > 0 ? (gridW * widget.w) / COLS : 0;
-      if (cardW > 0) return infoRowsNeeded(widget, cardW, ROW_PX, GAP_PX);
+      const auto = cardW > 0 ? infoRowsNeeded(widget, cardW, ROW_PX, GAP_PX) : widget.h;
+      const manual = resizing?.id === widget.id ? resizing.h : widget.h;
+      if (resizing?.id === widget.id || widget.hFixed) return Math.max(auto, manual);
+      return auto;
     }
-    return widget.h;
+    // 其余类型:拖拽中实时预览高度(#46 起丢失导致拖高度无反馈,#51 恢复)
+    return resizing?.id === widget.id ? resizing.h : widget.h;
   }
 
   function onResizeStart(e: MouseEvent, widget: DashWidget) {
@@ -170,7 +174,13 @@ import { onMount } from 'svelte';
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       if (resizing) {
-        onChange(widgets.map((w) => (w.id === resizing!.id ? { ...w, w: resizing!.w, h: resizing!.h } : w)));
+        onChange(
+          widgets.map((w) =>
+            w.id === resizing!.id
+              ? { ...w, w: resizing!.w, h: resizing!.h, ...(w.type === 'info' ? { hFixed: true } : {}) }
+              : w
+          )
+        );
       }
       resizing = null;
     };
