@@ -6,7 +6,7 @@
   import { filterMetrics, groupMetricsByContext, metricId, type MetricOption } from '$lib/utils/metricGroups';
   import type { DashWidget, InfoItem, RunInfo } from '$lib/utils/dashboard';
   import { flattenConfigKeys } from '$lib/utils/infoCard';
-  import { WIDGET_TYPES } from '$lib/utils/widgetTypes';
+  import { WIDGET_TYPES, widgetTypeAvailability } from '$lib/utils/widgetTypes';
   import type { BoardsData } from './boardsData';
 
   interface Props {
@@ -68,6 +68,21 @@
   );
 
   const configKeys = $derived(flattenConfigKeys(runInfo?.config));
+  // tab 按数据可用性过滤(9 个全排开必换行);编辑已有卡时其类型始终保留
+  const typeAvail = $derived(
+    widgetTypeAvailability({
+      metrics: metricOptions.length,
+      config: configKeys.length,
+      hists: boardsData.histograms.length,
+      pca: boardsData.figures.filter((f) => f.kind === 'pca').length,
+      landscape: boardsData.figures.filter((f) => f.kind === 'landscape').length,
+      figures: boardsData.figures.filter((f) => f.kind === 'png' || f.kind === 'g2').length,
+      texts: boardsData.texts.length,
+      tables: boardsData.tables.length,
+      media: boardsData.media.length,
+    })
+  );
+  const visibleTypes = $derived(WIDGET_TYPES.filter((t) => typeAvail[t.type] || t.type === initWidget?.type));
   const filteredConfigKeys = $derived(
     query.trim() ? configKeys.filter((k) => k.toLowerCase().includes(query.trim().toLowerCase())) : configKeys
   );
@@ -93,6 +108,13 @@
 
   const filteredMetrics = $derived(query.trim() ? filterMetrics(metricOptions, query.trim()) : metricOptions);
   const metricGroups = $derived(groupMetricsByContext(filteredMetrics, { rootLabel: 'root' }));
+
+  // 默认 tab 落到第一个有数据的类型(boardsData 异步到达/新建时 line 无数据等情形)
+  $effect(() => {
+    if (!initWidget && !typeAvail[activeType] && visibleTypes.length > 0) {
+      activeType = visibleTypes[0].type;
+    }
+  });
 
   // hist 分组(与 HistogramExplorer 同规则 key[context])
   const histGroups = $derived.by(() => {
@@ -222,9 +244,9 @@
       </button>
     </div>
 
-    <!-- 类型 tabs -->
+    <!-- 类型 tabs(只显示有数据的类型) -->
     <div class="flex gap-1 px-4 pt-3 flex-wrap">
-      {#each WIDGET_TYPES as t (t.type)}
+      {#each visibleTypes as t (t.type)}
         <button
           class="px-3 py-1.5 text-xs rounded-md transition-colors {activeType === t.type
             ? 'bg-primary text-primary-foreground'

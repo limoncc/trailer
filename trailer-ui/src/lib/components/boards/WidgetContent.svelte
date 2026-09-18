@@ -41,6 +41,27 @@
 
   let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit }: Props = $props();
 
+  // ─── 视口内懒挂载:G2/Three 实例创建贵(单卡 100ms+),新增卡/整板加载时
+  // 只渲染视口附近的卡,滚到附近(300px 预载)才挂载真实内容;一次性闩,之后保持
+  // 挂载(指标轮询持续更新)。info 卡轻量,不参与懒挂载。
+  // 400ms 轮询 rect 直到命中——不依赖 scroll/IO 事件(嵌入式环境事件不可靠),
+  // 未命中卡片只有个位数,开销可忽略。 ───
+  let hostEl = $state<HTMLElement | null>(null);
+  let inView = $state(false);
+  $effect(() => {
+    if (!hostEl || inView || widget.type === 'info') return;
+    const MARGIN = 300;
+    const check = () => {
+      if (inView || !hostEl) return;
+      const r = hostEl.getBoundingClientRect();
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      if (r.bottom > -MARGIN && r.top < vh + MARGIN) inView = true;
+    };
+    check();
+    const timer = setInterval(check, 400);
+    return () => clearInterval(timer);
+  });
+
   const PALETTE = ['#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f59e0b', '#6366f1'];
 
   function seriesName(key: string, context: string): string {
@@ -234,7 +255,10 @@
   });
 </script>
 
-{#if widget.type === 'line'}
+<div bind:this={hostEl} class="h-full">
+{#if widget.type !== 'info' && !inView}
+  <!-- 未进入视口:占位(卡片高度由网格保证),滚到附近再挂载重型内容 -->
+{:else if widget.type === 'line'}
   {#if lineData.length === 0}
     <div class="h-full flex items-center justify-center text-xs text-muted-foreground">
       Waiting for metric data…
@@ -257,9 +281,9 @@
       No histogram frames yet
     </div>
   {:else}
-    <!-- 完整分布视图可能高于卡片:容器可滚动,窄卡交由 compact 模式精简坐标轴 -->
+    <!-- 完整分布视图可能高于卡片:容器可滚动;≤12 列(约 1/3 板宽)用 compact 模式隐藏坐标轴,挤成竖排不可读 -->
     <div class="h-full overflow-auto">
-      <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact={widget.w < 12} />
+      <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact={widget.w <= 12} />
     </div>
   {/if}
 {:else if widget.type === 'pca'}
@@ -369,3 +393,4 @@
 {:else if widget.type === 'info'}
   <InfoCard {widget} {metrics} {running} {runState} {runInfo} {editing} {onLabelEdit} {onModelLabelEdit} />
 {/if}
+</div>

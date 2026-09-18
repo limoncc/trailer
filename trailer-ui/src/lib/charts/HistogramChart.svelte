@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { Chart } from '@antv/g2';
-  import { adaptiveTicks, onChartThemeChange, themeOpts } from './chartTheme.svelte';
+  import { adaptiveTicks, formatAxisTick, onChartThemeChange, themeOpts } from './chartTheme.svelte';
 
   export interface HistogramPoint {
     run_id: string;
@@ -25,7 +25,7 @@
 
   const STAT_COLORS = { mean: '#3b82f6', std: '#22c55e', skewness: '#f97316' };
   const EXTREME_COLORS = { max: '#ef4444', min: '#06b6d4', p5: '#94a3b8', p95: '#94a3b8' };
-  const FMT = (v: number) => { const s = String(v); const dot = s.indexOf('.'); return dot === -1 || s.length - dot - 1 <= 6 ? s : v.toFixed(6); };
+  const FMT = (v: number) => formatAxisTick(v);
 
   interface Props { data: HistogramPoint[]; key: string; context?: string; compact?: boolean; }
   let { data, key, context = '', compact = false }: Props = $props();
@@ -169,7 +169,18 @@
       type: 'interval', data: barData,
       encode: { x: 'v', y: 'count', color: 'count' },
       scale: { color: { palette: 'blues' }, x: { nice: true } },
-      axis: compact ? { x: false, y: false } : { x: { title: 'Value', labelAutoHide: true, labelFontSize: 10, tickCount: adaptiveTicks(barContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Count', tickCount: 4 } },
+      axis: compact ? { x: false, y: false } : {
+        x: {
+          title: 'Value', labelFontSize: 10, labelAutoHide: true,
+          // band 标度会给每个 bucket 出标签(24+ 个挤成竖排):抽稀到约 6 个
+          labelFormatter: (d: unknown, i: number, data: unknown[]) => {
+            const every = Math.max(1, Math.ceil((data?.length ?? 0) / 6));
+            return i % every === 0 ? formatAxisTick(Number(d)) : '';
+          },
+          tickCount: adaptiveTicks(barContainer?.clientWidth ?? 400, 70, 10),
+        },
+        y: { title: 'Count', tickCount: 4 },
+      },
       tooltip: { title: 'range', items: [{ field: 'count', name: 'Count', valueFormatter: FMT }] },
       legend: false, style: { radius: 2 },
     });
@@ -182,7 +193,7 @@
       type: 'line', data: trend,
       encode: { x: 'step', y: 'v', color: 'm' },
       scale: { color: { domain: ['mean', 'std', 'skewness'], range: [STAT_COLORS.mean, STAT_COLORS.std, STAT_COLORS.skewness] }, y: { nice: true } },
-      axis: compact ? { x: false, y: false } : { x: { title: 'Step', tickCount: adaptiveTicks(trendContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Value', tickCount: 4 } },
+      axis: compact ? { x: false, y: false } : { x: { title: 'Step', tickCount: adaptiveTicks(trendContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Value', labelFormatter: formatAxisTick, tickCount: 4 } },
       legend: compact ? false : { color: { title: null, position: 'top', layout: { justifyContent: 'center' } } },
       tooltip: { crosshairs: true, items: [{ field: 'v', name: 'Value', valueFormatter: FMT }] },
       annotations: [{ type: 'lineX', data: [selectedIndex + 1], style: { stroke: '#94a3b8', lineDash: [4, 4], lineWidth: 1 } }],
@@ -199,7 +210,7 @@
           type: 'line',
           encode: { x: 'step', y: 'v', color: 'm' },
           scale: { color: { domain: ['max', 'min'], range: [EXTREME_COLORS.max, EXTREME_COLORS.min] }, y: { nice: true } },
-          axis: compact ? { x: false, y: false } : { x: { title: 'Step', tickCount: adaptiveTicks(extremeContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Value', tickCount: 4 } },
+          axis: compact ? { x: false, y: false } : { x: { title: 'Step', tickCount: adaptiveTicks(extremeContainer?.clientWidth ?? 400, 70, 10) }, y: { title: 'Value', labelFormatter: formatAxisTick, tickCount: 4 } },
           legend: compact ? false : { color: { title: null, position: 'top', layout: { justifyContent: 'center' } } },
           tooltip: { crosshairs: true, items: [{ field: 'v', name: 'Value', valueFormatter: FMT }] },
         },
