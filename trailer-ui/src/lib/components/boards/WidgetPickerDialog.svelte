@@ -221,6 +221,18 @@
 
     <div class="flex-1 overflow-auto px-4 py-3">
       {#if activeType === 'info'}
+        <!-- 搜索:同一输入框同时过滤 config 超参与指标列表 -->
+        <div class="flex items-center gap-2 mb-3">
+          <div class="relative flex-1">
+            <Search size={13} class="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              bind:value={query}
+              placeholder="Filter config & metrics…"
+              class="w-full pl-7 pr-2 py-1.5 text-xs border border-border rounded-md bg-background"
+            />
+          </div>
+          <span class="text-xs text-muted-foreground shrink-0">{selectedConfigPaths.length + selectedInfoMetrics.length} selected</span>
+        </div>
         <!-- status header + cost cell(model/status/step/elapsed 也可以只勾 status 作为独立状态卡) -->
         <div class="space-y-0.5 mb-4">
           <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50 cursor-pointer text-xs">
@@ -276,7 +288,7 @@
         <!-- 超参数 -->
         <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1 font-mono">Hyperparameters (config)</div>
         {#if filteredConfigKeys.length === 0}
-          <p class="text-xs text-muted-foreground text-center py-3">Run has no config entries</p>
+          <p class="text-xs text-muted-foreground text-center py-3">{query.trim() ? 'No matching config entries' : 'Run has no config entries'}</p>
         {:else}
           <div class="space-y-0.5 mb-4 max-h-48 overflow-auto">
             {#each filteredConfigKeys as key (key)}
@@ -300,7 +312,7 @@
         <!-- 当前指标 -->
         <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1 font-mono">Latest metrics</div>
         {#if infoMetrics.length === 0}
-          <p class="text-xs text-muted-foreground text-center py-3">Run has no metrics yet</p>
+          <p class="text-xs text-muted-foreground text-center py-3">{query.trim() ? 'No matching metrics' : 'Run has no metrics yet'}</p>
         {:else}
           <div class="space-y-0.5 max-h-48 overflow-auto">
             {#each infoMetrics as m (metricId(m))}
