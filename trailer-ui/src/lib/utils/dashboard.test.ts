@@ -361,6 +361,31 @@ describe('info widgets', () => {
     expect((again.widgets[0] as any).currency).toBe('cny');
   });
 
+  it('parses cost item label and widget modelLabel (display rename)', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        {
+          id: 'i1', type: 'info', w: 9, h: 6,
+          items: [{ src: 'cost', label: 'GPU 花费' }, { src: 'status' }],
+          modelLabel: 'My Model',
+        },
+        { id: 'i2', type: 'info', w: 9, h: 6, items: [{ src: 'cost' }] },
+      ],
+    }));
+    expect((parsed.widgets[0] as any).items[0]).toEqual({ src: 'cost', label: 'GPU 花费' });
+    expect((parsed.widgets[0] as any).modelLabel).toBe('My Model');
+    // 空白 modelLabel 丢弃
+    const blank = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [{ id: 'i', type: 'info', w: 9, h: 6, items: [{ src: 'cost' }], modelLabel: '   ' }],
+    }));
+    expect((blank.widgets[0] as any).modelLabel).toBeUndefined();
+    const again = parseLayout(serializeLayout(parsed));
+    expect((again.widgets[0] as any).items[0]).toEqual({ src: 'cost', label: 'GPU 花费' });
+    expect((again.widgets[0] as any).modelLabel).toBe('My Model');
+  });
+
   it('defaultSize and defaultWidgetTitle', () => {
     expect(defaultSize('info')).toEqual({ w: 9, h: 6 });
     expect(defaultWidgetTitle({ id: 'i', type: 'info', items: [], w: 9, h: 6 })).toBe('Training Info');
@@ -425,6 +450,15 @@ describe('computeSnapSeams', () => {
   it('snap toward empty space squares but keeps the border', () => {
     const seams = computeSnapSeams([line('a', 6, 4, ['up'])]);
     expect(seams.get('a')).toEqual({ deborder: [], square: ['up'] });
+  });
+
+  it('up snap squares ALL cards above, not just the first', () => {
+    // a+b+f 填满一行,c(宽14)跨在 a|b 拼缝正下方:两卡的底角都要改直角
+    const seams = computeSnapSeams([line('a', 6, 3), line('b', 8, 3), line('f', 22, 3), line('c', 14, 3, ['up'])]);
+    expect(seams.get('c')).toEqual({ deborder: ['up'], square: ['up'] });
+    expect(seams.get('a')).toEqual({ deborder: [], square: ['down'] });
+    expect(seams.get('b')).toEqual({ deborder: [], square: ['down'] });
+    expect(seams.get('f')).toEqual({ deborder: [], square: [] });
   });
 
   it('up snap squares the card above downward', () => {

@@ -50,8 +50,6 @@
   let infoGpus = $state<number | null>(initInfo?.gpus ?? null);
   let infoUnitPrice = $state<number | null>(initInfo?.unitPrice ?? null);
   let infoCurrency = $state<'usd' | 'cny'>(initInfo?.currency === 'cny' ? 'cny' : 'usd');
-  // 模型名 config 路径(空 = 自动链 model_name/train_model/model)
-  let infoModelPath = $state(initInfo?.modelPath ?? '');
   // 自定义标签(config 按 path、metric 按 metricId),空 = 用默认名
   let infoLabels = $state<Record<string, string>>(
     initInfo
@@ -152,7 +150,11 @@
         const items: InfoItem[] = [];
         for (const src of selectedFixed) {
           if (src === 'status') items.push({ src: 'status' });
-          else if (src === 'cost') items.push({ src: 'cost' });
+          else if (src === 'cost') {
+            // 重编辑时保留已有的自定义 cost label(改名在卡片上双击完成)
+            const prev = initInfo?.items.find((i) => i.src === 'cost');
+            items.push({ src: 'cost', label: prev && prev.src === 'cost' ? prev.label : undefined });
+          }
         }
         for (const path of selectedConfigPaths) {
           const label = infoLabels[path]?.trim();
@@ -163,8 +165,6 @@
           items.push({ src: 'metric', key: m.key, context: m.context, label: label || undefined });
         }
         const content: Record<string, unknown> = { items, currency: infoCurrency };
-        const modelPath = infoModelPath.trim();
-        if (modelPath) content.modelPath = modelPath;
         if (infoGpus !== null && Number.isFinite(infoGpus) && infoGpus > 0) content.gpus = Math.round(infoGpus);
         if (infoUnitPrice !== null && Number.isFinite(infoUnitPrice) && infoUnitPrice >= 0) {
           content.unitPrice = infoUnitPrice;
@@ -227,13 +227,6 @@
             <input type="checkbox" checked={selectedFixed.includes('status')} onchange={() => (selectedFixed = toggleIn(selectedFixed, 'status'))} class="accent-primary" />
             <span>Model status</span>
           </label>
-          {#if selectedFixed.includes('status')}
-            <input
-              placeholder="model name config path (auto: model_name / train_model / model)"
-              bind:value={infoModelPath}
-              class="ml-6 mb-1 px-1.5 py-0.5 text-xs border border-border rounded bg-background w-72 max-w-full"
-            />
-          {/if}
           <div class="px-2 py-1.5 rounded hover:bg-accent/50">
             <label class="flex items-center gap-2 cursor-pointer text-xs">
               <input type="checkbox" checked={selectedFixed.includes('cost')} onchange={() => (selectedFixed = toggleIn(selectedFixed, 'cost'))} class="accent-primary" />

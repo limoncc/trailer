@@ -242,6 +242,12 @@ describe('formatCell', () => {
     expect(row.value).toBe('2.00 GPU·h');
   });
 
+  it('renders cost cell with custom label', () => {
+    const row = formatCell({ ...base, item: { src: 'cost', label: 'GPU 花费' }, running: true });
+    expect(row.label).toBe('GPU 花费');
+    expect(row.value).toBe('2.00 GPU·h');
+  });
+
   it('renders config cells via resolveConfigValue', () => {
     const row = formatCell({
       ...base,

@@ -22,13 +22,13 @@
     running?: boolean;
     runState?: string;
     runInfo?: RunInfo;
-    /** 编辑态:瓦片 label 双击改名,模型名双击改 config 路径 */
+    /** 编辑态:瓦片 label 双击改名,模型名双击改显示别名(不动 config 原始值) */
     editing?: boolean;
     onLabelEdit?: (itemIdx: number, label: string) => void;
-    onModelPathEdit?: (path: string) => void;
+    onModelLabelEdit?: (label: string) => void;
   }
 
-  let { widget, metrics, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelPathEdit }: Props = $props();
+  let { widget, metrics, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit }: Props = $props();
 
   // 双击 label 改名(编辑态):Enter/失焦提交,Escape 取消
   let editIdx = $state<number | null>(null);
@@ -46,16 +46,16 @@
     editIdx = null;
   }
 
-  // 双击模型名改 modelPath(编辑态):空 = 回退自动链 model_name/train_model/model
-  let editingModelPath = $state(false);
-  let modelPathDraft = $state('');
-  function startModelPathEdit() {
-    modelPathDraft = widget.modelPath ?? '';
-    editingModelPath = true;
+  // 双击模型名改显示别名(编辑态):不改 config 原始值;清空 = 回退 config 解析名
+  let editingModelName = $state(false);
+  let modelNameDraft = $state('');
+  function startModelRename() {
+    modelNameDraft = widget.modelLabel ?? '';
+    editingModelName = true;
   }
-  function commitModelPath() {
-    if (editingModelPath) onModelPathEdit?.(modelPathDraft.trim());
-    editingModelPath = false;
+  function commitModelName() {
+    if (editingModelName) onModelLabelEdit?.(modelNameDraft.trim());
+    editingModelName = false;
   }
 
   // 卡片实际宽度:窄卡头部条右列换行到下一行,不与模型名抢宽度
@@ -96,7 +96,9 @@
       }))
   );
 
-  const modelName = $derived(modelNameFromConfig(runInfo?.config, widget.modelPath) ?? '—');
+  const resolvedModelName = $derived(modelNameFromConfig(runInfo?.config, widget.modelPath) ?? '—');
+  // 显示别名优先;原始 config 名不被修改,tooltip 里可见
+  const modelName = $derived(widget.modelLabel ? widget.modelLabel : resolvedModelName);
   const statusText = $derived(statusFromRunState(running ? 'running' : runState));
   // 配色与 run 列表页一致(running 绿/finished 灰/crashed 浅红),running 绿点闪烁
   const statusDot = $derived(
@@ -135,23 +137,23 @@
             {/if}
             <span class="relative inline-flex w-2 h-2 rounded-full {statusDot}"></span>
           </span>
-          {#if editing && editingModelPath}
+          {#if editing && editingModelName}
             <input
               use:focusOnMount
-              bind:value={modelPathDraft}
-              onblur={commitModelPath}
+              bind:value={modelNameDraft}
+              onblur={commitModelName}
               onkeydown={(e) => {
-                if (e.key === 'Enter') commitModelPath();
-                if (e.key === 'Escape') editingModelPath = false;
+                if (e.key === 'Enter') commitModelName();
+                if (e.key === 'Escape') editingModelName = false;
               }}
-              placeholder="config path: model_name / train_model / model"
+              placeholder={resolvedModelName}
               class="flex-1 min-w-0 px-1 py-0.5 text-[11px] border border-border rounded bg-background"
             />
           {:else}
             <span
               class="font-semibold truncate {editing ? 'cursor-text hover:text-foreground underline decoration-dotted' : ''}"
-              title="{modelName} (config path: {widget.modelPath ?? 'auto'}){editing ? ' — double-click to change' : ''}"
-              ondblclick={editing ? () => startModelPathEdit() : undefined}
+              title="{modelName}{widget.modelLabel ? ` (renamed, original: ${resolvedModelName})` : ''}{editing ? ' — double-click to rename' : ''}"
+              ondblclick={editing ? () => startModelRename() : undefined}
             >
               {modelName}
             </span>
@@ -183,7 +185,7 @@
       {#each cellDefs as d, i (i)}
         <div class="bg-card p-2.5 flex flex-col justify-center min-h-[64px]">
           <div class="text-[11px] text-muted-foreground truncate" title={d.cell.label}>
-            {#if editing && editIdx === d.idx && (d.item.src === 'config' || d.item.src === 'metric')}
+            {#if editing && editIdx === d.idx && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost')}
               <input
                 use:focusOnMount
                 bind:value={draft}
@@ -196,9 +198,9 @@
               />
             {:else}
               <span
-                class="{editing && (d.item.src === 'config' || d.item.src === 'metric') ? 'cursor-text hover:text-foreground underline decoration-dotted' : ''}"
+                class="{editing && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost') ? 'cursor-text hover:text-foreground underline decoration-dotted' : ''}"
                 title="{d.cell.label} (double-click to rename)"
-                ondblclick={editing && (d.item.src === 'config' || d.item.src === 'metric') ? () => startLabelEdit(d.idx, d.item.label ?? '') : undefined}
+                ondblclick={editing && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost') ? () => startLabelEdit(d.idx, d.item.label ?? '') : undefined}
               >
                 {d.cell.label}
               </span>
