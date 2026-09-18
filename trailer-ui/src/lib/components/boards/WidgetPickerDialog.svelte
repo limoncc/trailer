@@ -22,24 +22,27 @@
 
   let { editWidget = null, metricOptions, boardsData, runInfo, onConfirm, onClose }: Props = $props();
 
-  // 由父组件条件挂载(每次打开都是新实例),初始状态直接取自 props,无需 effect 同步
-  let activeType = $state<DashWidget['type']>(editWidget?.type ?? 'line');
+  // 由父组件条件挂载(每次打开都是新实例),初始状态直接取自 props。
+  // 有意只读 editWidget 的初始值一次(不参与响应性)——设计如此,显式忽略警告
+  // svelte-ignore state_referenced_locally
+  const initWidget = editWidget;
+  let activeType = $state<DashWidget['type']>(initWidget?.type ?? 'line');
   let query = $state('');
-  let selectedMetrics = $state<MetricRef[]>(editWidget?.type === 'line' ? [...editWidget.metrics] : []);
+  let selectedMetrics = $state<MetricRef[]>(initWidget?.type === 'line' ? [...initWidget.metrics] : []);
   let selectedHistId = $state(
-    editWidget?.type === 'hist' ? (editWidget.context ? `${editWidget.key}[${editWidget.context}]` : editWidget.key) : ''
+    initWidget?.type === 'hist' ? (initWidget.context ? `${initWidget.key}[${initWidget.context}]` : initWidget.key) : ''
   );
   let selectedName = $state(
-    editWidget && (editWidget.type === 'figure' || editWidget.type === 'text') ? editWidget.name : ''
+    initWidget && (initWidget.type === 'figure' || initWidget.type === 'text') ? initWidget.name : ''
   );
   let selectedNumericId = $state<number | null>(
-    editWidget?.type === 'table' ? editWidget.tableId : editWidget?.type === 'media' ? editWidget.mediaId : null
+    initWidget?.type === 'table' ? initWidget.tableId : initWidget?.type === 'media' ? initWidget.mediaId : null
   );
 
   // ─── info 卡选中态(编辑时按 items 预勾选) ───
-  const initInfo = editWidget?.type === 'info' ? editWidget : null;
+  const initInfo = initWidget?.type === 'info' ? initWidget : null;
   let selectedFixed = $state<string[]>(
-    initInfo ? initInfo.items.filter((i) => i.src === 'step' || i.src === 'elapsed' || i.src === 'cost').map((i) => i.src) : []
+    initInfo ? initInfo.items.filter((i) => i.src === 'status' || i.src === 'cost').map((i) => i.src) : []
   );
   let selectedConfigPaths = $state<string[]>(
     initInfo ? initInfo.items.filter((i) => i.src === 'config').map((i) => i.path) : []
