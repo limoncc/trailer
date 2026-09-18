@@ -226,6 +226,52 @@ describe('defaultWidgetTitle', () => {
     expect(defaultWidgetTitle({ id: 'w', type: 'table', tableId: 9, w: 6, h: 8 })).toBe('Table #9');
     expect(defaultWidgetTitle({ id: 'w', type: 'media', mediaId: 2, w: 6, h: 8 })).toBe('Media #2');
   });
+
+  it('pca title uses figure name', () => {
+    expect(defaultWidgetTitle({ id: 'w', type: 'pca', name: 'tok_emb', w: 6, h: 8 })).toBe('tok_emb');
+  });
+});
+
+describe('pca widgets', () => {
+  it('parses pca widget with name and optional step, round-trips', () => {
+    const s = JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'w1', type: 'pca', name: 'tok_emb', w: 12, h: 6 },
+        { id: 'w2', type: 'pca', name: 'w_q', step: 42, w: 12, h: 6 },
+      ],
+    });
+    const parsed = parseLayout(s);
+    expect(parsed.widgets).toHaveLength(2);
+    expect(parsed.widgets[0]).toMatchObject({ type: 'pca', name: 'tok_emb' });
+    expect(parsed.widgets[1]).toMatchObject({ type: 'pca', name: 'w_q', step: 42 });
+    // 往返:序列化后再解析保持一致
+    const again = parseLayout(serializeLayout(parsed));
+    expect(again.widgets[0]).toMatchObject({ type: 'pca', name: 'tok_emb' });
+  });
+
+  it('drops pca widgets without a name', () => {
+    const s = JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'w1', type: 'pca', w: 12, h: 6 },
+        { id: 'w2', type: 'pca', name: '', w: 12, h: 6 },
+      ],
+    });
+    expect(parseLayout(s).widgets).toHaveLength(0);
+  });
+
+  it('defaultSize pca is 12x7 and hist fits its explorer (12x8)', () => {
+    expect(defaultSize('pca')).toEqual({ w: 12, h: 7 });
+    expect(defaultSize('hist')).toEqual({ w: 12, h: 8 });
+  });
+
+  it('WIDGET_TYPES registers PCA tab', async () => {
+    const { WIDGET_TYPES } = await import('./widgetTypes');
+    const pca = WIDGET_TYPES.find((t) => t.type === 'pca');
+    expect(pca).toBeDefined();
+    expect(pca!.label).toBe('PCA');
+  });
 });
 
 describe('defaultWidgets', () => {

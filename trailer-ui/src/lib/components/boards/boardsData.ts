@@ -7,7 +7,8 @@ export interface FigureRow {
   run_id: string;
   step: number;
   name: string;
-  kind: 'png' | 'g2';
+  /** 端点返回全部 kind(pca/model/landscape/png/g2);png/g2 供 Figures 卡, pca 供 PCA 卡, 其余被 picker/渲染忽略 */
+  kind: string;
   body: string;
 }
 

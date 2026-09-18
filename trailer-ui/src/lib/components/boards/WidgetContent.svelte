@@ -4,6 +4,8 @@
   import LineChart from '$lib/charts/LineChart.svelte';
   import HistogramChart from '$lib/charts/HistogramChart.svelte';
   import G2SpecChart from '$lib/charts/G2SpecChart.svelte';
+  import PCACard from '$lib/charts/PCACard.svelte';
+  import type { PcaFigureRow, PcaGroup } from '$lib/pca/pcaTypes';
   import MarkdownRenderer from '$lib/components/MarkdownRenderer.svelte';
   import {
     displayMetricName,
@@ -141,6 +143,19 @@
       .sort((a, b) => a.step - b.step);
   });
 
+  // ─── pca:figures 表 kind='pca' 按 name 取整组(卡内滑块浏览 step);step 为数字时只看该步 ───
+  let pcaGroup = $derived.by(() => {
+    if (widget.type !== 'pca') return null;
+    const rows = data.figures
+      .filter((f) => f.kind === 'pca' && f.name === widget.name)
+      .sort((a, b) => a.step - b.step) as PcaFigureRow[];
+    const group: PcaGroup = {
+      name: widget.name,
+      rows: typeof widget.step === 'number' ? rows.filter((r) => r.step === widget.step) : rows,
+    };
+    return group;
+  });
+
   // ─── figure / text:name(+step,'latest'/缺省取最新) ───
   function resolveByName<T extends { name: string; step: number }>(
     rows: T[],
@@ -227,7 +242,18 @@
       No histogram frames yet
     </div>
   {:else}
-    <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact={widget.w < 12} />
+    <!-- 完整分布视图可能高于卡片:容器可滚动,窄卡交由 compact 模式精简坐标轴 -->
+    <div class="h-full overflow-auto">
+      <HistogramChart data={histFrames} key={widget.key} context={widget.context} compact={widget.w < 12} />
+    </div>
+  {/if}
+{:else if widget.type === 'pca'}
+  {#if !pcaGroup || pcaGroup.rows.length === 0}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">
+      PCA data not found
+    </div>
+  {:else}
+    <PCACard group={pcaGroup} chromeless chartHeight={Math.max(160, heightPx - 120)} />
   {/if}
 {:else if widget.type === 'figure'}
   {#if !figureRow}
