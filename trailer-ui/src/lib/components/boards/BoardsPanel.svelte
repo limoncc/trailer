@@ -479,7 +479,7 @@
         {editing}
         {runId}
         {metrics}
-        data={boardsData}
+        {boardsData}
         running={runState === 'running'}
         {runState}
         {runInfo}

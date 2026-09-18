@@ -17,6 +17,7 @@ export const WIDGET_TYPES: WidgetTypeMeta[] = [
   { type: 'info', label: 'Info', emptyHint: 'Select metrics, hyperparameters and cost to display' },
   { type: 'line', label: 'Metrics', emptyHint: 'Run has no metrics yet' },
   { type: 'hist', label: 'Histograms', emptyHint: 'Run has no histograms yet' },
+  { type: 'pca', label: 'PCA', emptyHint: 'Run has no PCA data yet' },
   { type: 'figure', label: 'Figures', emptyHint: 'Run has no figures yet' },
   { type: 'text', label: 'Texts', emptyHint: 'Run has no text entries yet' },
   { type: 'table', label: 'Tables', emptyHint: 'Run has no tables yet' },
