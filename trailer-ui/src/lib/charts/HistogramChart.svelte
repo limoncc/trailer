@@ -26,6 +26,11 @@
   const STAT_COLORS = { mean: '#3b82f6', std: '#22c55e', skewness: '#f97316' };
   const EXTREME_COLORS = { max: '#ef4444', min: '#06b6d4', p5: '#94a3b8', p95: '#94a3b8' };
   const FMT = (v: number) => formatAxisTick(v);
+  // Value 轴统一 4 位小数(与统计卡片一致);-0.0000 归一为 0.0000
+  const FMT4 = (v: number) => {
+    const r = v.toFixed(4);
+    return r === '-0.0000' ? '0.0000' : r;
+  };
 
   interface Props { data: HistogramPoint[]; key: string; context?: string; compact?: boolean; }
   let { data, key, context = '', compact = false }: Props = $props();
@@ -171,11 +176,11 @@
       scale: { color: { palette: 'blues' }, x: { nice: true } },
       axis: compact ? { x: false, y: false } : {
         x: {
-          title: 'Value', labelFontSize: 10, labelAutoHide: true,
-          // band 标度会给每个 bucket 出标签(24+ 个挤成竖排):抽稀到约 6 个
+          title: 'Value', labelFontSize: 10, labelAutoHide: true, labelAutoRotate: false,
+          // band 标度会给每个 bucket 出标签(24+ 个):抽稀到约 6 个;统一 4 位小数,水平展示
           labelFormatter: (d: unknown, i: number, data: unknown[]) => {
             const every = Math.max(1, Math.ceil((data?.length ?? 0) / 6));
-            return i % every === 0 ? formatAxisTick(Number(d)) : '';
+            return i % every === 0 ? FMT4(Number(d)) : '';
           },
           tickCount: adaptiveTicks(barContainer?.clientWidth ?? 400, 70, 10),
         },
