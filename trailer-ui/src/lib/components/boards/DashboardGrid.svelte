@@ -301,6 +301,7 @@ import { onMount } from 'svelte';
     {@const isCollapsed = collapsed.has(widget.id)}
     <div
       data-card-idx={idx}
+      {...(editing ? { role: 'button', tabindex: 0 } : {})}
       class="border rounded-md overflow-hidden flex flex-col bg-card relative group/card {editing
         ? 'border-dashed cursor-grab'
         : 'border-border'} {dragId === widget.id ? 'opacity-40' : ''} {dragId !== null && overIndex === idx && dragId !== widget.id
@@ -309,8 +310,7 @@ import { onMount } from 'svelte';
       style="grid-column: span {effectiveW(widget)}; grid-row: span {isCollapsed ? 1 : effectiveH(widget)}; {widget.color
         ? `box-shadow: inset 0 2px 0 0 ${widget.color};`
         : ''} {snapStyle(widget)}"
-      role="{editing ? 'button' : 'presentation'}"
-      tabindex={editing ? 0 : -1}
+      {...(editing ? {} : { role: 'presentation' })}
       onkeydown={(e) => {
         if (editing && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
       }}
@@ -356,8 +356,7 @@ import { onMount } from 'svelte';
             class="text-xs font-medium truncate {editing ? 'cursor-text hover:text-primary' : ''}"
             title={titleOf(widget)}
             onclick={editing ? () => startRename(widget) : undefined}
-            role={editing ? 'button' : 'presentation'}
-            tabindex={editing ? 0 : -1}
+            {...(editing ? { role: 'button', tabindex: 0 } : {})}
             onkeydown={editing ? (e) => { if (e.key === 'Enter') startRename(widget); } : undefined}
           >
             {titleOf(widget)}
