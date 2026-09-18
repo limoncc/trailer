@@ -81,12 +81,12 @@ export interface MediaWidget extends WidgetBase {
 }
 
 /** 信息卡主体瓦片来源:status=头部条(模型名+状态+step+时长,一张卡勾一次) /
- *  config 超参 / 当前步数下的指标值(带 Δ) / 训练成本。 */
+ *  config 超参 / 当前步数下的指标值(带 Δ) / 训练成本(可自定义 label)。 */
 export type InfoItem =
   | { src: 'status' }
   | { src: 'config'; path: string; label?: string }
   | { src: 'metric'; key: string; context: string; label?: string }
-  | { src: 'cost' };
+  | { src: 'cost'; label?: string };
 
 export interface InfoWidget extends WidgetBase {
   type: 'info';
@@ -98,6 +98,8 @@ export interface InfoWidget extends WidgetBase {
   unitPrice?: number;
   /** 成本金额币种;缺省 usd */
   currency?: 'usd' | 'cny';
+  /** 模型名显示别名(双击改名);不改 config 原始值,空 = 显示 config 解析名 */
+  modelLabel?: string;
   /** 模型名的 config 点路径;缺省依次尝试 model_name / train_model / model */
   modelPath?: string;
 }
@@ -251,8 +253,10 @@ function parseWidget(raw: unknown): DashWidget | null {
             context: typeof it.context === 'string' ? it.context : '',
             label: typeof it.label === 'string' && it.label ? it.label : undefined,
           });
-        } else if (it.src === 'cost' || it.src === 'status') {
-          items.push({ src: it.src });
+        } else if (it.src === 'cost') {
+          items.push({ src: 'cost', label: typeof it.label === 'string' && it.label ? it.label : undefined });
+        } else if (it.src === 'status') {
+          items.push({ src: 'status' });
         }
         // 未知 src(含旧版 step/elapsed,已移入卡片头部)丢弃
       }
@@ -268,6 +272,8 @@ function parseWidget(raw: unknown): DashWidget | null {
             ? r.unitPrice
             : undefined,
         modelPath: typeof r.modelPath === 'string' && r.modelPath ? r.modelPath : undefined,
+        modelLabel:
+          typeof r.modelLabel === 'string' && r.modelLabel.trim() ? r.modelLabel.trim() : undefined,
         currency: r.currency === 'cny' || r.currency === 'usd' ? r.currency : undefined,
       };
     }
@@ -393,16 +399,17 @@ export function computeSnapSeams(
     const mine = seams.get(p.id)!;
     for (const d of dirs) {
       mine.square.push(d);
-      const neighbor = placed.find((q) => {
+      // 该侧可能同时贴多张卡(如上边压着两行拼卡),每一张都要改直角
+      const neighbors = placed.filter((q) => {
         if (q === p) return false;
         if (d === 'left') return q.col + q.w === p.col && rowsOverlap(p, q);
         if (d === 'right') return q.col === p.col + p.w && rowsOverlap(p, q);
         if (d === 'up') return q.row + q.h === p.row && colsOverlap(p, q);
         return q.row === p.row + p.h && colsOverlap(p, q);
       });
-      if (neighbor) {
+      if (neighbors.length > 0) {
         mine.deborder.push(d);
-        seams.get(neighbor.id)!.square.push(OPPOSITE_SNAP[d]);
+        for (const n of neighbors) seams.get(n.id)!.square.push(OPPOSITE_SNAP[d]);
       }
     }
   }
