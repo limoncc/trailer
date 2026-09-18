@@ -77,6 +77,13 @@ export interface PcaWidget extends WidgetBase {
   step?: LatestOrStep;
 }
 
+/** 损失景观卡(figures 表 kind='landscape',按 name 取该组全部 step,卡内滑块/视图切换) */
+export interface LandscapeWidget extends WidgetBase {
+  type: 'landscape';
+  name: string;
+  step?: LatestOrStep;
+}
+
 export interface TableWidget extends WidgetBase {
   type: 'table';
   tableId: number;
@@ -118,6 +125,7 @@ export type DashWidget =
   | HistWidget
   | FigureWidget
   | PcaWidget
+  | LandscapeWidget
   | TextWidget
   | TableWidget
   | MediaWidget
@@ -168,6 +176,8 @@ export function defaultSize(type: DashWidget['type']): { w: number; h: number } 
     case 'figure':
       return { w: 12, h: 4 };
     case 'pca':
+      return { w: 12, h: 7 };
+    case 'landscape':
       return { w: 12, h: 7 };
     case 'text':
       return { w: 9, h: 3 };
@@ -241,6 +251,7 @@ function parseWidget(raw: unknown): DashWidget | null {
     }
     case 'figure':
     case 'pca':
+    case 'landscape':
     case 'text': {
       if (typeof r.name !== 'string' || !r.name) return null;
       return { ...base, type: r.type, name: r.name, step: parseStep(r.step) };
@@ -445,6 +456,8 @@ export function defaultWidgetTitle(w: DashWidget, display?: (m: MetricRef) => st
     case 'text':
       return w.name;
     case 'pca':
+      return w.name;
+    case 'landscape':
       return w.name;
     case 'table':
       return `Table #${w.tableId}`;
