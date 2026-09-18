@@ -42,6 +42,14 @@ export function adaptiveTicks(size: number, minPx: number, max: number): number 
   return Math.min(max, Math.max(2, n));
 }
 
+/** 轴标签/浮点值自适应格式化:整数原样,小数收敛到 4 位有效数字,
+ *  去掉浮点长尾(hist bucket 中点 -0.06000000000000001 一类)——轴标签短才可读。 */
+export function formatAxisTick(v: number): string {
+  if (!Number.isFinite(v)) return String(v);
+  if (Number.isInteger(v)) return String(v);
+  return String(parseFloat(v.toPrecision(4)));
+}
+
 /** 订阅主题切换(命令式图表在 onMount 订阅、清理函数退订,
  *  不用 $effect 跟踪——图表创建属于外部事件驱动的命令式副作用)。返回退订函数。 */
 export function onChartThemeChange(cb: () => void): () => void {
