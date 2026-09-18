@@ -153,7 +153,10 @@
             <span
               class="font-semibold truncate {editing ? 'cursor-text hover:text-foreground underline decoration-dotted' : ''}"
               title="{modelName}{widget.modelLabel ? ` (renamed, original: ${resolvedModelName})` : ''}{editing ? ' — double-click to rename' : ''}"
+              role="button"
+              tabindex={editing ? 0 : -1}
               ondblclick={editing ? () => startModelRename() : undefined}
+              onkeydown={(e) => { if (editing && e.key === 'Enter') startModelRename(); }}
             >
               {modelName}
             </span>
@@ -200,7 +203,14 @@
               <span
                 class="{editing && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost') ? 'cursor-text hover:text-foreground underline decoration-dotted' : ''}"
                 title="{d.cell.label} (double-click to rename)"
+                role="button"
+                tabindex={editing && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost') ? 0 : -1}
                 ondblclick={editing && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost') ? () => startLabelEdit(d.idx, d.item.label ?? '') : undefined}
+                onkeydown={(e) => {
+                  if (editing && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost') && e.key === 'Enter') {
+                    startLabelEdit(d.idx, d.item.label ?? '');
+                  }
+                }}
               >
                 {d.cell.label}
               </span>

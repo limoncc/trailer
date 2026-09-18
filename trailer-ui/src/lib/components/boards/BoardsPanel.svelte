@@ -330,7 +330,12 @@
               class="px-1 py-0.5 w-28 text-xs border border-border rounded bg-background font-mono"
             />
           {:else}
-            <span ondblclick={(e) => { e.stopPropagation(); startRename(d); }}>{d.title}</span>
+            <span
+              role="button"
+              tabindex="-1"
+              ondblclick={(e) => { e.stopPropagation(); startRename(d); }}
+              onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); startRename(d); } }}
+            >{d.title}</span>
           {/if}
           {#if renamingId === d.id}
             <button
