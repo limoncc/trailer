@@ -198,11 +198,12 @@ export function formatCell(input: InfoCellInput): InfoCell {
       const sec = typeof input.seconds === 'number' ? input.seconds : trainingSeconds(input);
       const gpus = input.gpus && input.gpus > 0 ? input.gpus : 0;
       const gpuHours = sec !== null ? round2((sec / 3600) * gpus) : null;
-      if (gpuHours === null) return { label: 'train cost', value: '—' };
+      const costLabel = item.label ?? 'train cost';
+      if (gpuHours === null) return { label: costLabel, value: '—' };
       if (typeof input.unitPrice === 'number' && input.unitPrice >= 0) {
-        return { label: 'train cost', value: formatMoney(gpuHours * input.unitPrice, input.currency) };
+        return { label: costLabel, value: formatMoney(gpuHours * input.unitPrice, input.currency) };
       }
-      return { label: 'train cost', value: `${gpuHours.toFixed(2)} GPU·h` };
+      return { label: costLabel, value: `${gpuHours.toFixed(2)} GPU·h` };
     }
     case 'config': {
       return {

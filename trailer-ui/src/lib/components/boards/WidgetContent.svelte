@@ -31,11 +31,11 @@
     /** info 卡编辑态:瓦片 label 双击改名 */
     editing?: boolean;
     onLabelEdit?: (itemIdx: number, label: string) => void;
-    /** info 卡编辑态:双击模型名改 config 路径 */
-    onModelPathEdit?: (path: string) => void;
+    /** info 卡编辑态:双击模型名改显示别名 */
+    onModelLabelEdit?: (label: string) => void;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelPathEdit }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit }: Props = $props();
 
   const PALETTE = ['#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f59e0b', '#6366f1'];
 
@@ -318,5 +318,5 @@
     </audio>
   {/if}
 {:else if widget.type === 'info'}
-  <InfoCard {widget} {metrics} {running} {runState} {runInfo} {editing} {onLabelEdit} {onModelPathEdit} />
+  <InfoCard {widget} {metrics} {running} {runState} {runInfo} {editing} {onLabelEdit} {onModelLabelEdit} />
 {/if}

@@ -242,10 +242,13 @@ import { onMount } from 'svelte';
   function snapStyle(widget: DashWidget): string {
     if (compact) return '';
     const parts: string[] = [];
-    for (const d of widget.snap ?? []) parts.push(`margin-${SNAP_CSS_SIDE[d]}: -${GAP_PX}px;`);
     const seams = snapSeams.get(widget.id);
+    // margin/去边框都跟随"确认有邻居"的方向:声明指向空白处时自动休眠,不把卡拖出网格
+    for (const d of seams?.deborder ?? []) {
+      parts.push(`margin-${SNAP_CSS_SIDE[d]}: -${GAP_PX}px;`);
+      parts.push(`border-${SNAP_CSS_SIDE[d]}-width: 0;`);
+    }
     if (seams) {
-      for (const d of seams.deborder) parts.push(`border-${SNAP_CSS_SIDE[d]}-width: 0;`);
       for (const d of seams.square) {
         for (const corner of SNAP_CSS_CORNERS[d]) parts.push(`border-${corner}-radius: 0;`);
       }
@@ -253,23 +256,23 @@ import { onMount } from 'svelte';
     return parts.join(' ');
   }
 
-  /** 双击 info 卡 label 改名:更新对应 item 的 label 并持久化 */
+  /** 双击 info 卡 label 改名:更新对应 item 的 label 并持久化(config/metric/cost) */
   function handleInfoLabelEdit(widget: DashWidget, itemIdx: number, label: string) {
     if (widget.type !== 'info') return;
     const l = label.trim();
     const items = widget.items.map((it, i) => {
       if (i !== itemIdx) return it;
-      if (it.src !== 'config' && it.src !== 'metric') return it;
+      if (it.src !== 'config' && it.src !== 'metric' && it.src !== 'cost') return it;
       return { ...it, label: l || undefined };
     });
     onChange(widgets.map((w) => (w.id === widget.id ? { ...w, items } : w)));
   }
 
-  /** 编辑态双击模型名:设置模型名的 config 点路径(空 = 回退自动链) */
-  function handleInfoModelPathEdit(widget: DashWidget, path: string) {
+  /** 编辑态双击模型名:改显示别名(不改 config 原始值;空 = 回退 config 解析名) */
+  function handleInfoModelLabelEdit(widget: DashWidget, label: string) {
     if (widget.type !== 'info') return;
-    const p = path.trim();
-    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, modelPath: p || undefined } : w)));
+    const l = label.trim();
+    onChange(widgets.map((w) => (w.id === widget.id ? { ...w, modelLabel: l || undefined } : w)));
   }
 
   function focusOnMount(node: HTMLInputElement) {
@@ -395,7 +398,7 @@ import { onMount } from 'svelte';
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
         <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' ? 'pointer-events-none' : ''}">
-          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelPathEdit={(path) => handleInfoModelPathEdit(widget, path)} />
+          <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} />
         </div>
 
         <!-- Resize handle -->
