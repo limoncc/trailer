@@ -62,14 +62,21 @@ export type Currency = 'usd' | 'cny';
 
 const CURRENCY_SYMBOL: Record<Currency, string> = { usd: '$', cny: '¥' };
 
-/** 金额 → "$1,063,883";小额保留两位小数;currency 切换 ¥ */
+/** 金额 → 大额缩写:"$1.06M"(K/M/B) / "¥106.39万"(万/亿);阈值以下保留两位小数 */
 export function formatMoney(amount: number, currency: Currency = 'usd'): string {
   const sym = CURRENCY_SYMBOL[currency] ?? '$';
   if (!Number.isFinite(amount)) return `${sym}0.00`;
-  if (Math.abs(amount) >= 1000) {
-    return `${sym}${Math.round(amount).toLocaleString('en-US')}`;
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? '-' : '';
+  if (currency === 'cny') {
+    if (abs >= 1e8) return `${sym}${sign}${(abs / 1e8).toFixed(2)}亿`;
+    if (abs >= 1e4) return `${sym}${sign}${(abs / 1e4).toFixed(2)}万`;
+  } else {
+    if (abs >= 1e9) return `${sym}${sign}${(abs / 1e9).toFixed(2)}B`;
+    if (abs >= 1e6) return `${sym}${sign}${(abs / 1e6).toFixed(2)}M`;
+    if (abs >= 1e3) return `${sym}${sign}${(abs / 1e3).toFixed(2)}K`;
   }
-  return `${sym}${amount.toFixed(2)}`;
+  return `${sym}${sign}${abs.toFixed(2)}`;
 }
 
 /** 指标 Δ(最后一点 - 第一点);不足两个点返回 null */
