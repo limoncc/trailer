@@ -34,19 +34,34 @@ describe('formatElapsed', () => {
 });
 
 describe('formatMoney', () => {
-  it('formats with thousands separators and $', () => {
-    expect(formatMoney(1063883.42)).toBe('$1,063,883');
+  it('abbreviates large usd amounts with K/M/B', () => {
+    expect(formatMoney(1063883.42)).toBe('$1.06M');
+    expect(formatMoney(4200)).toBe('$4.20K');
+    expect(formatMoney(2.5e9)).toBe('$2.50B');
   });
 
-  it('keeps decimals for small amounts', () => {
+  it('keeps usd amounts below 1000 unabbreviated', () => {
+    expect(formatMoney(999.99)).toBe('$999.99');
     expect(formatMoney(42.5)).toBe('$42.50');
     expect(formatMoney(0)).toBe('$0.00');
   });
 
-  it('supports cny via ¥', () => {
-    expect(formatMoney(1063883.42, 'cny')).toBe('¥1,063,883');
+  it('abbreviates large cny amounts with 万/亿', () => {
+    expect(formatMoney(1063883.42, 'cny')).toBe('¥106.39万');
+    expect(formatMoney(42000, 'cny')).toBe('¥4.20万');
+    expect(formatMoney(2.35e8, 'cny')).toBe('¥2.35亿');
+    expect(formatMoney(9999, 'cny')).toBe('¥9999.00');
+  });
+
+  it('keeps small cny amounts unabbreviated', () => {
     expect(formatMoney(42.5, 'cny')).toBe('¥42.50');
     expect(formatMoney(0, 'cny')).toBe('¥0.00');
+  });
+
+  it('handles non-finite and negative amounts', () => {
+    expect(formatMoney(NaN)).toBe('$0.00');
+    expect(formatMoney(Infinity, 'cny')).toBe('¥0.00');
+    expect(formatMoney(-4200)).toBe('$-4.20K');
   });
 });
 
