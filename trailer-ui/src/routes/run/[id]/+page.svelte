@@ -16,6 +16,7 @@
   import MetricPicker from '$lib/components/MetricPicker.svelte';
   import BoardsPanel from '$lib/components/boards/BoardsPanel.svelte';
   import { fetchRunMeta, type GpuInfo } from '$lib/utils/runMeta';
+  import { isShareView } from '$lib/utils/shareView';
   import type { MetricRef } from '$lib/utils/explore';
   import type { RunInfo } from '$lib/utils/dashboard';
 
@@ -44,6 +45,8 @@
   let columns = $state<1 | 2 | 3 | 4>(1);
   // Persist smooth settings across refreshes (keyed by metric ID)
   let smoothSettings = $state<Map<string, number>>(new Map());
+  // 分享链接只读视图(?token= 匿名访问):隐藏 Share/Resume 等写入口
+  const shareView = isShareView();
 
   // 各 tab 是否有数据（决定是否显示对应标签）
   let tabDataLoaded = $state(false);
@@ -321,16 +324,18 @@
   <div class="flex items-center gap-3 mb-4 shrink-0">
     <a href="/" class="text-sm text-muted-foreground hover:text-foreground">← Back</a>
     <h1 class="text-xl font-bold font-mono">{runId || 'Loading...'}</h1>
-    <button type="button" onclick={createShare} class="px-3 py-1 text-xs border border-border rounded-md hover:bg-accent">Share
-    </button>
-    {#if runState && runState !== 'running'}
-      <button
-        onclick={handleResume}
-        disabled={resuming}
-        class="px-3 py-1 text-xs bg-primary text-primary-foreground rounded-md disabled:opacity-50"
-      >
-        {resuming ? 'Resuming...' : 'Resume'}
+    {#if !shareView}
+      <button type="button" onclick={createShare} class="px-3 py-1 text-xs border border-border rounded-md hover:bg-accent">Share
       </button>
+      {#if runState && runState !== 'running'}
+        <button
+          onclick={handleResume}
+          disabled={resuming}
+          class="px-3 py-1 text-xs bg-primary text-primary-foreground rounded-md disabled:opacity-50"
+        >
+          {resuming ? 'Resuming...' : 'Resume'}
+        </button>
+      {/if}
     {/if}
   </div>
 
