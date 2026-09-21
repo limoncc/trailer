@@ -4,6 +4,7 @@
   import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
+  import { isShareView } from '$lib/utils/shareView';
   import type { MetricRef } from '$lib/utils/explore';
   import type { MetricOption } from '$lib/utils/metricGroups';
   import { displayMetricName } from '$lib/utils/systemMetrics';
@@ -240,6 +241,8 @@
   }
 
   // ─── 看板 CRUD ───
+  // 分享链接只读视图(?token= 匿名访问):写接口服务端一律 401,UI 隐藏写入口、跳过自动保存
+  const readonly = isShareView();
   async function createBoard() {
     try {
       const title = `Board ${dashes.length + 1}`;
@@ -262,6 +265,7 @@
   let saveChain: Promise<void> = Promise.resolve();
 
   async function saveLayout(widgetsToSave: DashWidget[], boardId?: string) {
+    if (readonly) return;
     const id = boardId ?? activeId;
     if (!id) return;
     const layout = serializeLayout({ version: 3, widgets: widgetsToSave, compact });
@@ -430,7 +434,8 @@
             >
               <Check size={12} />
             </button>
-          {:else}
+          {/if}
+          {#if !readonly}
             <button
               class="opacity-0 group-hover/tab:opacity-100 text-muted-foreground hover:text-foreground"
               title="Rename board"
@@ -439,22 +444,26 @@
               <Pencil size={11} />
             </button>
           {/if}
-          <button
-            class="opacity-0 group-hover/tab:opacity-100 text-muted-foreground hover:text-destructive"
-            title="Delete board"
-            onclick={(e) => { e.stopPropagation(); deleteBoard(d); }}
-          >
-            <X size={12} />
-          </button>
+          {#if !readonly}
+            <button
+              class="opacity-0 group-hover/tab:opacity-100 text-muted-foreground hover:text-destructive"
+              title="Delete board"
+              onclick={(e) => { e.stopPropagation(); deleteBoard(d); }}
+            >
+              <X size={12} />
+            </button>
+          {/if}
         </div>
       {/each}
-      <button
-        class="flex items-center gap-1 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-        onclick={createBoard}
-        title="New board"
-      >
-        <Plus size={13} /> New Board
-      </button>
+      {#if !readonly}
+        <button
+          class="flex items-center gap-1 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+          onclick={createBoard}
+          title="New board"
+        >
+          <Plus size={13} /> New Board
+        </button>
+      {/if}
 
       <div class="ml-auto flex items-center gap-2 pb-1 flex-wrap">
         {#if error}
@@ -557,33 +566,35 @@
               {/if}
             </span>
           {/if}
-          <button
-            class="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-md hover:bg-accent"
-            onclick={openAdd}
-          >
-            <Plus size={12} /> Add Chart
-          </button>
-          <button
-            class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md {compact
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-              : 'border border-border hover:bg-accent'}"
-            title="Snap cards together (no gap)"
-            onclick={toggleCompact}
-          >
-            <Magnet size={12} /> Snap
-          </button>
-          <button
-            class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md {editing
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-              : 'border border-border hover:bg-accent'}"
-            onclick={toggleEditing}
-          >
-            {#if editing}
-              <Check size={12} /> Done
-            {:else}
-              <LayoutDashboard size={12} /> Edit Layout
-            {/if}
-          </button>
+          {#if !readonly}
+            <button
+              class="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-md hover:bg-accent"
+              onclick={openAdd}
+            >
+              <Plus size={12} /> Add Chart
+            </button>
+            <button
+              class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md {compact
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'border border-border hover:bg-accent'}"
+              title="Snap cards together (no gap)"
+              onclick={toggleCompact}
+            >
+              <Magnet size={12} /> Snap
+            </button>
+            <button
+              class="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md {editing
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'border border-border hover:bg-accent'}"
+              onclick={toggleEditing}
+            >
+              {#if editing}
+                <Check size={12} /> Done
+              {:else}
+                <LayoutDashboard size={12} /> Edit Layout
+              {/if}
+            </button>
+          {/if}
         {/if}
       </div>
     </div>
@@ -591,32 +602,36 @@
     {#if !activeBoard}
       <div class="text-center py-16">
         <p class="text-sm text-muted-foreground mb-3">No boards yet. Create a dashboard to arrange metrics and logs your way.</p>
-        <button
-          class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-          onclick={createBoard}
-        >
-          Create your first board
-        </button>
+        {#if !readonly}
+          <button
+            class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+            onclick={createBoard}
+          >
+            Create your first board
+          </button>
+        {/if}
       </div>
     {:else if widgets.length === 0}
       <div class="text-center py-16">
         <p class="text-sm text-muted-foreground mb-3">This board is empty.</p>
-        <div class="flex items-center justify-center gap-2">
-          <button
-            class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-            onclick={openAdd}
-          >
-            Add Chart
-          </button>
-          {#if metricOptions.length > 0}
+        {#if !readonly}
+          <div class="flex items-center justify-center gap-2">
             <button
-              class="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-accent"
-              onclick={generateDefault}
+              class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+              onclick={openAdd}
             >
-              Generate from metrics
+              Add Chart
             </button>
-          {/if}
-        </div>
+            {#if metricOptions.length > 0}
+              <button
+                class="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-accent"
+                onclick={generateDefault}
+              >
+                Generate from metrics
+              </button>
+            {/if}
+          </div>
+        {/if}
       </div>
     {:else}
       <DashboardGrid

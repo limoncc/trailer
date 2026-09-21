@@ -15,6 +15,8 @@
   import Card from '$lib/components/ui/Card.svelte';
   import MetricPicker from '$lib/components/MetricPicker.svelte';
   import BoardsPanel from '$lib/components/boards/BoardsPanel.svelte';
+  import { fetchRunMeta, type GpuInfo } from '$lib/utils/runMeta';
+  import { isShareView } from '$lib/utils/shareView';
   import type { MetricRef } from '$lib/utils/explore';
   import type { RunInfo } from '$lib/utils/dashboard';
 
@@ -43,6 +45,8 @@
   let columns = $state<1 | 2 | 3 | 4>(1);
   // Persist smooth settings across refreshes (keyed by metric ID)
   let smoothSettings = $state<Map<string, number>>(new Map());
+  // 分享链接只读视图(?token= 匿名访问):隐藏 Share/Resume 等写入口
+  const shareView = isShareView();
 
   // 各 tab 是否有数据（决定是否显示对应标签）
   let tabDataLoaded = $state(false);
@@ -166,10 +170,7 @@
       let url = `/api/v1/metrics?run_id=${encodeURIComponent(id)}&max_points=1000`;
       if (refreshing && maxStep > 0) url += `&after_step=${maxStep}`;
 
-      const [metricsResp, runsResp] = await Promise.all([
-        fetch(url),
-        fetch(`/api/v1/runs`),
-      ]);
+      const metricsResp = await fetch(url);
 
       if (metricsResp.ok) {
         const data: MetricGroup[] = await metricsResp.json();
@@ -209,26 +210,22 @@
         }
       }
 
-      if (runsResp.ok) {
-        const runs = await runsResp.json();
-        const r = runs.find((x: any) => x.run_id === id);
-        if (r) {
-          runState = r.state;
-          runConfig = r.config || null;
-          runInfo = {
-            createdAt: r.created_at,
-            heartbeatAt: r.heartbeat_at ?? undefined,
-            config: r.config || null,
-            gpuCount: Array.isArray(r.env?.hardware?.gpus) ? r.env.hardware.gpus.length : undefined,
-          };
-          const gpus = r.env?.hardware?.gpus;
-          if (Array.isArray(gpus)) {
-            gpuNames = new Map(
-              gpus
-                .filter((g: any) => g?.name)
-                .map((g: any) => [`system/${g.vendor}/gpu${g.index}`, g.name])
-            );
-          }
+      // run 元信息:单 run 详情优先(支持匿名 share token;runs 列表接口对分享访客 401,
+      // 曾致分享视图 GPU 数缺失、Boards 成本卡恒为 0),详情不可用时回退列表
+      const meta = await fetchRunMeta(id);
+      if (meta) {
+        runState = meta.state ?? '';
+        runConfig = meta.config || null;
+        runInfo = {
+          createdAt: meta.created_at,
+          heartbeatAt: meta.heartbeat_at ?? undefined,
+          config: meta.config || null,
+          gpuCount: Array.isArray(meta.env?.hardware?.gpus) ? meta.env.hardware.gpus.length : undefined,
+        };
+        const gpus = meta.env?.hardware?.gpus;
+        if (Array.isArray(gpus)) {
+          const named = gpus.filter((g): g is GpuInfo & { name: string } => !!g?.name);
+          gpuNames = new Map(named.map((g) => [`system/${g.vendor}/gpu${g.index}`, g.name]));
         }
       }
       tabData.config = !!runConfig && Object.keys(runConfig).length > 0;
@@ -327,16 +324,18 @@
   <div class="flex items-center gap-3 mb-4 shrink-0">
     <a href="/" class="text-sm text-muted-foreground hover:text-foreground">← Back</a>
     <h1 class="text-xl font-bold font-mono">{runId || 'Loading...'}</h1>
-    <button type="button" onclick={createShare} class="px-3 py-1 text-xs border border-border rounded-md hover:bg-accent">Share
-    </button>
-    {#if runState && runState !== 'running'}
-      <button
-        onclick={handleResume}
-        disabled={resuming}
-        class="px-3 py-1 text-xs bg-primary text-primary-foreground rounded-md disabled:opacity-50"
-      >
-        {resuming ? 'Resuming...' : 'Resume'}
+    {#if !shareView}
+      <button type="button" onclick={createShare} class="px-3 py-1 text-xs border border-border rounded-md hover:bg-accent">Share
       </button>
+      {#if runState && runState !== 'running'}
+        <button
+          onclick={handleResume}
+          disabled={resuming}
+          class="px-3 py-1 text-xs bg-primary text-primary-foreground rounded-md disabled:opacity-50"
+        >
+          {resuming ? 'Resuming...' : 'Resume'}
+        </button>
+      {/if}
     {/if}
   </div>
 
