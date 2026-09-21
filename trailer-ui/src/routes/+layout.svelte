@@ -13,6 +13,7 @@
   import { sidebarState } from '$lib/sidebar-state.svelte';
   import { IsMobile } from '$lib/hooks/is-mobile.svelte';
   import { initAuthFetch } from '$lib/utils/authFetch';
+  import { isShareView } from '$lib/utils/shareView';
   import { fetchServerVersion, UI_VERSION, type ServerVersion } from '$lib/utils/version';
   import { createAuthReadyPromise, signalAuthReady, authReady } from '$lib/utils/auth';
   import { refreshInterval } from '$lib/refresh.svelte';
@@ -207,6 +208,8 @@
   }
 
   async function loadProjects() {
+    // 分享链接匿名访客:runs 列表接口仅登录可用(必 401),跳过避免控制台 401 噪音
+    if (isShareView() && !localStorage.getItem('trailer_token')) return;
     try {
       const resp = await fetch('/api/v1/runs?limit=1000');
       if (resp.ok) {
@@ -363,7 +366,7 @@
               </div>
             {/if}
           {:else}
-            <p class="text-xs text-muted-foreground px-2 py-4">Loading projects...</p>
+            <p class="text-xs text-muted-foreground px-2 py-4">{isShareView() ? 'Sign in to browse projects' : 'Loading projects...'}</p>
           {/if}
         </Sidebar.GroupContent>
       </Sidebar.Group>

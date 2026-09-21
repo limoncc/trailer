@@ -102,6 +102,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/runs",
             axum::routing::post(create_run).get(list_runs),
         )
+        .route("/api/v1/runs/{id}", axum::routing::get(get_run_detail))
         .route("/api/v1/runs/diff", axum::routing::get(diff_runs))
         .route("/api/v1/runs/states", axum::routing::get(run_states))
         .route(
@@ -1156,6 +1157,55 @@ pub async fn resume_run(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+// ─── GET /api/v1/runs/{id} ───
+
+/// 单 run 详情响应(RunMeta 去掉 owner_id,不向匿名分享访客暴露归属)。
+#[derive(Serialize)]
+pub struct RunDetailResponse {
+    pub run_id: String,
+    pub project: String,
+    pub group_name: Option<String>,
+    pub name: Option<String>,
+    pub state: String,
+    pub config: serde_json::Value,
+    pub env: serde_json::Value,
+    pub git_commit: Option<String>,
+    pub sweep_id: Option<String>,
+    pub created_at: f64,
+    pub heartbeat_at: Option<f64>,
+    pub tags: Option<Vec<String>>,
+}
+
+/// 单 run 详情。与 list_runs 不同,走 require_run_read:登录(owner/admin)或
+/// 匿名 share token(绑 run 且未过期)均可读——分享链接页面的 runInfo 数据源
+/// (GPU 卡数/created_at/config),列表接口 401 会导致分享视图成本恒为 0。
+pub async fn get_run_detail(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(run_id): Path<String>,
+    Query(share): Query<ShareQuery>,
+) -> impl IntoResponse {
+    let run = match require_run_read(&state, &run_id, &headers, share.token.as_deref()).await {
+        Ok(run) => run,
+        Err(status) => return status.into_response(),
+    };
+    Json(RunDetailResponse {
+        run_id: run.run_id,
+        project: run.project,
+        group_name: run.group_name,
+        name: run.name,
+        state: run.state,
+        config: run.config,
+        env: run.env,
+        git_commit: run.git_commit,
+        sweep_id: run.sweep_id,
+        created_at: run.created_at,
+        heartbeat_at: run.heartbeat_at,
+        tags: run.tags,
+    })
+    .into_response()
 }
 
 // ─── GET /api/v1/runs/{id}/last_step ───
@@ -2798,7 +2848,13 @@ mod tests {
     }
 
     async fn test_app() -> Router {
+        test_app_with_store().await.0
+    }
+
+    /// 同 test_app,但把 store 句柄一并返回(测试里直接种 share 边车数据,如过期 token)
+    async fn test_app_with_store() -> (Router, Arc<dyn trailer_core::Storage>) {
         let store = new_sqlite_storage("sqlite::memory:").await.unwrap();
+        let store_handle = store.clone();
         let (tx, rx) = mpsc::channel(10_000);
         let query_store = store.clone();
         let run_mgr = Arc::new(RunManager::new(store.clone(), Duration::from_secs(60)));
@@ -2827,7 +2883,7 @@ mod tests {
             auth,
         };
 
-        Router::new()
+        let router = Router::new()
             .route("/api/v1/ingest", post(ingest_metrics))
             .route("/api/v1/metrics", get(query_metrics))
             .route(
@@ -2835,6 +2891,7 @@ mod tests {
                 axum::routing::post(batch_query_metrics),
             )
             .route("/api/v1/runs", post(create_run).get(list_runs))
+            .route("/api/v1/runs/{id}", get(get_run_detail))
             .route("/api/v1/runs/{id}/heartbeat", post(heartbeat_run))
             .route("/api/v1/runs/{id}/finish", post(finish_run))
             .route("/api/v1/runs/{id}/delete", post(delete_run_handler))
@@ -2904,7 +2961,8 @@ mod tests {
             .route("/api/v1/auth/login", post(auth_login))
             .route("/api/v1/auth/register", post(auth_register))
             .route("/api/v1/version", get(get_version))
-            .with_state(state)
+            .with_state(state);
+        (router, store_handle)
     }
 
     #[tokio::test]
@@ -4061,6 +4119,119 @@ mod tests {
             resp.status(),
             StatusCode::FORBIDDEN,
             "non-owner logged-in cannot read"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_detail_share_token_with_expiry() {
+        let (app, store) = test_app_with_store().await;
+        let admin_token = login_and_create_run(&app, "p1", "admin-run").await;
+        let admin_auth = format!("Bearer {}", admin_token);
+
+        // 登录 owner → 200,返回 run 页所需元信息(不暴露 owner_id)
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/admin-run")
+            .header("authorization", &admin_auth)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "owner can read run detail");
+        let body = axum::body::to_bytes(resp.into_body(), 8192).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["run_id"], "admin-run");
+        assert!(json["created_at"].is_number(), "created_at present");
+        assert!(json["env"].is_object(), "env present");
+        assert!(json.get("owner_id").is_none(), "owner_id not exposed");
+
+        // 匿名无 token → 401
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/admin-run")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "anonymous denied");
+
+        // 有效 share token → 200
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/share")
+            .header("content-type", "application/json")
+            .header("authorization", &admin_auth)
+            .body(Body::from(
+                r#"{"resource_type":"run","resource_id":"admin-run","expires_in_days":7}"#,
+            ))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED, "share creation");
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let share_tok = json["token"].as_str().unwrap().to_string();
+        let req = Request::builder()
+            .method("GET")
+            .uri(&format!("/api/v1/runs/admin-run?token={}", share_tok))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "valid share token allows anonymous read"
+        );
+
+        // 绑定其他 run 的 token → 401(token 与 run 不匹配)
+        store
+            .create_share("tok-other-run", "run", "another-run", None)
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/admin-run?token=tok-other-run")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "share bound to another run denied"
+        );
+
+        // ⚠️ 有效期:过期的 share token → 401(新端点与 metrics 等同标准,不得绕过过期检查)
+        let past = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+            - 100.0;
+        store
+            .create_share("tok-expired", "run", "admin-run", Some(past))
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/admin-run?token=tok-expired")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "expired share token denied"
+        );
+
+        // 非 owner 登录无 token → 403
+        let bob_token = register_and_login(&app, "bob", "pw").await;
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/runs/admin-run")
+            .header("authorization", format!("Bearer {}", bob_token))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "non-owner logged-in denied"
         );
     }
 
