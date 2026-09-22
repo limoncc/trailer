@@ -8,6 +8,7 @@
  * 发送走全局 fetch(authFetch 已 patch:登录自动 Bearer、分享页自动附 ?token=)。
  */
 import { getUser } from '$lib/projectsStore.svelte';
+import { isShareView } from '$lib/utils/shareView';
 
 /** 弹幕播放三态 */
 export type DanmakuPlayMode = 'off' | 'live' | 'loop';
@@ -58,6 +59,10 @@ export interface DanmakuMsg {
 }
 
 function readPlayMode(): DanmakuPlayMode {
+  if (typeof window === 'undefined') return 'off';
+  // 分享链接:自动进入循环播放(展示模式),不读本地偏好;
+  // 访客本次会话仍可手动切换,下次打开分享链接恢复 loop
+  if (isShareView()) return 'loop';
   if (typeof localStorage === 'undefined') return 'off';
   try {
     const v = localStorage.getItem(MODE_KEY);

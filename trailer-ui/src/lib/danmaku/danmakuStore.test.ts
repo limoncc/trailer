@@ -67,6 +67,19 @@ describe('DanmakuStore', () => {
     expect(new DanmakuStore().playMode).toBe('off');
   });
 
+  it('分享链接默认进入 loop(展示模式),不读本地偏好;清 token 恢复偏好', () => {
+    localStorage.setItem(MODE_KEY, 'off');
+    const url = new URL(window.location.href);
+    url.search = '?token=abc123';
+    window.history.replaceState({}, '', url);
+    try {
+      expect(new DanmakuStore().playMode).toBe('loop');
+    } finally {
+      window.history.replaceState({}, '', '/');
+    }
+    expect(new DanmakuStore().playMode).toBe('off'); // 普通页仍读偏好
+  });
+
   it('回到 off 清空 flying;listOpen 独立且不持久化', () => {
     const s = new DanmakuStore();
     s.cyclePlayMode(); // live
