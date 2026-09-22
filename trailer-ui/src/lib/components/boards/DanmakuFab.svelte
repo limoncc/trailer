@@ -23,12 +23,12 @@
     <div
       class="w-80 max-w-[80vw] bg-card border border-border rounded-xl shadow-xl p-3 flex flex-col gap-2 animate-in slide-in-from-right fade-in duration-150"
       role="dialog"
-      aria-label="发送弹幕"
+      aria-label="Send danmaku"
       tabindex="-1"
     >
       <div class="flex items-center gap-2">
-        <span class="text-sm font-medium text-foreground">DanMu</span>
-        <span class="text-xs text-muted-foreground">发一条弹幕</span>
+        <span class="text-sm font-medium text-foreground">Danmu</span>
+        <span class="text-xs text-muted-foreground">Send a danmaku</span>
         <div class="ml-auto flex items-center gap-1.5">
           <button
             class="flex items-center gap-1 px-2 py-0.5 text-xs border border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"

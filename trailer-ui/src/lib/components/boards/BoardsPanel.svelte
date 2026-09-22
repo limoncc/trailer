@@ -476,18 +476,18 @@
         {#if error}
           <span class="text-xs text-destructive">{error}</span>
         {/if}
-        <!-- DanMu:横飘显示开关(消息列表从右侧浮动面板进入);owner 与分享访客都可操作 -->
+        <!-- Danmu:横飘显示开关(消息列表从右侧浮动面板进入);owner 与分享访客都可操作 -->
         <button
           class="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md transition-colors {danmakuStore.barrageOn
             ? 'border-primary bg-primary/10 text-primary'
             : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'}"
-          title={danmakuStore.barrageOn ? 'DanMu: ON — click to hide floating danmaku' : 'DanMu: OFF — click to show floating danmaku'}
+          title={danmakuStore.barrageOn ? 'Danmu: ON — click to hide floating danmaku' : 'Danmu: OFF — click to show floating danmaku'}
           onclick={() => danmakuStore.toggleBarrage()}
         >
           {#if danmakuStore.barrageOn}
-            <Clapperboard size={12} /> DanMu
+            <Clapperboard size={12} /> Danmu
           {:else}
-            <MessageSquare size={12} /> DanMu
+            <MessageSquare size={12} /> Danmu
           {/if}
         </button>
         {#if activeBoard}

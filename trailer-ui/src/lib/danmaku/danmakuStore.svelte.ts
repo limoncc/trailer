@@ -2,7 +2,7 @@
  * Boards 弹幕 store — 模块级单例(对齐 sidebar-state/projectsStore 的 runes 单例模式)。
  *
  * 两个独立状态:
- * - barrageOn: 工具栏 DanMu 开关(横飘显示),持久化 localStorage
+ * - barrageOn: 工具栏 Danmu 开关(横飘显示),持久化 localStorage
  * - listOpen:  消息列表(仅从浮动面板进入),不持久化
  * 数据 per-run:attach 拉最近历史,开启(barrageOn || listOpen)时每 2s 轮询 since_id 增量。
  * 发送走全局 fetch(authFetch 已 patch:登录自动 Bearer、分享页自动附 ?token=)。
@@ -86,7 +86,7 @@ function randomId(): string {
 }
 
 export class DanmakuStore {
-  /** 工具栏 DanMu 开关:横飘显示 */
+  /** 工具栏 Danmu 开关:横飘显示 */
   barrageOn = $state(readBarrage());
   /** 消息列表浮层(仅浮动面板进入) */
   listOpen = $state(false);
@@ -136,7 +136,7 @@ export class DanmakuStore {
     this.color = v;
   }
 
-  /** 工具栏 DanMu 开关(只控横飘):关时清空在飞 */
+  /** 工具栏 Danmu 开关(只控横飘):关时清空在飞 */
   toggleBarrage() {
     this.barrageOn = !this.barrageOn;
     writeStr(MODE_KEY, this.barrageOn ? 'barrage' : 'off');
@@ -258,7 +258,7 @@ export class DanmakuStore {
       this.#merge(msgs);
       if (msgs.length === HISTORY_LIMIT) this.hasOlder = true;
     } catch (e) {
-      this.error = e instanceof Error ? e.message : '加载弹幕失败';
+      this.error = e instanceof Error ? e.message : 'Failed to load danmaku';
     }
   }
 
@@ -288,7 +288,7 @@ export class DanmakuStore {
       const added = older.filter((m) => !known.has(m.id));
       if (added.length) this.messages = [...added, ...this.messages];
     } catch (e) {
-      this.error = e instanceof Error ? e.message : '加载失败';
+      this.error = e instanceof Error ? e.message : 'Load failed';
     } finally {
       this.loadingOlder = false;
     }
@@ -326,12 +326,12 @@ export class DanmakuStore {
       });
       if (res.status === 429) {
         rollback();
-        this.error = '发送太频繁,几秒后再试';
+        this.error = 'Too frequent — wait a few seconds';
         return false;
       }
       if (!res.ok) {
         rollback();
-        this.error = res.status === 400 ? '内容不合法' : `发送失败(HTTP ${res.status})`;
+        this.error = res.status === 400 ? 'Invalid content' : `Send failed (HTTP ${res.status})`;
         return false;
       }
       const created = await res.json();

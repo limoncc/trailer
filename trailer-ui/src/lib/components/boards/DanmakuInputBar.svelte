@@ -33,19 +33,19 @@
     <input
       value={danmakuStore.nickname}
       oninput={(e) => danmakuStore.setNickname(e.currentTarget.value)}
-      placeholder="昵称(≤{MAX_NICKNAME}字)"
+      placeholder="Nickname (≤{MAX_NICKNAME})"
       maxlength={MAX_NICKNAME}
-      aria-label="弹幕昵称"
+      aria-label="Danmaku nickname"
       class="w-28 px-2 py-1.5 text-xs border border-border rounded bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
     />
-    <div class="flex items-center gap-1" role="radiogroup" aria-label="弹幕颜色">
+    <div class="flex items-center gap-1" role="radiogroup" aria-label="Danmaku color">
       {#each colorKeys as key (key)}
         <button
           type="button"
           role="radio"
           aria-checked={danmakuStore.color === key}
-          aria-label={key === '' ? '主题色' : key}
-          title={key === '' ? '主题色' : key}
+          aria-label={key === '' ? 'Theme color' : key}
+          title={key === '' ? 'Theme color' : key}
           class="size-4 rounded-full border transition-transform hover:scale-110 {danmakuStore.color === key
             ? 'border-ring ring-2 ring-ring/50'
             : 'border-border'}"
@@ -65,9 +65,9 @@
   >
     <input
       bind:value={draft}
-      placeholder="发条弹幕…"
+      placeholder="Say something…"
       maxlength={MAX_CONTENT}
-      aria-label="弹幕内容"
+      aria-label="Danmaku content"
       class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-border rounded bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
     />
     <button

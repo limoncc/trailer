@@ -34,7 +34,7 @@ describe('DanmakuStore', () => {
     vi.resetModules();
   });
 
-  // ── DanMu 开关与列表浮层 ──
+  // ── Danmu 开关与列表浮层 ──
 
   it('默认 barrageOff + listClosed', () => {
     const s = new DanmakuStore();
@@ -231,7 +231,7 @@ describe('DanmakuStore', () => {
     expect(ok).toBe(false);
     expect(s.messages).toHaveLength(0);
     expect(s.flying).toHaveLength(0);
-    expect(s.error).toContain('频繁');
+    expect(s.error).toContain('frequent');
     s.detach();
   });
 

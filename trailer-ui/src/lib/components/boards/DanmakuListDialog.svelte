@@ -35,13 +35,13 @@
 <div
   class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[440px] max-w-[92vw] h-[min(560px,80vh)] bg-card border border-border rounded-xl shadow-xl flex flex-col"
   role="dialog"
-  aria-label="弹幕列表"
+  aria-label="Danmaku list"
   tabindex="-1"
 >
   <!-- 头部 -->
   <div class="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
-    <span class="text-sm font-medium text-foreground">弹幕列表</span>
-    <span class="text-xs text-muted-foreground">{danmakuStore.messages.length} 条</span>
+    <span class="text-sm font-medium text-foreground">Danmaku List</span>
+    <span class="text-xs text-muted-foreground">{danmakuStore.messages.length} messages</span>
     <div class="ml-auto flex items-center gap-2">
       {#if danmakuStore.hasOlder}
         <button
@@ -50,9 +50,9 @@
           onclick={() => danmakuStore.loadOlder()}
         >
           {#if danmakuStore.loadingOlder}
-            加载中…
+            Loading…
           {:else}
-            <ChevronUp size={12} /> 加载更早
+            <ChevronUp size={12} /> Load earlier
           {/if}
         </button>
       {/if}
@@ -78,7 +78,7 @@
       </div>
     {/each}
     {#if danmakuStore.messages.length === 0}
-      <div class="text-center text-xs text-muted-foreground py-8">还没有弹幕,来发第一条吧</div>
+      <div class="text-center text-xs text-muted-foreground py-8">No danmaku yet — send the first one!</div>
     {/if}
   </div>
 
