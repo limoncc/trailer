@@ -1,12 +1,13 @@
 /**
  * Boards 弹幕 store — 模块级单例(对齐 sidebar-state/projectsStore 的 runes 单例模式)。
  *
- * 三态互斥:off(关) / barrage(页面横飘) / list(消息列表弹窗),偏好存 localStorage;
- * 数据 per-run:attach 拉最近历史,开启时每 2s 轮询 since_id 增量,关闭即停表。
+ * 两个独立状态:
+ * - barrageOn: 工具栏 DanMu 开关(横飘显示),持久化 localStorage
+ * - listOpen:  消息列表(仅从浮动面板进入),不持久化
+ * 数据 per-run:attach 拉最近历史,开启(barrageOn || listOpen)时每 2s 轮询 since_id 增量。
  * 发送走全局 fetch(authFetch 已 patch:登录自动 Bearer、分享页自动附 ?token=)。
  */
-
-export type DanmakuMode = 'off' | 'barrage' | 'list';
+import { getUser } from '$lib/projectsStore.svelte';
 
 export const MODE_KEY = 'trailer-danmaku-mode';
 export const NICK_KEY = 'trailer-danmaku-nickname';
@@ -19,7 +20,21 @@ export const HISTORY_LIMIT = 100;
 export const PAGE_LIMIT = 50;
 export const POLL_MS = 2000;
 export const MAX_CONTENT = 200;
-export const MAX_NICKNAME = 24;
+/** 昵称上限(服务端同为 6 字) */
+export const MAX_NICKNAME = 6;
+
+/** 预设色 key → CSS 色值('' = 跟随主题文字色);与服务端白名单一致 */
+export const DANMAKU_COLOR_MAP = {
+  '': '',
+  red: '#ef4444',
+  orange: '#f97316',
+  yellow: '#eab308',
+  green: '#22c55e',
+  cyan: '#06b6d4',
+  blue: '#3b82f6',
+  purple: '#a855f7'
+} as const;
+export type DanmakuColor = keyof typeof DANMAKU_COLOR_MAP;
 
 export interface DanmakuMsg {
   /** 服务端自增 id;乐观消息用负数 temp id */
@@ -27,19 +42,21 @@ export interface DanmakuMsg {
   run_id: string;
   nickname: string;
   content: string;
+  /** 预设色 key,'' = 主题色 */
+  color?: string;
   created_at: number;
   temp?: boolean;
   /** 推入 flying 时分配的本地序号:Layer 的去重键,id 落定/替换后保持稳定 */
   fkey?: number;
 }
 
-function readMode(): DanmakuMode {
-  if (typeof localStorage === 'undefined') return 'off';
+function readBarrage(): boolean {
+  if (typeof localStorage === 'undefined') return false;
   try {
-    const v = localStorage.getItem(MODE_KEY);
-    return v === 'barrage' || v === 'list' ? v : 'off';
+    // 旧三态值 'list' 视为关(列表现为独立浮层)
+    return localStorage.getItem(MODE_KEY) === 'barrage';
   } catch {
-    return 'off';
+    return false;
   }
 }
 
@@ -69,8 +86,13 @@ function randomId(): string {
 }
 
 export class DanmakuStore {
-  mode = $state<DanmakuMode>(readMode());
+  /** 工具栏 DanMu 开关:横飘显示 */
+  barrageOn = $state(readBarrage());
+  /** 消息列表浮层(仅浮动面板进入) */
+  listOpen = $state(false);
   nickname = $state(readStr(NICK_KEY));
+  /** 当前发送用的预设色 key('' = 主题色) */
+  color = $state<DanmakuColor>('');
   /** 消息全集(软上限 MAX_MESSAGES) */
   messages = $state<DanmakuMsg[]>([]);
   /** 当前在飞(仅 barrage 层渲染) */
@@ -93,10 +115,15 @@ export class DanmakuStore {
     }
   }
 
-  /** 空昵称时生成「访客xxxxxx」 */
+  /**
+   * 发送昵称:自定义 > 登录用户名(截 6 字)>「访客xxxxxx」。
+   * 登录用户来自 projectsStore(layout 登录时 setUser)。
+   */
   get effectiveNickname(): string {
     const nick = this.nickname.trim();
     if (nick) return nick.slice(0, MAX_NICKNAME);
+    const username = getUser()?.username?.trim();
+    if (username) return username.slice(0, MAX_NICKNAME);
     return `访客${randomId().replace(/-/g, '').slice(0, 6)}`;
   }
 
@@ -105,21 +132,35 @@ export class DanmakuStore {
     writeStr(NICK_KEY, v);
   }
 
-  setMode(m: DanmakuMode) {
-    const wasOff = this.mode === 'off';
-    this.mode = m;
-    writeStr(MODE_KEY, m);
-    if (m === 'off') this.flying = [];
-    if (m === 'barrage' && wasOff) {
+  setColor(v: DanmakuColor) {
+    this.color = v;
+  }
+
+  /** 工具栏 DanMu 开关(只控横飘):关时清空在飞 */
+  toggleBarrage() {
+    this.barrageOn = !this.barrageOn;
+    writeStr(MODE_KEY, this.barrageOn ? 'barrage' : 'off');
+    if (!this.barrageOn) {
+      this.flying = [];
+    } else {
       // 开启瞬间先静默补一次增量,避免 off 期间积压的消息一齐飞出
       void this.#poll(true);
     }
     this.#syncPolling();
   }
 
-  /** 工具栏按钮:关→横飘→列表→关 */
-  cycleMode() {
-    this.setMode(this.mode === 'off' ? 'barrage' : this.mode === 'barrage' ? 'list' : 'off');
+  /** 消息列表(仅浮动面板进入):打开先静默补积压,避免旧消息刷屏列表滚动位 */
+  openList() {
+    if (this.listOpen) return;
+    this.listOpen = true;
+    void this.#poll(true);
+    this.#syncPolling();
+  }
+
+  closeList() {
+    if (!this.listOpen) return;
+    this.listOpen = false;
+    this.#syncPolling();
   }
 
   attach(runId: string) {
@@ -153,7 +194,7 @@ export class DanmakuStore {
 
   #syncPolling() {
     this.#stopPolling();
-    if (this.#runId && this.mode !== 'off') {
+    if (this.#runId && (this.barrageOn || this.listOpen)) {
       this.#timer = setInterval(() => void this.#poll(false), POLL_MS);
     }
   }
@@ -226,7 +267,7 @@ export class DanmakuStore {
     try {
       const fresh = await this.#fetchMessages(`?since_id=${this.#lastId()}&limit=100`);
       const added = this.#merge(fresh);
-      if (!silent && this.mode === 'barrage' && added.length) {
+      if (!silent && this.barrageOn && added.length) {
         this.flying = [...this.flying, ...this.#toFlying(added)];
       }
     } catch {
@@ -253,24 +294,26 @@ export class DanmakuStore {
     }
   }
 
-  /** 发送:乐观插入(temp 负 id)→ POST → 用服务端 id 替换;失败回滚 */
+  /** 发送:乐观插入(temp 负 id)→ POST → 折叠为服务端 id;失败回滚 */
   async send(content: string): Promise<boolean> {
     const text = content.trim();
     if (!text || !this.#runId || this.sending) return false;
     this.sending = true;
     this.error = '';
     const nickname = this.effectiveNickname;
+    const color = this.color;
     const tempId = -(++this.#tempSeq);
     const temp: DanmakuMsg = {
       id: tempId,
       run_id: this.#runId,
       nickname,
       content: text,
+      color,
       created_at: Date.now() / 1000,
       temp: true
     };
     this.messages = [...this.messages, temp];
-    if (this.mode === 'barrage') this.flying = [...this.flying, ...this.#toFlying([temp])];
+    if (this.barrageOn) this.flying = [...this.flying, ...this.#toFlying([temp])];
     const rollback = () => {
       this.messages = this.messages.filter((m) => m.id !== tempId);
       this.flying = this.flying.filter((m) => m.id !== tempId);
@@ -279,7 +322,7 @@ export class DanmakuStore {
       const res = await fetch(`/api/v1/runs/${this.#runId}/danmaku`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content: text, nickname, client_id: this.#clientId })
+        body: JSON.stringify({ content: text, nickname, client_id: this.#clientId, color })
       });
       if (res.status === 429) {
         rollback();
@@ -300,6 +343,7 @@ export class DanmakuStore {
             run_id: temp.run_id,
             nickname,
             content: text,
+            color,
             created_at:
               typeof created.created_at === 'number' ? created.created_at : temp.created_at
           }

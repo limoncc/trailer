@@ -1,7 +1,7 @@
 <script lang="ts">
   // ─── Boards tab:run 下多个命名看板(子标签),12 列网格自由布局 ───
   import { onMount } from 'svelte';
-  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause, MessageSquare, Clapperboard, List } from 'lucide-svelte';
+  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause, MessageSquare, Clapperboard } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
   import { isShareView } from '$lib/utils/shareView';
@@ -24,7 +24,7 @@
   import DashboardGrid from './DashboardGrid.svelte';
   import WidgetPickerDialog from './WidgetPickerDialog.svelte';
   import DanmakuLayer from './DanmakuLayer.svelte';
-  import DanmakuComposer from './DanmakuComposer.svelte';
+  import DanmakuFab from './DanmakuFab.svelte';
   import DanmakuListDialog from './DanmakuListDialog.svelte';
 
   interface BoardItem {
@@ -476,24 +476,18 @@
         {#if error}
           <span class="text-xs text-destructive">{error}</span>
         {/if}
-        <!-- 弹幕三态开关(per-run,owner 与分享访客都可操作,不进 readonly 分支) -->
+        <!-- DanMu:横飘显示开关(消息列表从右侧浮动面板进入);owner 与分享访客都可操作 -->
         <button
-          class="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md transition-colors {danmakuStore.mode === 'off'
-            ? 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
-            : 'border-primary bg-primary/10 text-primary'}"
-          title={danmakuStore.mode === 'off'
-            ? '弹幕:关 — 点击开启横飘弹幕'
-            : danmakuStore.mode === 'barrage'
-              ? '弹幕:横飘中 — 点击切换到消息列表'
-              : '弹幕:消息列表 — 点击关闭'}
-          onclick={() => danmakuStore.cycleMode()}
+          class="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md transition-colors {danmakuStore.barrageOn
+            ? 'border-primary bg-primary/10 text-primary'
+            : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'}"
+          title={danmakuStore.barrageOn ? 'DanMu: ON — click to hide floating danmaku' : 'DanMu: OFF — click to show floating danmaku'}
+          onclick={() => danmakuStore.toggleBarrage()}
         >
-          {#if danmakuStore.mode === 'barrage'}
-            <Clapperboard size={12} /> 弹幕
-          {:else if danmakuStore.mode === 'list'}
-            <List size={12} /> 弹幕
+          {#if danmakuStore.barrageOn}
+            <Clapperboard size={12} /> DanMu
           {:else}
-            <MessageSquare size={12} /> 弹幕
+            <MessageSquare size={12} /> DanMu
           {/if}
         </button>
         {#if activeBoard}
@@ -678,13 +672,15 @@
           onEditContent={openEditContent}
         />
       {/if}
-      {#if danmakuStore.mode === 'barrage'}
+      {#if danmakuStore.barrageOn}
         <DanmakuLayer />
-        <DanmakuComposer />
       {/if}
     </div>
   {/if}
 </div>
+
+<!-- 浮动发送按钮:贴右缘、靠近滑出;面板内含发送与 List 入口 -->
+<DanmakuFab />
 
 {#if pickerOpen}
   <WidgetPickerDialog
@@ -697,6 +693,6 @@
   />
 {/if}
 
-{#if danmakuStore.mode === 'list'}
-  <DanmakuListDialog onClose={() => danmakuStore.setMode('off')} />
+{#if danmakuStore.listOpen}
+  <DanmakuListDialog onClose={() => danmakuStore.closeList()} />
 {/if}

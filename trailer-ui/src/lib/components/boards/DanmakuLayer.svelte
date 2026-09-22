@@ -1,7 +1,7 @@
 <script lang="ts">
-  // ─── 弹幕横飘层:只渲染在飞条目,起飞/归轨在 {@attach} 动作内完成(无 $effect) ───
-  // 层与条目整体 pointer-events-none(v1 不做悬浮暂停/点击),不挡看板交互。
-  import { danmakuStore, type DanmakuMsg } from '$lib/danmaku/danmakuStore.svelte';
+  // ─── 弹幕横飘层:无框纯文字两排(昵称左上小字 + 消息在下),起飞/归轨在 {@attach} 内完成 ───
+  // 整层 pointer-events-none(v1 不做悬浮暂停/点击),不挡看板交互。
+  import { danmakuStore, DANMAKU_COLOR_MAP, type DanmakuMsg } from '$lib/danmaku/danmakuStore.svelte';
   import { allocateTrack, completeTrack, createTracks, durationMs, TRACK_H } from '$lib/danmaku/tracks';
 
   /** 轨道状态仅被 attachment 动作读写,不需要响应性 */
@@ -14,11 +14,19 @@
     return w;
   }
 
+  /** 消息色 CSS('' → 空,由 class 走主题色) */
+  function colorStyle(color?: string): string {
+    const hex = color ? DANMAKU_COLOR_MAP[color as keyof typeof DANMAKU_COLOR_MAP] : '';
+    return hex ? `color:${hex}` : '';
+  }
+
   /** 元素挂载即起飞:现测容器宽、占轨、设动画;动画结束/提前卸载时归还轨道并通知 store */
   function startFly(el: HTMLElement, msg: DanmakuMsg) {
     if (msg.fkey === undefined) return;
     const containerW = el.parentElement?.offsetWidth ?? 800;
-    const textW = estimateWidth(`${msg.nickname}${msg.content}`) + 48;
+    // 两排取较宽一行 + 少量留白
+    const textW =
+      Math.max(estimateWidth(msg.nickname), estimateWidth(msg.content)) + 24;
     const dur = durationMs(containerW, textW);
     const track = allocateTrack(tracks, performance.now(), dur);
     if (track < 0) {
@@ -46,11 +54,16 @@
 <div class="absolute inset-0 overflow-hidden pointer-events-none z-20">
   {#each danmakuStore.flying as m (m.fkey ?? m.id)}
     <span
-      class="absolute left-full top-0 whitespace-nowrap text-sm flex items-center gap-1.5 will-change-transform"
+      class="absolute left-full top-0 whitespace-nowrap flex flex-col leading-tight will-change-transform [text-shadow:0_1px_2px_rgb(0_0_0/0.35)]"
       {@attach (el) => startFly(el, m)}
     >
-      <span class="text-primary font-medium">{m.nickname}</span>
-      <span class="text-foreground bg-card/85 px-2 py-0.5 rounded border border-border/60 shadow-sm"
+      <!-- 昵称:左上小字 -->
+      <span
+        class="text-[10px] opacity-80 font-medium {m.color ? '' : 'text-muted-foreground'}"
+        style={colorStyle(m.color)}>{m.nickname}</span
+      >
+      <!-- 消息:下面大字 -->
+      <span class="text-sm font-medium {m.color ? '' : 'text-foreground'}" style={colorStyle(m.color)}
         >{m.content}</span
       >
     </span>

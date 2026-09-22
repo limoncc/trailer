@@ -2,8 +2,9 @@
   // ─── 弹幕消息列表弹窗(手写遮罩+居中面板,对齐 WidgetPickerDialog 模式) ───
   // 列表用 flex-col-reverse + 数据倒序渲染:天然锚定底部(新消息在下),
   // 打开即贴底、新消息自动可见、加载更早不跳动——全程零滚动 JS / 零 $effect。
-  import { X, Send, LoaderCircle, ChevronUp } from 'lucide-svelte';
-  import { danmakuStore, MAX_CONTENT, MAX_NICKNAME } from '$lib/danmaku/danmakuStore.svelte';
+  import { X, ChevronUp } from 'lucide-svelte';
+  import { danmakuStore, DANMAKU_COLOR_MAP } from '$lib/danmaku/danmakuStore.svelte';
+  import DanmakuInputBar from './DanmakuInputBar.svelte';
 
   interface Props {
     onClose: () => void;
@@ -11,16 +12,14 @@
 
   let { onClose }: Props = $props();
 
-  let draft = $state('');
-
-  async function submit() {
-    const text = draft.trim();
-    if (!text) return;
-    if (await danmakuStore.send(text)) draft = '';
-  }
-
   function fmtTime(ts: number): string {
     return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  /** 消息色 CSS('' → 空,由 class 走主题色) */
+  function colorStyle(color?: string): string {
+    const hex = color ? DANMAKU_COLOR_MAP[color as keyof typeof DANMAKU_COLOR_MAP] : '';
+    return hex ? `color:${hex}` : '';
   }
 </script>
 
@@ -73,7 +72,9 @@
       <div class="text-sm leading-snug">
         <span class="text-primary text-xs font-medium mr-1.5">{m.nickname}</span>
         <span class="text-[10px] text-muted-foreground mr-1.5 tabular-nums">{fmtTime(m.created_at)}</span>
-        <span class="text-foreground break-words">{m.content}</span>
+        <span class="break-words {m.color ? '' : 'text-foreground'}" style={colorStyle(m.color)}
+          >{m.content}</span
+        >
       </div>
     {/each}
     {#if danmakuStore.messages.length === 0}
@@ -81,42 +82,8 @@
     {/if}
   </div>
 
-  {#if danmakuStore.error}
-    <div class="px-4 pb-1 text-xs text-destructive shrink-0">{danmakuStore.error}</div>
-  {/if}
-
-  <!-- 底部输入 -->
-  <div class="border-t border-border px-3 py-2.5 flex items-center gap-1.5 shrink-0">
-    <input
-      value={danmakuStore.nickname}
-      oninput={(e) => danmakuStore.setNickname(e.currentTarget.value)}
-      placeholder="昵称(可选)"
-      maxlength={MAX_NICKNAME}
-      aria-label="弹幕昵称"
-      class="w-24 px-2 py-1.5 text-xs border border-border rounded bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-    />
-    <input
-      bind:value={draft}
-      placeholder="发条弹幕…"
-      maxlength={MAX_CONTENT}
-      aria-label="弹幕内容"
-      onkeydown={(e) => {
-        if (e.key === 'Enter') submit();
-      }}
-      class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-border rounded bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-    />
-    <button
-      type="button"
-      disabled={danmakuStore.sending || !draft.trim()}
-      title="发送弹幕(Enter)"
-      class="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
-      onclick={submit}
-    >
-      {#if danmakuStore.sending}
-        <LoaderCircle size={14} class="animate-spin" />
-      {:else}
-        <Send size={14} />
-      {/if}
-    </button>
+  <!-- 底部发送条(与浮动面板共用) -->
+  <div class="border-t border-border px-3 py-2.5 shrink-0">
+    <DanmakuInputBar />
   </div>
 </div>
