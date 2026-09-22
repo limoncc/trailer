@@ -1,9 +1,9 @@
 mod auth;
 mod config;
-pub mod error;
-mod routes;
 #[cfg(feature = "embed-frontend")]
 mod embedded;
+pub mod error;
+mod routes;
 
 use crate::auth::AuthState;
 use axum::extract::State;
@@ -120,6 +120,7 @@ async fn main() {
         frontend_dir: cfg.frontend_dir.clone().into(),
         lttb_cache: Arc::new(Mutex::new(LttbCache::new(10, 500))),
         auth,
+        danmaku_rl: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     // Build router
@@ -220,7 +221,12 @@ async fn serve_disk(dir: &std::path::Path, path: &str) -> Response {
     }
     if let Ok(data) = tokio::fs::read(&file_path).await {
         let mime = mime_guess::from_path(&candidate).first_or_octet_stream();
-        return (StatusCode::OK, [(header::CONTENT_TYPE, mime.as_ref())], data).into_response();
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, mime.as_ref())],
+            data,
+        )
+            .into_response();
     }
     // SPA fallback:未知路径 → index.html
     if let Ok(index) = tokio::fs::read(dir.join("index.html")).await {

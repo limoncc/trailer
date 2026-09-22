@@ -3,8 +3,9 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
 
 use crate::domain::{
-    ApiToken, ArtifactMeta, ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow,
-    ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
+    ApiToken, ArtifactMeta, DanmakuMessage, ExploreRow, FigureRow, HistogramRow, MediaRow,
+    MetricQuery, MetricRow, ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow,
+    TableRow, TextRow, UserRow,
 };
 use crate::error::{StorageError, StorageResult};
 use crate::storage::Storage;
@@ -286,6 +287,28 @@ impl PgStorage {
             .execute(&self.pool)
             .await?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS danmaku_messages (
+                id         BIGSERIAL PRIMARY KEY,
+                run_id     TEXT NOT NULL,
+                nickname   TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                color      TEXT NOT NULL DEFAULT '',
+                client_id  TEXT NOT NULL DEFAULT '',
+                created_at DOUBLE PRECISION NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_danmaku_run ON danmaku_messages(run_id, id)")
+            .execute(&self.pool)
+            .await?;
+        let _ = sqlx::query(
+            "ALTER TABLE danmaku_messages ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
+
         Ok(())
     }
 }
@@ -475,6 +498,15 @@ impl Storage for PgStorage {
             .execute(&self.pool)
             .await?;
         sqlx::query("DELETE FROM run_summary WHERE run_id = $1")
+            .bind(run_id)
+            .execute(&self.pool)
+            .await?;
+        // run_dashboards 此前 PG 侧漏删,顺手补齐
+        sqlx::query("DELETE FROM run_dashboards WHERE run_id = $1")
+            .bind(run_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM danmaku_messages WHERE run_id = $1")
             .bind(run_id)
             .execute(&self.pool)
             .await?;
@@ -966,7 +998,11 @@ impl Storage for PgStorage {
             .collect())
     }
 
-    async fn count_reports(&self, project: Option<&str>, owner_id: Option<i64>) -> StorageResult<u64> {
+    async fn count_reports(
+        &self,
+        project: Option<&str>,
+        owner_id: Option<i64>,
+    ) -> StorageResult<u64> {
         let row = sqlx::query(
             "SELECT COUNT(*) FROM reports WHERE ($1::text IS NULL OR project = $1) AND ($2::bigint IS NULL OR owner_id = $2)",
         )
@@ -1118,9 +1154,14 @@ impl Storage for PgStorage {
             "INSERT INTO run_dashboards (id, run_id, title, layout, created_at, updated_at)
              VALUES ($1,$2,$3,$4,$5,$6)",
         )
-        .bind(&id).bind(&d.run_id).bind(&d.title).bind(&d.layout)
-        .bind(d.created_at).bind(d.updated_at)
-        .execute(&self.pool).await?;
+        .bind(&id)
+        .bind(&d.run_id)
+        .bind(&d.title)
+        .bind(&d.layout)
+        .bind(d.created_at)
+        .bind(d.updated_at)
+        .execute(&self.pool)
+        .await?;
         Ok(id)
     }
 
@@ -1129,16 +1170,23 @@ impl Storage for PgStorage {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs_f64();
-        sqlx::query("UPDATE run_dashboards SET title = $1, layout = $2, updated_at = $3 WHERE id = $4")
-            .bind(title).bind(layout).bind(now).bind(id)
-            .execute(&self.pool).await?;
+        sqlx::query(
+            "UPDATE run_dashboards SET title = $1, layout = $2, updated_at = $3 WHERE id = $4",
+        )
+        .bind(title)
+        .bind(layout)
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     async fn delete_run_dashboard(&self, id: &str) -> StorageResult<()> {
         sqlx::query("DELETE FROM run_dashboards WHERE id = $1")
             .bind(id)
-            .execute(&self.pool).await?;
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -1148,7 +1196,8 @@ impl Storage for PgStorage {
              FROM run_dashboards WHERE run_id = $1 ORDER BY created_at ASC, id ASC",
         )
         .bind(run_id)
-        .fetch_all(&self.pool).await?;
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows
             .iter()
             .map(|r| RunDashboardRow {
@@ -1168,7 +1217,8 @@ impl Storage for PgStorage {
              FROM run_dashboards WHERE id = $1",
         )
         .bind(id)
-        .fetch_all(&self.pool).await?;
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows
             .iter()
             .map(|r| RunDashboardRow {
@@ -1180,6 +1230,102 @@ impl Storage for PgStorage {
                 updated_at: r.get("updated_at"),
             })
             .next())
+    }
+
+    // ── Danmaku ──
+
+    async fn insert_danmaku(&self, msg: &DanmakuMessage) -> StorageResult<i64> {
+        let row: (i64,) = sqlx::query_as(
+            "INSERT INTO danmaku_messages (run_id, nickname, content, color, client_id, created_at)
+             VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+        )
+        .bind(&msg.run_id)
+        .bind(&msg.nickname)
+        .bind(&msg.content)
+        .bind(&msg.color)
+        .bind(&msg.client_id)
+        .bind(msg.created_at)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
+    }
+
+    async fn list_danmaku(
+        &self,
+        run_id: &str,
+        before_id: Option<i64>,
+        since_id: Option<i64>,
+        limit: i64,
+    ) -> StorageResult<Vec<DanmakuMessage>> {
+        // 三种语义统一:DESC 取最新 limit 条,最后反转为升序
+        let rows = match (since_id, before_id) {
+            (Some(sid), _) => {
+                sqlx::query(
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
+                     FROM danmaku_messages WHERE run_id = $1 AND id > $2
+                     ORDER BY id DESC LIMIT $3",
+                )
+                .bind(run_id)
+                .bind(sid)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, Some(bid)) => {
+                sqlx::query(
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
+                     FROM danmaku_messages WHERE run_id = $1 AND id < $2
+                     ORDER BY id DESC LIMIT $3",
+                )
+                .bind(run_id)
+                .bind(bid)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, None) => {
+                sqlx::query(
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
+                     FROM danmaku_messages WHERE run_id = $1
+                     ORDER BY id DESC LIMIT $2",
+                )
+                .bind(run_id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+        let mut msgs: Vec<DanmakuMessage> = rows
+            .iter()
+            .map(|r| DanmakuMessage {
+                id: Some(r.get("id")),
+                run_id: r.get("run_id"),
+                nickname: r.get("nickname"),
+                content: r.get("content"),
+                color: r.get("color"),
+                client_id: r.get("client_id"),
+                created_at: r.get("created_at"),
+            })
+            .collect();
+        msgs.reverse();
+        Ok(msgs)
+    }
+
+    async fn count_danmaku(&self, run_id: &str) -> StorageResult<u64> {
+        let row = sqlx::query("SELECT COUNT(*) AS n FROM danmaku_messages WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get::<i64, _>("n").max(0) as u64)
+    }
+
+    async fn delete_danmaku(&self, run_id: &str, id: i64) -> StorageResult<()> {
+        sqlx::query("DELETE FROM danmaku_messages WHERE run_id = $1 AND id = $2")
+            .bind(run_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     async fn insert_table(&self, t: &TableRow) -> StorageResult<i64> {
