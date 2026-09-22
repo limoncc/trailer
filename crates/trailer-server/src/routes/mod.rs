@@ -2028,7 +2028,14 @@ pub struct CreateDanmakuRequest {
     pub content: String,
     pub nickname: Option<String>,
     pub client_id: Option<String>,
+    /// 预设色 key,白名单外一律 400。
+    pub color: Option<String>,
 }
+
+/// 弹幕预设色白名单('' = 跟随主题文字色),与前端色板一一对应。
+const DANMAKU_COLORS: &[&str] = &[
+    "", "red", "orange", "yellow", "green", "cyan", "blue", "purple",
+];
 
 /// 弹幕纯文本清洗:剥换行/控制字符、去首尾空白(D5:不支持 markdown/HTML)。
 fn sanitize_danmaku_text(s: &str) -> String {
@@ -2078,6 +2085,7 @@ pub async fn list_danmaku_handler(
                         "run_id": m.run_id,
                         "nickname": m.nickname,
                         "content": m.content,
+                        "color": m.color,
                         "created_at": m.created_at,
                     })
                 })
@@ -2105,6 +2113,7 @@ pub async fn create_danmaku_handler(
     // 2) 清洗 + 校验(在限流之前,防无效请求刷表)
     let content = sanitize_danmaku_text(&body.content);
     let nickname = sanitize_danmaku_text(body.nickname.as_deref().unwrap_or(""));
+    let color = body.color.clone().unwrap_or_default();
     if content.is_empty() || content.chars().count() > 200 {
         return (
             StatusCode::BAD_REQUEST,
@@ -2112,10 +2121,17 @@ pub async fn create_danmaku_handler(
         )
             .into_response();
     }
-    if nickname.chars().count() > 24 {
+    if nickname.chars().count() > 6 {
         return (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "nickname must be <= 24 chars"})),
+            Json(serde_json::json!({"error": "nickname must be <= 6 chars"})),
+        )
+            .into_response();
+    }
+    if !DANMAKU_COLORS.contains(&color.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "unsupported color"})),
         )
             .into_response();
     }
@@ -2158,6 +2174,7 @@ pub async fn create_danmaku_handler(
         run_id,
         nickname: nickname.clone(),
         content: content.clone(),
+        color: color.clone(),
         client_id: body.client_id.clone().unwrap_or_default(),
         created_at: now_secs(),
     };
@@ -2169,6 +2186,7 @@ pub async fn create_danmaku_handler(
                 "run_id": msg.run_id,
                 "nickname": msg.nickname,
                 "content": msg.content,
+                "color": msg.color,
                 "created_at": msg.created_at,
             })),
         )
@@ -3803,8 +3821,8 @@ mod tests {
         .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-        // 昵称 25 字 → 400
-        let long_nick = "昵".repeat(25);
+        // 昵称 7 字 → 400(上限 6 字)
+        let long_nick = "昵".repeat(7);
         let resp = post_danmaku(
             &app,
             "/api/v1/runs/r1/danmaku",
@@ -3815,6 +3833,33 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // 非白名单颜色 → 400
+        let body = serde_json::json!({"content": "ok", "client_id": "c1", "color": "chartreuse"});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/r1/danmaku")
+            .header("content-type", "application/json")
+            .header("authorization", &auth_val)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // 白名单颜色 → 201,响应回传 color
+        let body = serde_json::json!({"content": "colored", "client_id": "c1", "color": "red"});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/r1/danmaku")
+            .header("content-type", "application/json")
+            .header("authorization", &auth_val)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["color"], "red");
 
         // 校验失败不占限流名额:同 client_id 仍可成功发送
         let resp = post_danmaku(

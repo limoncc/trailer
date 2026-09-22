@@ -325,6 +325,7 @@ impl SqliteStorage {
                 run_id     TEXT NOT NULL,
                 nickname   TEXT NOT NULL,
                 content    TEXT NOT NULL,
+                color      TEXT NOT NULL DEFAULT '',
                 client_id  TEXT NOT NULL DEFAULT '',
                 created_at REAL NOT NULL
             )",
@@ -334,6 +335,11 @@ impl SqliteStorage {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_danmaku_run ON danmaku_messages(run_id, id)")
             .execute(&self.pool)
             .await?;
+        // 旧库补 color 列(重复执行报 Duplicate column,容错忽略)
+        let _ =
+            sqlx::query("ALTER TABLE danmaku_messages ADD COLUMN color TEXT NOT NULL DEFAULT ''")
+                .execute(&self.pool)
+                .await;
 
         Ok(())
     }
@@ -1278,12 +1284,13 @@ impl Storage for SqliteStorage {
 
     async fn insert_danmaku(&self, msg: &DanmakuMessage) -> StorageResult<i64> {
         let result = sqlx::query(
-            "INSERT INTO danmaku_messages (run_id, nickname, content, client_id, created_at)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO danmaku_messages (run_id, nickname, content, color, client_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&msg.run_id)
         .bind(&msg.nickname)
         .bind(&msg.content)
+        .bind(&msg.color)
         .bind(&msg.client_id)
         .bind(msg.created_at)
         .execute(&self.pool)
@@ -1302,7 +1309,7 @@ impl Storage for SqliteStorage {
         let rows = match (since_id, before_id) {
             (Some(sid), _) => {
                 sqlx::query(
-                    "SELECT id, run_id, nickname, content, client_id, created_at
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
                      FROM danmaku_messages WHERE run_id = ?1 AND id > ?2
                      ORDER BY id DESC LIMIT ?3",
                 )
@@ -1314,7 +1321,7 @@ impl Storage for SqliteStorage {
             }
             (None, Some(bid)) => {
                 sqlx::query(
-                    "SELECT id, run_id, nickname, content, client_id, created_at
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
                      FROM danmaku_messages WHERE run_id = ?1 AND id < ?2
                      ORDER BY id DESC LIMIT ?3",
                 )
@@ -1326,7 +1333,7 @@ impl Storage for SqliteStorage {
             }
             (None, None) => {
                 sqlx::query(
-                    "SELECT id, run_id, nickname, content, client_id, created_at
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
                      FROM danmaku_messages WHERE run_id = ?1
                      ORDER BY id DESC LIMIT ?2",
                 )
@@ -1343,6 +1350,7 @@ impl Storage for SqliteStorage {
                 run_id: r.get("run_id"),
                 nickname: r.get("nickname"),
                 content: r.get("content"),
+                color: r.get("color"),
                 client_id: r.get("client_id"),
                 created_at: r.get("created_at"),
             })

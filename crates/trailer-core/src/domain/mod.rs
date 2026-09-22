@@ -276,10 +276,13 @@ pub struct ArtifactMeta {
 pub struct DanmakuMessage {
     pub id: Option<i64>,
     pub run_id: String,
-    /// ≤24 chars,服务端再校验。
+    /// ≤6 chars,服务端再校验。
     pub nickname: String,
     /// ≤200 chars,纯文本。
     pub content: String,
+    /// 预设色 key('' = 跟随主题文字色);白名单由服务端校验。
+    #[serde(default)]
+    pub color: String,
     /// 限流用的客户端指纹,API 响应中不回传。
     pub client_id: String,
     pub created_at: f64,

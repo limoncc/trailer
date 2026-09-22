@@ -1671,6 +1671,7 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
                 run_id: "danmaku-run-1".into(),
                 nickname: format!("user{i}"),
                 content: format!("msg{i}"),
+                color: if i == 0 { "red".into() } else { String::new() },
                 client_id: format!("c{i}"),
                 created_at: 4000.0 + i as f64,
             })
@@ -1714,6 +1715,15 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
         store.count_danmaku("danmaku-run-1").await.expect("count"),
         3
     );
+
+    // color 往返:首条 red,其余默认空串(跟随主题)
+    let all = store
+        .list_danmaku("danmaku-run-1", None, None, 10)
+        .await
+        .expect("list all for color");
+    assert_eq!(all[0].content, "msg0");
+    assert_eq!(all[0].color, "red");
+    assert_eq!(all[1].color, "");
 
     // delete_run 级联
     store

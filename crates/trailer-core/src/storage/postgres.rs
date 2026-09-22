@@ -293,6 +293,7 @@ impl PgStorage {
                 run_id     TEXT NOT NULL,
                 nickname   TEXT NOT NULL,
                 content    TEXT NOT NULL,
+                color      TEXT NOT NULL DEFAULT '',
                 client_id  TEXT NOT NULL DEFAULT '',
                 created_at DOUBLE PRECISION NOT NULL
             )",
@@ -302,6 +303,11 @@ impl PgStorage {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_danmaku_run ON danmaku_messages(run_id, id)")
             .execute(&self.pool)
             .await?;
+        let _ = sqlx::query(
+            "ALTER TABLE danmaku_messages ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
 
         Ok(())
     }
@@ -1230,12 +1236,13 @@ impl Storage for PgStorage {
 
     async fn insert_danmaku(&self, msg: &DanmakuMessage) -> StorageResult<i64> {
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO danmaku_messages (run_id, nickname, content, client_id, created_at)
-             VALUES ($1,$2,$3,$4,$5) RETURNING id",
+            "INSERT INTO danmaku_messages (run_id, nickname, content, color, client_id, created_at)
+             VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
         )
         .bind(&msg.run_id)
         .bind(&msg.nickname)
         .bind(&msg.content)
+        .bind(&msg.color)
         .bind(&msg.client_id)
         .bind(msg.created_at)
         .fetch_one(&self.pool)
@@ -1254,7 +1261,7 @@ impl Storage for PgStorage {
         let rows = match (since_id, before_id) {
             (Some(sid), _) => {
                 sqlx::query(
-                    "SELECT id, run_id, nickname, content, client_id, created_at
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
                      FROM danmaku_messages WHERE run_id = $1 AND id > $2
                      ORDER BY id DESC LIMIT $3",
                 )
@@ -1266,7 +1273,7 @@ impl Storage for PgStorage {
             }
             (None, Some(bid)) => {
                 sqlx::query(
-                    "SELECT id, run_id, nickname, content, client_id, created_at
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
                      FROM danmaku_messages WHERE run_id = $1 AND id < $2
                      ORDER BY id DESC LIMIT $3",
                 )
@@ -1278,7 +1285,7 @@ impl Storage for PgStorage {
             }
             (None, None) => {
                 sqlx::query(
-                    "SELECT id, run_id, nickname, content, client_id, created_at
+                    "SELECT id, run_id, nickname, content, color, client_id, created_at
                      FROM danmaku_messages WHERE run_id = $1
                      ORDER BY id DESC LIMIT $2",
                 )
@@ -1295,6 +1302,7 @@ impl Storage for PgStorage {
                 run_id: r.get("run_id"),
                 nickname: r.get("nickname"),
                 content: r.get("content"),
+                color: r.get("color"),
                 client_id: r.get("client_id"),
                 created_at: r.get("created_at"),
             })
