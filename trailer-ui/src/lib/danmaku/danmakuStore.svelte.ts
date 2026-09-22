@@ -25,8 +25,10 @@ export const POLL_MS = 2000;
 export const MAX_CONTENT = 200;
 /** 昵称上限(服务端同为 6 字) */
 export const MAX_NICKNAME = 6;
-/** 循环模式同时在飞上限(≈横飘轨道数),不足则从消息源补位 */
-export const LOOP_CONCURRENT = 6;
+/** 循环模式出幕间隔(ms):一条一条按时间先后出,配合 SPEED 150px/s 基本不撞轨 */
+export const LOOP_INTERVAL_MS = 1500;
+/** 循环在飞软上限:挤不下时跳过本拍(游标不推进,顺序不丢,下拍重试) */
+export const LOOP_MAX_FLYING = 8;
 
 /** 预设色 key → CSS 色值('' = 跟随主题文字色);与服务端白名单一致 */
 export const DANMAKU_COLOR_MAP = {
@@ -111,10 +113,12 @@ export class DanmakuStore {
 
   #runId: string | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
+  /** 循环出幕定时器(串行:每拍一条) */
+  #loopTimer: ReturnType<typeof setInterval> | null = null;
   #clientId = readStr(CLIENT_KEY);
   #tempSeq = 0;
   #fkeySeq = 0;
-  /** 循环播放游标(指向消息源下一条) */
+  /** 循环播放游标(单调递增,消费时对源长度取模;失败回退 --) */
   #loopCursor = 0;
 
   constructor() {
@@ -157,27 +161,42 @@ export class DanmakuStore {
     if (m === prev) return;
     this.playMode = m;
     writeStr(MODE_KEY, m);
+    // 离开 off 先静默补一次增量:live 防积压齐飞,loop 刷新循环源
+    if (prev === 'off' && m !== 'off') void this.#poll(true);
     if (m === 'off') {
       this.flying = [];
       this.#loopCursor = 0;
-    } else {
-      // 离开 off 先静默补一次增量:live 防积压齐飞,loop 刷新循环源
-      if (prev === 'off') void this.#poll(true);
-      if (m === 'loop') this.#fillLoop();
+    }
+    this.#stopLoopTimer();
+    if (m === 'loop') {
+      this.#pushLoopOne(); // 首条立即出
+      this.#startLoopTimer();
     }
     this.#syncPolling();
   }
 
-  /** 循环模式补位:在飞不足上限时从消息源(仅真 id)按游标取下一条,走完回开头 */
-  #fillLoop() {
+  /**
+   * 循环出一幕:严格按消息时间先后(id 升序)取游标下一条。
+   * 在飞挤满时跳过本拍(游标不动 → 顺序不丢,下拍重试);空源等轮询补源。
+   */
+  #pushLoopOne() {
     if (this.playMode !== 'loop') return;
-    while (this.flying.length < LOOP_CONCURRENT) {
-      const real = this.messages.filter((m) => m.id > 0);
-      if (!real.length) return;
-      const m = real[this.#loopCursor % real.length];
-      this.#loopCursor = (this.#loopCursor % real.length) + 1;
-      this.flying = [...this.flying, ...this.#toFlying([m])];
-    }
+    if (this.flying.length >= LOOP_MAX_FLYING) return;
+    const real = this.messages.filter((m) => m.id > 0);
+    if (!real.length) return;
+    const m = real[this.#loopCursor % real.length];
+    this.#loopCursor += 1;
+    this.flying = [...this.flying, ...this.#toFlying([m])];
+  }
+
+  #startLoopTimer() {
+    if (this.#loopTimer) return;
+    this.#loopTimer = setInterval(() => this.#pushLoopOne(), LOOP_INTERVAL_MS);
+  }
+
+  #stopLoopTimer() {
+    if (this.#loopTimer) clearInterval(this.#loopTimer);
+    this.#loopTimer = null;
   }
 
   /** 消息列表(仅浮动面板进入):打开先静默补积压,避免旧消息刷屏列表滚动位 */
@@ -201,23 +220,32 @@ export class DanmakuStore {
     this.flying = [];
     this.hasOlder = false;
     this.error = '';
+    this.#loopCursor = 0;
     void this.#loadLatest();
+    if (this.playMode === 'loop') this.#startLoopTimer(); // 恢复页即 loop:定时器从源出幕
     this.#syncPolling();
   }
 
   detach() {
     this.#runId = null;
     this.#stopPolling();
+    this.#stopLoopTimer();
     this.messages = [];
     this.flying = [];
     this.hasOlder = false;
     this.#loopCursor = 0;
   }
 
-  /** 动画结束由 Layer 按 fkey 回调移除(messages 保留);循环模式随即补位 */
-  flyDone(fkey: number) {
+  /**
+   * 动画结束由 Layer 按 fkey 回调移除(messages 保留)。
+   * failed=true 表示轨道分配失败:游标回退,循环下一拍重出同一条(顺序不丢)。
+   * 正常飞完不回退——循环节奏由出幕定时器驱动,不在此补位(避免同步风暴)。
+   */
+  flyDone(fkey: number, failed = false) {
     this.flying = this.flying.filter((m) => m.fkey !== fkey);
-    if (this.playMode === 'loop') this.#fillLoop();
+    if (failed && this.playMode === 'loop') {
+      this.#loopCursor = Math.max(0, this.#loopCursor - 1);
+    }
   }
 
   /** 推入在飞队列并分配 fkey(Layer 以此去重,跨 id 替换稳定) */
@@ -287,10 +315,9 @@ export class DanmakuStore {
   async #loadLatest() {
     try {
       const msgs = await this.#fetchMessages(`?limit=${HISTORY_LIMIT}`);
-      // 历史只进列表:live 不飞(避免开启瞬间全飞);loop 以历史为循环源首填
+      // 历史只进列表:live 不飞(避免开启瞬间全飞);loop 由定时器从源串行出幕
       this.#merge(msgs);
       if (msgs.length === HISTORY_LIMIT) this.hasOlder = true;
-      if (this.playMode === 'loop') this.#fillLoop();
     } catch (e) {
       this.error = e instanceof Error ? e.message : 'Failed to load danmaku';
     }
@@ -301,17 +328,10 @@ export class DanmakuStore {
     try {
       const fresh = await this.#fetchMessages(`?since_id=${this.#lastId()}&limit=100`);
       const added = this.#merge(fresh);
-      if (silent) {
-        // 静默只更新源;loop 的源可能因此从空变有,补一次位
-        if (this.playMode === 'loop') this.#fillLoop();
-        return;
-      }
+      if (silent || !added.length) return;
       if (this.playMode === 'live') {
-        // 实时:新消息立即起飞
-        if (added.length) this.flying = [...this.flying, ...this.#toFlying(added)];
-      } else if (this.playMode === 'loop') {
-        // 循环:每拍按需补位(未满才动,不打乱游标节奏)
-        this.#fillLoop();
+        // 实时:新消息立即起飞(loop 的循环源同步更新,由出幕定时器按序播)
+        this.flying = [...this.flying, ...this.#toFlying(added)];
       }
     } catch {
       /* 轮询静默失败,下一拍重试 */

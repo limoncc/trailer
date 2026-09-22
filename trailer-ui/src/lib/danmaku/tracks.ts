@@ -7,8 +7,8 @@
 export const TRACK_H = 40;
 /** 默认轨道数 */
 export const TRACK_COUNT = 6;
-/** 横飘速度(px/s) */
-export const SPEED_PX_PER_S = 110;
+/** 横飘速度(px/s):150 让单条过场约 7~8s,配合循环 1.5s 出幕基本不撞轨 */
+export const SPEED_PX_PER_S = 150;
 /** 轨道释放后的冷却(ms),防止同轨道两条紧贴出发 */
 export const TRACK_GAP_MS = 400;
 

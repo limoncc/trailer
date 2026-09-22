@@ -30,8 +30,8 @@
     const dur = durationMs(containerW, textW);
     const track = allocateTrack(tracks, performance.now(), dur);
     if (track < 0) {
-      // 轨道全忙:丢弃该条(消息列表里仍有)
-      danmakuStore.flyDone(msg.fkey);
+      // 轨道全忙/冷却中:通知 store 游标回退,循环下一拍重出同一条(顺序不丢)
+      danmakuStore.flyDone(msg.fkey, true);
       return;
     }
     el.style.setProperty('--dm-dist', `${containerW}px`);

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CLIENT_KEY,
+  LOOP_INTERVAL_MS,
   MAX_MESSAGES,
   MODE_KEY,
   NICK_KEY,
@@ -84,28 +85,36 @@ describe('DanmakuStore', () => {
     expect(s.listOpen).toBe(false);
   });
 
-  it('loop:消息源按游标循环填满,flyDone 补位', async () => {
+  it('loop:串行按时间序出幕(每拍一条),正常飞完不回补,轨道失败回退重出同条', async () => {
+    vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue(okJson({ messages: [msg(1), msg(2)] }));
     vi.stubGlobal('fetch', fetchMock);
     const s = new DanmakuStore();
     s.attach('r1');
-    await vi.waitFor(() => expect(s.messages).toHaveLength(2));
+    await flush();
     s.cyclePlayMode(); // live
-    s.cyclePlayMode(); // loop:fillLoop 首填
-    // 2 条源循环填满 6 条:1,2,1,2,1,2
-    expect(s.flying).toHaveLength(6);
-    expect(s.flying.map((m) => m.id)).toEqual([1, 2, 1, 2, 1, 2]);
-    // fkey 各不相同(同消息重复起飞各自独立)
-    expect(new Set(s.flying.map((m) => m.fkey)).size).toBe(6);
-    // 飞走一条 → 补位(游标继续:下一条是源首 1)
-    const gone = s.flying[0].fkey!;
-    s.flyDone(gone);
-    expect(s.flying).toHaveLength(6);
-    expect(s.flying[5].id).toBe(1);
+    await flush();
+    s.cyclePlayMode(); // loop:首条立即出
+    expect(s.flying.map((m) => m.id)).toEqual([1]);
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS);
+    expect(s.flying.map((m) => m.id)).toEqual([1, 2]); // 第二拍出第 2 条
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS);
+    expect(s.flying.map((m) => m.id)).toEqual([1, 2, 1]); // 游标绕回,顺序严格
+
+    // 正常飞完:只移除不回补(节奏由出幕定时器驱动)
+    s.flyDone(s.flying[0].fkey!);
+    expect(s.flying.map((m) => m.id)).toEqual([2, 1]);
+
+    // 轨道失败(刚出的最后一条):游标回退,下一拍重出同一条,顺序不丢
+    const last = s.flying[s.flying.length - 1];
+    s.flyDone(last.fkey!, true);
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS);
+    expect(s.flying[s.flying.length - 1].id).toBe(last.id);
+
     s.detach();
   });
 
-  it('loop:空源时 flying 为空,轮询到新消息后自动补满', async () => {
+  it('loop:空源时不飞,轮询到新消息后下一拍出幕', async () => {
     vi.useFakeTimers();
     let pollN = 0;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -121,14 +130,14 @@ describe('DanmakuStore', () => {
     s.attach('r1');
     await flush();
     s.cyclePlayMode(); // live(silent 空)
-    s.cyclePlayMode(); // loop:源空 → 不填
+    s.cyclePlayMode(); // loop:源空 → 本拍跳过
     await flush();
     expect(s.flying).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(POLL_MS); // 正式轮询带回 msg5 → fillLoop
+    await vi.advanceTimersByTimeAsync(POLL_MS); // 正式轮询带回 msg5(只进源)
     await flush();
     expect(s.messages.map((m) => m.id)).toEqual([5]);
-    expect(s.flying.length).toBeGreaterThan(0); // 源更新后补位(同一条循环填)
-    expect(s.flying.every((m) => m.id === 5)).toBe(true);
+    await vi.advanceTimersByTimeAsync(LOOP_INTERVAL_MS); // 出幕定时器下一拍
+    expect(s.flying.map((m) => m.id)).toEqual([5]);
     s.detach();
   });
 

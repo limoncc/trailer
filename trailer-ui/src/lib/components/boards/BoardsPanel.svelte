@@ -1,7 +1,7 @@
 <script lang="ts">
   // ─── Boards tab:run 下多个命名看板(子标签),12 列网格自由布局 ───
   import { onMount } from 'svelte';
-  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause, MessageSquare, Radio, Repeat } from 'lucide-svelte';
+  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause, Square, Radio, Repeat } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
   import { isShareView } from '$lib/utils/shareView';
@@ -476,7 +476,7 @@
         {#if error}
           <span class="text-xs text-destructive">{error}</span>
         {/if}
-        <!-- Danmu:三态循环 off→实时(只飞新到)→循环(存量反复飞)→off;消息列表从右侧浮动面板进入 -->
+        <!-- Danmu:三态图标按钮 停止(Square)/实时(Radio)/循环(Repeat),无文字档位;消息列表从右侧浮动面板进入 -->
         <button
           class="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md transition-colors {danmakuStore.playMode === 'off'
             ? 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -484,16 +484,16 @@
           title={danmakuStore.playMode === 'off'
             ? 'Danmu: OFF — click for Live (only new messages float by)'
             : danmakuStore.playMode === 'live'
-              ? 'Danmu: LIVE — click for Loop (replay all messages)'
+              ? 'Danmu: LIVE — click for Loop (replay messages in order)'
               : 'Danmu: LOOP — click to turn off'}
           onclick={() => danmakuStore.cyclePlayMode()}
         >
           {#if danmakuStore.playMode === 'off'}
-            <MessageSquare size={12} /> Danmu
+            <Square size={11} /> Danmu
           {:else if danmakuStore.playMode === 'live'}
-            <Radio size={12} /> Danmu · Live
+            <Radio size={12} /> Danmu
           {:else}
-            <Repeat size={12} /> Danmu · Loop
+            <Repeat size={12} /> Danmu
           {/if}
         </button>
         {#if activeBoard}
