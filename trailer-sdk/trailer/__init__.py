@@ -1,6 +1,6 @@
 """Trailer: Next-gen ML experiment tracking."""
 
-__version__ = "0.1.14"
+__version__ = "0.1.15"
 
 # The compiled Rust extension (cdylib) is importable as trailer.trailer
 # after `maturin develop` or `pip install`
