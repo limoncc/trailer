@@ -1574,7 +1574,10 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
         created_at: 2000.0,
         updated_at: 2000.0,
     };
-    let did = store.insert_run_dashboard(&dash).await.expect("insert dash");
+    let did = store
+        .insert_run_dashboard(&dash)
+        .await
+        .expect("insert dash");
     assert!(did.starts_with("dash_"));
     let got = store
         .get_run_dashboard(&did)
@@ -1641,6 +1644,135 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
         .await
         .expect("get dash3")
         .is_none());
+
+    // 17. Danmaku insert / pagination / count / delete_run cascade
+    let dm_run = RunMeta {
+        run_id: "danmaku-run-1".into(),
+        project: "test".into(),
+        group_name: None,
+        name: Some("danmaku".into()),
+        state: "finished".into(),
+        config: serde_json::json!({}),
+        env: serde_json::json!({}),
+        git_commit: None,
+        sweep_id: None,
+        created_at: 4000.0,
+        heartbeat_at: None,
+        tags: None,
+        owner_id: None,
+    };
+    store.upsert_run(&dm_run).await.expect("upsert dm run");
+
+    let mut dm_ids = Vec::new();
+    for i in 0..3 {
+        let id = store
+            .insert_danmaku(&trailer_core::domain::DanmakuMessage {
+                id: None,
+                run_id: "danmaku-run-1".into(),
+                nickname: format!("user{i}"),
+                content: format!("msg{i}"),
+                color: if i == 0 { "red".into() } else { String::new() },
+                client_id: format!("c{i}"),
+                created_at: 4000.0 + i as f64,
+            })
+            .await
+            .expect("insert danmaku");
+        dm_ids.push(id);
+    }
+    assert!(
+        dm_ids[0] < dm_ids[1] && dm_ids[1] < dm_ids[2],
+        "ids ascending"
+    );
+
+    // latest N:最后 2 条,升序
+    let latest = store
+        .list_danmaku("danmaku-run-1", None, None, 2)
+        .await
+        .expect("list latest");
+    assert_eq!(latest.len(), 2);
+    assert_eq!(latest[0].content, "msg1");
+    assert_eq!(latest[1].content, "msg2");
+
+    // since_id:增量
+    let inc = store
+        .list_danmaku("danmaku-run-1", None, Some(dm_ids[0]), 10)
+        .await
+        .expect("list since");
+    assert_eq!(inc.len(), 2);
+    assert_eq!(inc[0].content, "msg1");
+    assert_eq!(inc[1].content, "msg2");
+
+    // before_id:向上翻页
+    let older = store
+        .list_danmaku("danmaku-run-1", Some(dm_ids[2]), None, 1)
+        .await
+        .expect("list before");
+    assert_eq!(older.len(), 1);
+    assert_eq!(older[0].content, "msg1");
+
+    // count
+    assert_eq!(
+        store.count_danmaku("danmaku-run-1").await.expect("count"),
+        3
+    );
+
+    // color 往返:首条 red,其余默认空串(跟随主题)
+    let all = store
+        .list_danmaku("danmaku-run-1", None, None, 10)
+        .await
+        .expect("list all for color");
+    assert_eq!(all[0].content, "msg0");
+    assert_eq!(all[0].color, "red");
+    assert_eq!(all[1].color, "");
+
+    // 单条删除(双条件 run_id+id):删中间一条,幂等再删成功
+    store
+        .delete_danmaku("danmaku-run-1", dm_ids[1])
+        .await
+        .expect("delete one danmaku");
+    let after_del = store
+        .list_danmaku("danmaku-run-1", None, None, 10)
+        .await
+        .expect("list after single delete");
+    assert_eq!(after_del.len(), 2);
+    assert_eq!(after_del[0].content, "msg0");
+    assert_eq!(after_del[1].content, "msg2");
+    assert_eq!(
+        store.count_danmaku("danmaku-run-1").await.expect("count"),
+        2
+    );
+    // 跨 run 条件:错误 run_id 不删
+    store
+        .delete_danmaku("other-run", dm_ids[0])
+        .await
+        .expect("delete with wrong run is idempotent no-op");
+    assert_eq!(
+        store.count_danmaku("danmaku-run-1").await.expect("count2"),
+        2
+    );
+    // 幂等:再删同一条仍 Ok
+    store
+        .delete_danmaku("danmaku-run-1", dm_ids[1])
+        .await
+        .expect("idempotent delete");
+
+    // delete_run 级联
+    store
+        .delete_run("danmaku-run-1")
+        .await
+        .expect("delete dm run");
+    assert!(store
+        .list_danmaku("danmaku-run-1", None, None, 10)
+        .await
+        .expect("list after delete")
+        .is_empty());
+    assert_eq!(
+        store
+            .count_danmaku("danmaku-run-1")
+            .await
+            .expect("count after delete"),
+        0
+    );
 }
 
 // ─── PostgreSQL contract (runs when --features pg is enabled) ───
@@ -1652,7 +1784,7 @@ async fn pg_insert_and_query_metrics() {
 
     // Clean state: drop all tables
     let pgpool = sqlx::PgPool::connect(&url).await.expect("PG connect");
-    let _ = sqlx::query("DROP TABLE IF EXISTS metrics, runs, run_summary, artifacts, figures, texts, tables, media, reports, histograms, shares, api_tokens, trailer_users, explores, run_dashboards CASCADE")
+    let _ = sqlx::query("DROP TABLE IF EXISTS metrics, runs, run_summary, artifacts, figures, texts, tables, media, reports, histograms, shares, api_tokens, trailer_users, explores, run_dashboards, danmaku_messages CASCADE")
         .execute(&pgpool)
         .await;
     pgpool.close().await;

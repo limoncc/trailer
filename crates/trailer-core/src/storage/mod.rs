@@ -5,8 +5,9 @@ pub mod sqlite;
 pub mod postgres;
 
 use crate::domain::{
-    ApiToken, ArtifactMeta, ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow,
-    ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
+    ApiToken, ArtifactMeta, DanmakuMessage, ExploreRow, FigureRow, HistogramRow, MediaRow,
+    MetricQuery, MetricRow, ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow,
+    TableRow, TextRow, UserRow,
 };
 use crate::error::StorageResult;
 use async_trait::async_trait;
@@ -93,7 +94,11 @@ pub trait Storage: Send + Sync {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> StorageResult<Vec<ReportRow>>;
-    async fn count_reports(&self, project: Option<&str>, owner_id: Option<i64>) -> StorageResult<u64>;
+    async fn count_reports(
+        &self,
+        project: Option<&str>,
+        owner_id: Option<i64>,
+    ) -> StorageResult<u64>;
     async fn delete_runs_by_project(&self, project: &str) -> StorageResult<usize>;
     async fn get_report(&self, id: &str) -> StorageResult<Option<ReportRow>>;
 
@@ -125,6 +130,25 @@ pub trait Storage: Send + Sync {
     async fn delete_run_dashboard(&self, id: &str) -> StorageResult<()>;
     async fn list_run_dashboards(&self, run_id: &str) -> StorageResult<Vec<RunDashboardRow>>;
     async fn get_run_dashboard(&self, id: &str) -> StorageResult<Option<RunDashboardRow>>;
+
+    // ── Danmaku(per-run 弹幕,永久保存,无清理) ──
+    /// 插入一条弹幕,返回自增 id。
+    async fn insert_danmaku(&self, msg: &DanmakuMessage) -> StorageResult<i64>;
+    /// 按 id 升序返回:
+    /// - `since_id = Some(x)` → id > x 的最新 limit 条(升序,增量拉取)
+    /// - 否则 `before_id = Some(x)` → id < x 的较早 limit 条(升序,列表向上翻页)
+    /// - 两者皆 None → 该 run 最新 limit 条(升序)
+    async fn list_danmaku(
+        &self,
+        run_id: &str,
+        before_id: Option<i64>,
+        since_id: Option<i64>,
+        limit: i64,
+    ) -> StorageResult<Vec<DanmakuMessage>>;
+    /// 该 run 的弹幕总数(列表弹窗头部展示)。
+    async fn count_danmaku(&self, run_id: &str) -> StorageResult<u64>;
+    /// 删除一条弹幕(run_id 双条件防跨 run 误删);不存在按成功处理(幂等)。
+    async fn delete_danmaku(&self, run_id: &str, id: i64) -> StorageResult<()>;
 
     // ── Tables ──
     async fn insert_table(&self, table: &TableRow) -> StorageResult<i64>;

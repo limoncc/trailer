@@ -300,6 +300,16 @@
 [data-theme="teal"] { --primary: oklch(0.704 0.14 182.503); --primary-foreground: oklch(0.985 0 0); --ring: oklch(0.704 0.14 182.503); --accent: oklch(0.94 0.05 182); --accent-foreground: oklch(0.4 0.12 182); }
 .dark[data-theme="teal"] { --primary: oklch(0.777 0.152 181.912); --primary-foreground: oklch(0.2 0.06 182); --ring: oklch(0.777 0.152 181.912); --accent: oklch(0.4 0.12 182); --accent-foreground: oklch(0.94 0.05 182); }
 
+/* ─── 弹幕横飘:从容器右缘外平移到完全出左缘(--dm-dist = 容器宽,由起飞动作注入) ─── */
+@keyframes danmaku-x {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-100% - var(--dm-dist, 0px)));
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

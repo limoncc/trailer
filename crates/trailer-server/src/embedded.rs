@@ -17,7 +17,12 @@ pub fn serve(path: &str) -> Response {
     match Asset::get(key) {
         Some(file) => {
             let mime = mime_guess::from_path(key).first_or_octet_stream();
-            (StatusCode::OK, [(header::CONTENT_TYPE, mime.as_ref())], file.data).into_response()
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, mime.as_ref())],
+                file.data,
+            )
+                .into_response()
         }
         None => match Asset::get("index.html") {
             Some(index) => (
