@@ -943,7 +943,12 @@ pub async fn run_states(
         Err(s) => return s.into_response(),
     };
     let mut out = HashMap::new();
-    for rid in params.run_ids.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+    for rid in params
+        .run_ids
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         if let Ok(Some(run)) = state.store.get_run(rid).await {
             // 与 list_runs 一致的权限: admin 全量, 其余仅自己拥有的 run
             if user.role == "admin" || run.owner_id == Some(user.id) {
@@ -1605,7 +1610,12 @@ pub async fn list_reports(
     };
     match state
         .store
-        .list_reports(params.project.as_deref(), owner_id, params.limit, params.offset)
+        .list_reports(
+            params.project.as_deref(),
+            owner_id,
+            params.limit,
+            params.offset,
+        )
         .await
     {
         Ok(reports) => {
@@ -3382,10 +3392,7 @@ mod tests {
             .await
             .unwrap();
         let list: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
-        assert!(list[0]["layout"]
-            .as_str()
-            .unwrap()
-            .contains("\"w1\""),);
+        assert!(list[0]["layout"].as_str().unwrap().contains("\"w1\""),);
 
         // Anonymous without token → 401;with run share token → 200
         let req = Request::builder()

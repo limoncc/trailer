@@ -4,8 +4,9 @@ use sqlx::Row;
 use std::str::FromStr;
 
 use crate::domain::{
-    ApiToken, ArtifactMeta, ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow,
-    ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
+    ApiToken, ArtifactMeta, DanmakuMessage, ExploreRow, FigureRow, HistogramRow, MediaRow,
+    MetricQuery, MetricRow, ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow,
+    TableRow, TextRow, UserRow,
 };
 use crate::error::{StorageError, StorageResult};
 use crate::storage::Storage;
@@ -318,6 +319,22 @@ impl SqliteStorage {
             .execute(&self.pool)
             .await?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS danmaku_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id     TEXT NOT NULL,
+                nickname   TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                client_id  TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_danmaku_run ON danmaku_messages(run_id, id)")
+            .execute(&self.pool)
+            .await?;
+
         Ok(())
     }
 }
@@ -510,6 +527,10 @@ impl Storage for SqliteStorage {
             .execute(&self.pool)
             .await?;
         sqlx::query("DELETE FROM run_dashboards WHERE run_id = ?")
+            .bind(run_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM danmaku_messages WHERE run_id = ?")
             .bind(run_id)
             .execute(&self.pool)
             .await?;
@@ -1027,7 +1048,11 @@ impl Storage for SqliteStorage {
             .collect())
     }
 
-    async fn count_reports(&self, project: Option<&str>, owner_id: Option<i64>) -> StorageResult<u64> {
+    async fn count_reports(
+        &self,
+        project: Option<&str>,
+        owner_id: Option<i64>,
+    ) -> StorageResult<u64> {
         let row = sqlx::query(
             "SELECT COUNT(*) FROM reports WHERE (?1 IS NULL OR project = ?1) AND (?2 IS NULL OR owner_id = ?2)",
         )
@@ -1173,9 +1198,14 @@ impl Storage for SqliteStorage {
             "INSERT INTO run_dashboards (id, run_id, title, layout, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?)",
         )
-        .bind(&id).bind(&d.run_id).bind(&d.title).bind(&d.layout)
-        .bind(d.created_at).bind(d.updated_at)
-        .execute(&self.pool).await?;
+        .bind(&id)
+        .bind(&d.run_id)
+        .bind(&d.title)
+        .bind(&d.layout)
+        .bind(d.created_at)
+        .bind(d.updated_at)
+        .execute(&self.pool)
+        .await?;
         Ok(id)
     }
 
@@ -1185,15 +1215,20 @@ impl Storage for SqliteStorage {
             .unwrap()
             .as_secs_f64();
         sqlx::query("UPDATE run_dashboards SET title = ?, layout = ?, updated_at = ? WHERE id = ?")
-            .bind(title).bind(layout).bind(now).bind(id)
-            .execute(&self.pool).await?;
+            .bind(title)
+            .bind(layout)
+            .bind(now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     async fn delete_run_dashboard(&self, id: &str) -> StorageResult<()> {
         sqlx::query("DELETE FROM run_dashboards WHERE id = ?")
             .bind(id)
-            .execute(&self.pool).await?;
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -1203,7 +1238,8 @@ impl Storage for SqliteStorage {
              FROM run_dashboards WHERE run_id = ? ORDER BY created_at ASC, id ASC",
         )
         .bind(run_id)
-        .fetch_all(&self.pool).await?;
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows
             .iter()
             .map(|r| RunDashboardRow {
@@ -1223,7 +1259,8 @@ impl Storage for SqliteStorage {
              FROM run_dashboards WHERE id = ?",
         )
         .bind(id)
-        .fetch_all(&self.pool).await?;
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows
             .iter()
             .map(|r| RunDashboardRow {
@@ -1235,6 +1272,91 @@ impl Storage for SqliteStorage {
                 updated_at: r.get("updated_at"),
             })
             .next())
+    }
+
+    // ── Danmaku ──
+
+    async fn insert_danmaku(&self, msg: &DanmakuMessage) -> StorageResult<i64> {
+        let result = sqlx::query(
+            "INSERT INTO danmaku_messages (run_id, nickname, content, client_id, created_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&msg.run_id)
+        .bind(&msg.nickname)
+        .bind(&msg.content)
+        .bind(&msg.client_id)
+        .bind(msg.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.last_insert_rowid())
+    }
+
+    async fn list_danmaku(
+        &self,
+        run_id: &str,
+        before_id: Option<i64>,
+        since_id: Option<i64>,
+        limit: i64,
+    ) -> StorageResult<Vec<DanmakuMessage>> {
+        // 三种语义统一:DESC 取最新 limit 条,最后反转为升序
+        let rows = match (since_id, before_id) {
+            (Some(sid), _) => {
+                sqlx::query(
+                    "SELECT id, run_id, nickname, content, client_id, created_at
+                     FROM danmaku_messages WHERE run_id = ?1 AND id > ?2
+                     ORDER BY id DESC LIMIT ?3",
+                )
+                .bind(run_id)
+                .bind(sid)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, Some(bid)) => {
+                sqlx::query(
+                    "SELECT id, run_id, nickname, content, client_id, created_at
+                     FROM danmaku_messages WHERE run_id = ?1 AND id < ?2
+                     ORDER BY id DESC LIMIT ?3",
+                )
+                .bind(run_id)
+                .bind(bid)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, None) => {
+                sqlx::query(
+                    "SELECT id, run_id, nickname, content, client_id, created_at
+                     FROM danmaku_messages WHERE run_id = ?1
+                     ORDER BY id DESC LIMIT ?2",
+                )
+                .bind(run_id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+        let mut msgs: Vec<DanmakuMessage> = rows
+            .iter()
+            .map(|r| DanmakuMessage {
+                id: Some(r.get("id")),
+                run_id: r.get("run_id"),
+                nickname: r.get("nickname"),
+                content: r.get("content"),
+                client_id: r.get("client_id"),
+                created_at: r.get("created_at"),
+            })
+            .collect();
+        msgs.reverse();
+        Ok(msgs)
+    }
+
+    async fn count_danmaku(&self, run_id: &str) -> StorageResult<u64> {
+        let row = sqlx::query("SELECT COUNT(*) AS n FROM danmaku_messages WHERE run_id = ?")
+            .bind(run_id)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get::<i64, _>("n").max(0) as u64)
     }
 
     async fn insert_table(&self, t: &TableRow) -> StorageResult<i64> {

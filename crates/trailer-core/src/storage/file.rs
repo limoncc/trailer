@@ -21,8 +21,9 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
-    ApiToken, ArtifactMeta, ExploreRow, FigureRow, HistogramRow, MediaRow, MetricQuery, MetricRow,
-    ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow, TableRow, TextRow, UserRow,
+    ApiToken, ArtifactMeta, DanmakuMessage, ExploreRow, FigureRow, HistogramRow, MediaRow,
+    MetricQuery, MetricRow, ReportRow, RunDashboardRow, RunFilter, RunMeta, ShareInfo, SummaryRow,
+    TableRow, TextRow, UserRow,
 };
 use crate::error::{StorageError, StorageResult};
 use crate::storage::Storage;
@@ -74,6 +75,11 @@ impl FileStorage {
 
     fn media_dir(&self, run_id: &str, project: &str) -> PathBuf {
         self.run_dir(project, run_id).join("media")
+    }
+
+    /// 每 run 一个弹幕文件:delete_run 走 remove_dir_all 自然级联。
+    fn danmaku_file(&self, run_id: &str, project: &str) -> PathBuf {
+        self.run_dir(project, run_id).join("danmaku.json")
     }
 
     /// 全局自增 id(_seq.json),用于 tables/media/reports/users。
@@ -763,7 +769,11 @@ impl Storage for FileStorage {
             .collect())
     }
 
-    async fn count_reports(&self, project: Option<&str>, owner_id: Option<i64>) -> StorageResult<u64> {
+    async fn count_reports(
+        &self,
+        project: Option<&str>,
+        owner_id: Option<i64>,
+    ) -> StorageResult<u64> {
         let reports = self.load_json::<ReportRow>("_reports.json").await?;
         Ok(reports
             .into_iter()
@@ -883,7 +893,9 @@ impl Storage for FileStorage {
 
     // ── Run dashboards ──
     async fn insert_run_dashboard(&self, d: &RunDashboardRow) -> StorageResult<String> {
-        let mut dashes = self.load_json::<RunDashboardRow>("_run_dashboards.json").await?;
+        let mut dashes = self
+            .load_json::<RunDashboardRow>("_run_dashboards.json")
+            .await?;
         let id = format!("dash_{:x}", rand::random::<u64>());
         let mut row = d.clone();
         row.id = Some(id.clone());
@@ -893,7 +905,9 @@ impl Storage for FileStorage {
     }
 
     async fn update_run_dashboard(&self, id: &str, title: &str, layout: &str) -> StorageResult<()> {
-        let mut dashes = self.load_json::<RunDashboardRow>("_run_dashboards.json").await?;
+        let mut dashes = self
+            .load_json::<RunDashboardRow>("_run_dashboards.json")
+            .await?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -909,7 +923,9 @@ impl Storage for FileStorage {
     }
 
     async fn delete_run_dashboard(&self, id: &str) -> StorageResult<()> {
-        let mut dashes = self.load_json::<RunDashboardRow>("_run_dashboards.json").await?;
+        let mut dashes = self
+            .load_json::<RunDashboardRow>("_run_dashboards.json")
+            .await?;
         dashes.retain(|x| x.id.as_deref() != Some(id));
         self.save_json("_run_dashboards.json", &dashes).await
     }
@@ -931,6 +947,73 @@ impl Storage for FileStorage {
             .await?
             .into_iter()
             .find(|x| x.id.as_deref() == Some(id)))
+    }
+
+    // ── Danmaku ──
+
+    async fn insert_danmaku(&self, msg: &DanmakuMessage) -> StorageResult<i64> {
+        let run = self
+            .get_run(&msg.run_id)
+            .await?
+            .ok_or_else(|| StorageError::NotFound(msg.run_id.clone()))?;
+        let id = self.next_id().await?;
+        let path = self.danmaku_file(&msg.run_id, &run.project);
+        let mut msgs = self
+            .read_json::<Vec<DanmakuMessage>>(&path)
+            .await?
+            .unwrap_or_default();
+        let mut row = msg.clone();
+        row.id = Some(id);
+        msgs.push(row);
+        self.write_json(&path, &msgs).await?;
+        Ok(id)
+    }
+
+    async fn list_danmaku(
+        &self,
+        run_id: &str,
+        before_id: Option<i64>,
+        since_id: Option<i64>,
+        limit: i64,
+    ) -> StorageResult<Vec<DanmakuMessage>> {
+        let run = match self.get_run(run_id).await? {
+            Some(r) => r,
+            None => return Ok(Vec::new()),
+        };
+        let path = self.danmaku_file(run_id, &run.project);
+        let mut msgs = self
+            .read_json::<Vec<DanmakuMessage>>(&path)
+            .await?
+            .unwrap_or_default();
+        msgs.sort_by_key(|m| m.id.unwrap_or(0));
+        let filtered: Vec<DanmakuMessage> = match (since_id, before_id) {
+            (Some(sid), _) => msgs
+                .into_iter()
+                .filter(|m| m.id.unwrap_or(0) > sid)
+                .collect(),
+            (None, Some(bid)) => msgs
+                .into_iter()
+                .filter(|m| m.id.unwrap_or(0) < bid)
+                .collect(),
+            (None, None) => msgs,
+        };
+        // 取最新 limit 条(排序后尾部),保持升序
+        let take = limit.max(0) as usize;
+        let start = filtered.len().saturating_sub(take);
+        Ok(filtered[start..].to_vec())
+    }
+
+    async fn count_danmaku(&self, run_id: &str) -> StorageResult<u64> {
+        let run = match self.get_run(run_id).await? {
+            Some(r) => r,
+            None => return Ok(0),
+        };
+        let path = self.danmaku_file(run_id, &run.project);
+        let msgs = self
+            .read_json::<Vec<DanmakuMessage>>(&path)
+            .await?
+            .unwrap_or_default();
+        Ok(msgs.len() as u64)
     }
 
     // ── Tables ──
