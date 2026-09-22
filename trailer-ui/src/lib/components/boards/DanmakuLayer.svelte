@@ -20,8 +20,14 @@
     return hex ? `color:${hex}` : '';
   }
 
-  /** 元素挂载即起飞:现测容器宽、占轨、设动画;动画结束/提前卸载时归还轨道并通知 store */
-  function startFly(el: HTMLElement, msg: DanmakuMsg) {
+  /**
+   * 起飞 action(use:):挂载执行一次,**参数变化不重调**——刻意选 action 而非
+   * {@attach}:{@attach} 表达式捕获 m,flying 数组每次变化都会重跑全部元素,
+   * 重复占轨 → 轨道秒满 → failed 风暴清空 flying、游标打转(弹幕中途消失、
+   * 后面的弹幕永远出不来)。action 的"不响应"恰好是这里需要的语义。
+   * 返回的 cleanup 仅在元素卸载时调用(归还轨道)。
+   */
+  function flyItem(el: HTMLElement, msg: DanmakuMsg): { destroy: () => void } | void {
     if (msg.fkey === undefined) return;
     const containerW = el.parentElement?.offsetWidth ?? 800;
     // 两排取较宽一行 + 少量留白
@@ -43,10 +49,12 @@
       danmakuStore.flyDone(msg.fkey!);
     };
     el.addEventListener('animationend', onEnd, { once: true });
-    return () => {
-      el.removeEventListener('animationend', onEnd);
-      // 提前卸载(如切 off):留冷却防复用瞬间重叠
-      completeTrack(tracks, track, performance.now());
+    return {
+      destroy: () => {
+        el.removeEventListener('animationend', onEnd);
+        // 提前卸载(如切 off):留冷却防复用瞬间重叠
+        completeTrack(tracks, track, performance.now());
+      }
     };
   }
 </script>
@@ -55,7 +63,7 @@
   {#each danmakuStore.flying as m (m.fkey ?? m.id)}
     <span
       class="absolute left-full top-0 whitespace-nowrap flex flex-col leading-tight will-change-transform [text-shadow:0_1px_2px_rgb(0_0_0/0.35)]"
-      {@attach (el) => startFly(el, m)}
+      use:flyItem={m}
     >
       <!-- 昵称:左上小字 -->
       <span
