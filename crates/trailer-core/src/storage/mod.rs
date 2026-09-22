@@ -147,6 +147,8 @@ pub trait Storage: Send + Sync {
     ) -> StorageResult<Vec<DanmakuMessage>>;
     /// 该 run 的弹幕总数(列表弹窗头部展示)。
     async fn count_danmaku(&self, run_id: &str) -> StorageResult<u64>;
+    /// 删除一条弹幕(run_id 双条件防跨 run 误删);不存在按成功处理(幂等)。
+    async fn delete_danmaku(&self, run_id: &str, id: i64) -> StorageResult<()>;
 
     // ── Tables ──
     async fn insert_table(&self, table: &TableRow) -> StorageResult<i64>;

@@ -192,6 +192,10 @@ pub fn router() -> Router<AppState> {
             axum::routing::get(list_danmaku_handler).post(create_danmaku_handler),
         )
         .route(
+            "/api/v1/runs/{id}/danmaku/{msg_id}",
+            axum::routing::delete(delete_danmaku_handler),
+        )
+        .route(
             "/api/v1/dashboards/{id}",
             axum::routing::put(update_run_dashboard_handler).delete(delete_run_dashboard_handler),
         )
@@ -2195,6 +2199,22 @@ pub async fn create_danmaku_handler(
     }
 }
 
+/// 删除弹幕:仅 admin / run owner(`require_run_write`,share token 一律 401);
+/// 双条件 run_id+msg_id 防跨 run 误删;不存在按成功处理(幂等)。
+pub async fn delete_danmaku_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path((run_id, msg_id)): Path<(String, i64)>,
+) -> impl IntoResponse {
+    if let Err(status) = require_run_write(&state, &run_id, &headers).await {
+        return status.into_response();
+    }
+    match state.store.delete_danmaku(&run_id, msg_id).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => internal_error(e, "delete_danmaku_handler").into_response(),
+    }
+}
+
 /// dashboard 写权限:解析出所属 run 后复用 run 写权限(owner/admin)
 async fn require_dashboard_write(
     state: &AppState,
@@ -3120,6 +3140,10 @@ mod tests {
                 get(list_danmaku_handler).post(create_danmaku_handler),
             )
             .route(
+                "/api/v1/runs/{id}/danmaku/{msg_id}",
+                delete(delete_danmaku_handler),
+            )
+            .route(
                 "/api/v1/dashboards/{id}",
                 put(update_run_dashboard_handler).delete(delete_run_dashboard_handler),
             )
@@ -3954,6 +3978,103 @@ mod tests {
         assert_eq!(older_msgs.len(), 2);
         assert_eq!(older_msgs[0]["content"], "msg2");
         assert_eq!(older_msgs[1]["content"], "msg3");
+    }
+
+    #[tokio::test]
+    async fn danmaku_delete_owner_only() {
+        let app = test_app().await;
+        let token = login_and_create_run(&app, "p1", "r1").await;
+        let auth_val = format!("Bearer {}", token);
+
+        // 发一条待删
+        let resp = post_danmaku(
+            &app,
+            "/api/v1/runs/r1/danmaku",
+            "to delete",
+            None,
+            "c-del",
+            Some(&auth_val),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let msg_id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+            .as_i64()
+            .unwrap();
+
+        // 建 share token(用于验证访客不能删)
+        let body = serde_json::json!({"resource_type": "run", "resource_id": "r1"});
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/share")
+            .header("content-type", "application/json")
+            .header("authorization", &auth_val)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let stoken = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // 匿名 DELETE → 401
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/runs/r1/danmaku/{}", msg_id))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // share token DELETE → 401(关键回归:write 不接受 token,弹幕删除也不例外)
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(format!(
+                "/api/v1/runs/r1/danmaku/{}?token={}",
+                msg_id, stoken
+            ))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // 仍存在
+        let list = get_danmaku(
+            &app,
+            &format!("/api/v1/runs/r1/danmaku?token={}", stoken),
+            None,
+        )
+        .await;
+        assert_eq!(list["messages"].as_array().unwrap().len(), 1);
+
+        // owner Bearer DELETE → 200
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/runs/r1/danmaku/{}", msg_id))
+            .header("authorization", &auth_val)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let list = get_danmaku(
+            &app,
+            &format!("/api/v1/runs/r1/danmaku?token={}", stoken),
+            None,
+        )
+        .await;
+        assert!(list["messages"].as_array().unwrap().is_empty());
+
+        // 幂等:再删同一条仍 200
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/runs/r1/danmaku/{}", msg_id))
+            .header("authorization", &auth_val)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]

@@ -1367,6 +1367,15 @@ impl Storage for SqliteStorage {
         Ok(row.get::<i64, _>("n").max(0) as u64)
     }
 
+    async fn delete_danmaku(&self, run_id: &str, id: i64) -> StorageResult<()> {
+        sqlx::query("DELETE FROM danmaku_messages WHERE run_id = ? AND id = ?")
+            .bind(run_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn insert_table(&self, t: &TableRow) -> StorageResult<i64> {
         let columns = serde_json::to_string(&t.columns).unwrap_or_default();
         let data = t.data.to_string();

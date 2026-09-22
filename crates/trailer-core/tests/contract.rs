@@ -1725,6 +1725,37 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
     assert_eq!(all[0].color, "red");
     assert_eq!(all[1].color, "");
 
+    // 单条删除(双条件 run_id+id):删中间一条,幂等再删成功
+    store
+        .delete_danmaku("danmaku-run-1", dm_ids[1])
+        .await
+        .expect("delete one danmaku");
+    let after_del = store
+        .list_danmaku("danmaku-run-1", None, None, 10)
+        .await
+        .expect("list after single delete");
+    assert_eq!(after_del.len(), 2);
+    assert_eq!(after_del[0].content, "msg0");
+    assert_eq!(after_del[1].content, "msg2");
+    assert_eq!(
+        store.count_danmaku("danmaku-run-1").await.expect("count"),
+        2
+    );
+    // 跨 run 条件:错误 run_id 不删
+    store
+        .delete_danmaku("other-run", dm_ids[0])
+        .await
+        .expect("delete with wrong run is idempotent no-op");
+    assert_eq!(
+        store.count_danmaku("danmaku-run-1").await.expect("count2"),
+        2
+    );
+    // 幂等:再删同一条仍 Ok
+    store
+        .delete_danmaku("danmaku-run-1", dm_ids[1])
+        .await
+        .expect("idempotent delete");
+
     // delete_run 级联
     store
         .delete_run("danmaku-run-1")

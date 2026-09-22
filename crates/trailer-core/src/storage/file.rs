@@ -1016,6 +1016,24 @@ impl Storage for FileStorage {
         Ok(msgs.len() as u64)
     }
 
+    async fn delete_danmaku(&self, run_id: &str, id: i64) -> StorageResult<()> {
+        // 文件不存在 / run 不存在 → 幂等成功
+        let path = match self.get_run(run_id).await? {
+            Some(r) => self.danmaku_file(run_id, &r.project),
+            None => return Ok(()),
+        };
+        let mut msgs = match self.read_json::<Vec<DanmakuMessage>>(&path).await? {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let before = msgs.len();
+        msgs.retain(|m| m.id != Some(id));
+        if msgs.len() != before {
+            self.write_json(&path, &msgs).await?;
+        }
+        Ok(())
+    }
+
     // ── Tables ──
 
     async fn insert_table(&self, table: &TableRow) -> StorageResult<i64> {
