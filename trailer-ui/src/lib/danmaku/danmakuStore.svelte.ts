@@ -29,6 +29,8 @@ export interface DanmakuMsg {
   content: string;
   created_at: number;
   temp?: boolean;
+  /** 推入 flying 时分配的本地序号:Layer 的去重键,id 落定/替换后保持稳定 */
+  fkey?: number;
 }
 
 function readMode(): DanmakuMode {
@@ -82,6 +84,7 @@ export class DanmakuStore {
   #timer: ReturnType<typeof setInterval> | null = null;
   #clientId = readStr(CLIENT_KEY);
   #tempSeq = 0;
+  #fkeySeq = 0;
 
   constructor() {
     if (!this.#clientId) {
@@ -138,9 +141,14 @@ export class DanmakuStore {
     this.hasOlder = false;
   }
 
-  /** barrage 结束动画时由 Layer 回调移除 */
-  flyDone(id: number) {
-    this.flying = this.flying.filter((m) => m.id !== id);
+  /** barrage 结束动画时由 Layer 按 fkey 回调移除(messages 保留) */
+  flyDone(fkey: number) {
+    this.flying = this.flying.filter((m) => m.fkey !== fkey);
+  }
+
+  /** 推入在飞队列并分配 fkey(Layer 以此去重,跨 id 替换稳定) */
+  #toFlying(msgs: DanmakuMsg[]): DanmakuMsg[] {
+    return msgs.map((m) => ({ ...m, fkey: ++this.#fkeySeq }));
   }
 
   #syncPolling() {
@@ -172,9 +180,26 @@ export class DanmakuStore {
     return list.filter((m) => typeof m.id === 'number');
   }
 
-  /** 按 id 升序并入,返回真正新增的条目;超软上限丢最旧 */
+  /**
+   * 按 id 升序并入,返回真正新增的条目;超软上限丢最旧。
+   * temp 折叠:轮询/POST 响应带回与乐观消息同昵称同内容的真条目时,
+   * 用真 id 替换 temp(messages + flying,fkey 不变——Layer 不会重复起飞)。
+   */
   #merge(fresh: DanmakuMsg[]): DanmakuMsg[] {
     if (!fresh.length) return [];
+    for (const f of fresh) {
+      const ti = this.messages.find(
+        (m) => m.temp && m.content === f.content && m.nickname === f.nickname
+      );
+      if (ti) {
+        this.messages = this.messages.map((m) =>
+          m.id === ti.id ? { ...f, temp: undefined, fkey: m.fkey } : m
+        );
+        this.flying = this.flying.map((m) =>
+          m.id === ti.id ? { ...m, id: f.id, temp: undefined, created_at: f.created_at } : m
+        );
+      }
+    }
     const known = new Set(this.messages.map((m) => m.id));
     const added = fresh.filter((m) => !known.has(m.id));
     if (!added.length) return [];
@@ -202,7 +227,7 @@ export class DanmakuStore {
       const fresh = await this.#fetchMessages(`?since_id=${this.#lastId()}&limit=100`);
       const added = this.#merge(fresh);
       if (!silent && this.mode === 'barrage' && added.length) {
-        this.flying = [...this.flying, ...added];
+        this.flying = [...this.flying, ...this.#toFlying(added)];
       }
     } catch {
       /* 轮询静默失败,下一拍重试 */
@@ -245,7 +270,7 @@ export class DanmakuStore {
       temp: true
     };
     this.messages = [...this.messages, temp];
-    if (this.mode === 'barrage') this.flying = [...this.flying, temp];
+    if (this.mode === 'barrage') this.flying = [...this.flying, ...this.#toFlying([temp])];
     const rollback = () => {
       this.messages = this.messages.filter((m) => m.id !== tempId);
       this.flying = this.flying.filter((m) => m.id !== tempId);
@@ -267,16 +292,19 @@ export class DanmakuStore {
         return false;
       }
       const created = await res.json();
-      const realId = typeof created.id === 'number' ? created.id : tempId;
-      const settled: DanmakuMsg = {
-        id: realId,
-        run_id: temp.run_id,
-        nickname,
-        content: text,
-        created_at: typeof created.created_at === 'number' ? created.created_at : temp.created_at
-      };
-      this.messages = this.messages.map((m) => (m.id === tempId ? settled : m));
-      this.flying = this.flying.map((m) => (m.id === tempId ? settled : m));
+      if (typeof created.id === 'number') {
+        // 走 merge 折叠:temp 落定为真 id,flying 条目 fkey 不变(不重复起飞)
+        this.#merge([
+          {
+            id: created.id,
+            run_id: temp.run_id,
+            nickname,
+            content: text,
+            created_at:
+              typeof created.created_at === 'number' ? created.created_at : temp.created_at
+          }
+        ]);
+      }
       return true;
     } catch (e) {
       rollback();

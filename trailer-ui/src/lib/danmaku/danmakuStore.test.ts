@@ -78,13 +78,12 @@ describe('DanmakuStore', () => {
     expect(new DanmakuStore().nickname).toBe('张三');
   });
 
-  it('client_id 只生成一次', () => {
-    const a = new DanmakuStore();
+  it('client_id 只生成一次(已有值不覆盖)', () => {
+    new DanmakuStore();
     const first = localStorage.getItem(CLIENT_KEY);
     expect(first).toBeTruthy();
-    const b = new DanmakuStore();
-    expect(b['#clientId'] ?? localStorage.getItem(CLIENT_KEY)).toBe(first);
-    expect(a).toBeTruthy();
+    new DanmakuStore();
+    expect(localStorage.getItem(CLIENT_KEY)).toBe(first);
   });
 
   // ── attach / 轮询 ──
@@ -139,15 +138,15 @@ describe('DanmakuStore', () => {
     s.detach();
   });
 
-  it('flyDone 只移除在飞条目,消息保留', async () => {
+  it('flyDone 按 fkey 移除在飞条目,消息保留', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson({ messages: [msg(1)] }));
     vi.stubGlobal('fetch', fetchMock);
     const s = new DanmakuStore();
     s.setMode('barrage');
     s.attach('r1');
     await vi.waitFor(() => expect(s.messages).toHaveLength(1));
-    s.flying = [...s.messages];
-    s.flyDone(1);
+    s.flying = [{ ...msg(1), fkey: 7 }];
+    s.flyDone(7);
     expect(s.flying).toHaveLength(0);
     expect(s.messages).toHaveLength(1);
     s.detach();
@@ -173,6 +172,42 @@ describe('DanmakuStore', () => {
     expect(s.messages[0].id).toBe(42);
     expect(s.messages[0].temp).toBeUndefined();
     expect(s.error).toBe('');
+    s.detach();
+  });
+
+  it('POST 未返回时轮询先带回:temp 折叠为真 id,flying 不重复起飞且 fkey 稳定', async () => {
+    vi.useFakeTimers();
+    let resolvePost!: (r: Response) => void;
+    const postPromise = new Promise<Response>((r) => (resolvePost = r));
+    const real = { id: 77, run_id: 'r1', nickname: 'n', content: 'hi', created_at: 5 };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return postPromise;
+      if (String(url).includes('since_id')) return okJson({ messages: [real] });
+      return okJson({ messages: [] }); // 首屏
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const s = new DanmakuStore();
+    s.setMode('barrage');
+    s.nickname = 'n';
+    s.attach('r1');
+    await flush();
+    const sendP = s.send('hi'); // temp 入队,POST 挂起
+    await flush();
+    expect(s.messages[0].temp).toBe(true);
+    expect(s.flying).toHaveLength(1);
+    const fkey = s.flying[0].fkey;
+    await vi.advanceTimersByTimeAsync(POLL_MS); // 轮询先带回同一条 → 折叠
+    await flush();
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0].id).toBe(77);
+    expect(s.flying).toHaveLength(1); // 不重复起飞
+    expect(s.flying[0].fkey).toBe(fkey); // fkey 稳定,Layer 不会重建
+    resolvePost(new Response(JSON.stringify(real), { status: 201 }));
+    expect(await sendP).toBe(true);
+    await flush();
+    expect(s.messages).toHaveLength(1); // POST 响应再 merge 也不重复
+    expect(s.flying).toHaveLength(1);
+    expect(s.flying[0].fkey).toBe(fkey);
     s.detach();
   });
 

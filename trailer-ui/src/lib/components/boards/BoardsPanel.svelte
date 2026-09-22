@@ -1,10 +1,11 @@
 <script lang="ts">
   // ─── Boards tab:run 下多个命名看板(子标签),12 列网格自由布局 ───
   import { onMount } from 'svelte';
-  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause } from 'lucide-svelte';
+  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause, MessageSquare, Clapperboard, List } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
   import { isShareView } from '$lib/utils/shareView';
+  import { danmakuStore } from '$lib/danmaku/danmakuStore.svelte';
   import type { MetricRef } from '$lib/utils/explore';
   import type { MetricOption } from '$lib/utils/metricGroups';
   import { displayMetricName } from '$lib/utils/systemMetrics';
@@ -22,6 +23,9 @@
   import { EMPTY_BOARDS_DATA, fetchBoardsData } from './boardsData';
   import DashboardGrid from './DashboardGrid.svelte';
   import WidgetPickerDialog from './WidgetPickerDialog.svelte';
+  import DanmakuLayer from './DanmakuLayer.svelte';
+  import DanmakuComposer from './DanmakuComposer.svelte';
+  import DanmakuListDialog from './DanmakuListDialog.svelte';
 
   interface BoardItem {
     id: string;
@@ -146,6 +150,9 @@
   onMount(() => {
     loadBoards();
     loadLogData(EMPTY_BOARDS_DATA);
+    // 弹幕:attach 拉历史 + 按当前模式起轮询;卸载时停表清空(与 runId 生命周期一致)
+    danmakuStore.attach(runId);
+    return () => danmakuStore.detach();
   });
 
   // 运行中 run:按全局刷新间隔拉新 hist/figure/text/table/media(line 走 run 页轮询)。
@@ -469,6 +476,26 @@
         {#if error}
           <span class="text-xs text-destructive">{error}</span>
         {/if}
+        <!-- 弹幕三态开关(per-run,owner 与分享访客都可操作,不进 readonly 分支) -->
+        <button
+          class="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md transition-colors {danmakuStore.mode === 'off'
+            ? 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+            : 'border-primary bg-primary/10 text-primary'}"
+          title={danmakuStore.mode === 'off'
+            ? '弹幕:关 — 点击开启横飘弹幕'
+            : danmakuStore.mode === 'barrage'
+              ? '弹幕:横飘中 — 点击切换到消息列表'
+              : '弹幕:消息列表 — 点击关闭'}
+          onclick={() => danmakuStore.cycleMode()}
+        >
+          {#if danmakuStore.mode === 'barrage'}
+            <Clapperboard size={12} /> 弹幕
+          {:else if danmakuStore.mode === 'list'}
+            <List size={12} /> 弹幕
+          {:else}
+            <MessageSquare size={12} /> 弹幕
+          {/if}
+        </button>
         {#if activeBoard}
           <!-- 训练回放(X: Step 前):未激活一键开启;激活后展开 播放/进度/速度/退出 -->
           {#if replayActive}
@@ -599,56 +626,63 @@
       </div>
     </div>
 
-    {#if !activeBoard}
-      <div class="text-center py-16">
-        <p class="text-sm text-muted-foreground mb-3">No boards yet. Create a dashboard to arrange metrics and logs your way.</p>
-        {#if !readonly}
-          <button
-            class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-            onclick={createBoard}
-          >
-            Create your first board
-          </button>
-        {/if}
-      </div>
-    {:else if widgets.length === 0}
-      <div class="text-center py-16">
-        <p class="text-sm text-muted-foreground mb-3">This board is empty.</p>
-        {#if !readonly}
-          <div class="flex items-center justify-center gap-2">
+    <!-- 弹幕舞台:relative 包住内容区,横飘层/输入条叠在其上(子 tab 切换不重挂本组件,弹幕不断) -->
+    <div class="relative">
+      {#if !activeBoard}
+        <div class="text-center py-16">
+          <p class="text-sm text-muted-foreground mb-3">No boards yet. Create a dashboard to arrange metrics and logs your way.</p>
+          {#if !readonly}
             <button
               class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-              onclick={openAdd}
+              onclick={createBoard}
             >
-              Add Chart
+              Create your first board
             </button>
-            {#if metricOptions.length > 0}
+          {/if}
+        </div>
+      {:else if widgets.length === 0}
+        <div class="text-center py-16">
+          <p class="text-sm text-muted-foreground mb-3">This board is empty.</p>
+          {#if !readonly}
+            <div class="flex items-center justify-center gap-2">
               <button
-                class="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-accent"
-                onclick={generateDefault}
+                class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+                onclick={openAdd}
               >
-                Generate from metrics
+                Add Chart
               </button>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    {:else}
-      <DashboardGrid
-        {widgets}
-        {editing}
-        {runId}
-        metrics={viewMetrics}
-        boardsData={viewBoardsData}
-        running={viewRunning}
-        {runState}
-        {runInfo}
-        {compact}
-        replayStep={replayActive ? replayStep : null}
-        onChange={onWidgetsChange}
-        onEditContent={openEditContent}
-      />
-    {/if}
+              {#if metricOptions.length > 0}
+                <button
+                  class="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-accent"
+                  onclick={generateDefault}
+                >
+                  Generate from metrics
+                </button>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <DashboardGrid
+          {widgets}
+          {editing}
+          {runId}
+          metrics={viewMetrics}
+          boardsData={viewBoardsData}
+          running={viewRunning}
+          {runState}
+          {runInfo}
+          {compact}
+          replayStep={replayActive ? replayStep : null}
+          onChange={onWidgetsChange}
+          onEditContent={openEditContent}
+        />
+      {/if}
+      {#if danmakuStore.mode === 'barrage'}
+        <DanmakuLayer />
+        <DanmakuComposer />
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -661,4 +695,8 @@
     onConfirm={onPickerConfirm}
     onClose={() => (pickerOpen = false)}
   />
+{/if}
+
+{#if danmakuStore.mode === 'list'}
+  <DanmakuListDialog onClose={() => danmakuStore.setMode('off')} />
 {/if}
