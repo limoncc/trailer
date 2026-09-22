@@ -358,6 +358,42 @@ describe('DanmakuStore', () => {
     s.detach();
   });
 
+  // ── 删除 ──
+
+  it('removeMessage 成功后本地移除(含在飞条目)', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return new Response('', { status: 200 });
+      return okJson({ messages: [msg(1), msg(2)] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const s = new DanmakuStore();
+    s.attach('r1');
+    await vi.waitFor(() => expect(s.messages).toHaveLength(2));
+    s.flying = [{ ...msg(1), fkey: 9 }];
+    const ok = await s.removeMessage(1);
+    expect(ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runs/r1/danmaku/1', { method: 'DELETE' });
+    expect(s.messages.map((m) => m.id)).toEqual([2]);
+    expect(s.flying).toHaveLength(0); // 在飞的同步移除
+    s.detach();
+  });
+
+  it('removeMessage 失败保留本地并提示', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return new Response('', { status: 403 });
+      return okJson({ messages: [msg(1)] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const s = new DanmakuStore();
+    s.attach('r1');
+    await vi.waitFor(() => expect(s.messages).toHaveLength(1));
+    const ok = await s.removeMessage(1);
+    expect(ok).toBe(false);
+    expect(s.messages).toHaveLength(1);
+    expect(s.error).toContain('403');
+    s.detach();
+  });
+
   // ── 软上限 / 翻页 ──
 
   it('messages 超软上限丢最旧', async () => {

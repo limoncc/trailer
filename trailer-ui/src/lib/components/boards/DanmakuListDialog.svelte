@@ -2,8 +2,9 @@
   // ─── 弹幕消息列表弹窗(手写遮罩+居中面板,对齐 WidgetPickerDialog 模式) ───
   // 列表用 flex-col-reverse + 数据倒序渲染:天然锚定底部(新消息在下),
   // 打开即贴底、新消息自动可见、加载更早不跳动——全程零滚动 JS / 零 $effect。
-  import { X, ChevronUp } from 'lucide-svelte';
+  import { X, ChevronUp, Trash2 } from 'lucide-svelte';
   import { danmakuStore, DANMAKU_COLOR_MAP } from '$lib/danmaku/danmakuStore.svelte';
+  import { isShareView } from '$lib/utils/shareView';
   import DanmakuInputBar from './DanmakuInputBar.svelte';
 
   interface Props {
@@ -11,6 +12,14 @@
   }
 
   let { onClose }: Props = $props();
+
+  // 删除入口:仅普通页(登录且能看到此页 = admin/owner;后端 require_run_write 把关)。
+  // 分享页(token)= 访客只读,不显示;挂载时判定一次即可。
+  const canDelete = !isShareView();
+
+  function confirmDelete(id: number) {
+    if (confirm('Delete this danmaku?')) void danmakuStore.removeMessage(id);
+  }
 
   function fmtTime(ts: number): string {
     return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -69,12 +78,23 @@
   <!-- 消息列表:倒序渲染 + flex-col-reverse → 视觉顺序为正序、锚定底部 -->
   <div class="flex-1 overflow-y-auto flex flex-col-reverse px-4 py-3 gap-2.5 min-h-0">
     {#each [...danmakuStore.messages].reverse() as m (m.id)}
-      <div class="text-sm leading-snug">
-        <span class="text-primary text-xs font-medium mr-1.5">{m.nickname}</span>
-        <span class="text-[10px] text-muted-foreground mr-1.5 tabular-nums">{fmtTime(m.created_at)}</span>
-        <span class="break-words {m.color ? '' : 'text-foreground'}" style={colorStyle(m.color)}
+      <div class="group/msg flex items-start gap-1 text-sm leading-snug">
+        <span class="text-primary text-xs font-medium mr-1.5 mt-0.5 shrink-0">{m.nickname}</span>
+        <span class="text-[10px] text-muted-foreground mr-1.5 mt-1 tabular-nums shrink-0"
+          >{fmtTime(m.created_at)}</span
+        >
+        <span class="flex-1 break-words {m.color ? '' : 'text-foreground'}" style={colorStyle(m.color)}
           >{m.content}</span
         >
+        {#if canDelete}
+          <button
+            class="mt-0.5 shrink-0 opacity-0 group-hover/msg:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+            title="Delete this danmaku"
+            onclick={() => confirmDelete(m.id)}
+          >
+            <Trash2 size={12} />
+          </button>
+        {/if}
       </div>
     {/each}
     {#if danmakuStore.messages.length === 0}

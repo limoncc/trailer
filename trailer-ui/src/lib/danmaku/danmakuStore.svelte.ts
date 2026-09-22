@@ -338,6 +338,30 @@ export class DanmakuStore {
     }
   }
 
+  /**
+   * 删除一条弹幕(仅 admin/owner 会看到入口;后端 require_run_write 把关)。
+   * 成功后本地同步移除(含在飞条目 → Layer 卸载归轨);游标不动——
+   * 删除低频,% len 在源变化后顺序轻微偏一格可接受。
+   */
+  async removeMessage(id: number): Promise<boolean> {
+    if (!this.#runId || id <= 0) return false;
+    try {
+      const res = await fetch(`/api/v1/runs/${this.#runId}/danmaku/${id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok && res.status !== 404) {
+        this.error = `Delete failed (HTTP ${res.status})`;
+        return false;
+      }
+      this.messages = this.messages.filter((m) => m.id !== id);
+      this.flying = this.flying.filter((m) => m.id !== id);
+      return true;
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : 'Network error';
+      return false;
+    }
+  }
+
   /** 列表弹窗向上翻页(更早消息) */
   async loadOlder() {
     if (!this.#runId || this.loadingOlder) return;
