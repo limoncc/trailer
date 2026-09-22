@@ -62,7 +62,7 @@
 <div class="absolute inset-0 overflow-hidden pointer-events-none z-20">
   {#each danmakuStore.flying as m (m.fkey ?? m.id)}
     <span
-      class="absolute left-full top-0 whitespace-nowrap flex flex-col leading-tight will-change-transform [text-shadow:0_1px_2px_rgb(0_0_0/0.35)]"
+      class="absolute left-full top-0 whitespace-nowrap flex flex-col leading-tight will-change-transform"
       use:flyItem={m}
     >
       <!-- 昵称:左上小字 -->

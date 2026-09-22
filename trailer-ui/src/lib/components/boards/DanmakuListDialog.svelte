@@ -1,7 +1,8 @@
 <script lang="ts">
   // ─── 弹幕消息列表弹窗(手写遮罩+居中面板,对齐 WidgetPickerDialog 模式) ───
-  // 列表用 flex-col-reverse + 数据倒序渲染:天然锚定底部(新消息在下),
-  // 打开即贴底、新消息自动可见、加载更早不跳动——全程零滚动 JS / 零 $effect。
+  // 正序渲染(旧上新下)+ use: action 管滚动:挂载贴底、贴底时跟随新消息/删除;
+  // 用户在上方浏览时的删除/加载更早交给浏览器原生滚动锚定(overflow-anchor)。
+  // ⚠️ 勿改回 flex-col-reverse:其删除节点后的滚动坐标错乱会出现大块空白。
   import { X, ChevronUp, Trash2 } from 'lucide-svelte';
   import { danmakuStore, DANMAKU_COLOR_MAP } from '$lib/danmaku/danmakuStore.svelte';
   import { isShareView } from '$lib/utils/shareView';
@@ -29,6 +30,19 @@
   function colorStyle(color?: string): string {
     const hex = color ? DANMAKU_COLOR_MAP[color as keyof typeof DANMAKU_COLOR_MAP] : '';
     return hex ? `color:${hex}` : '';
+  }
+
+  /** 滚动 action:挂载贴底;messages 变化时原本贴底(<48px)则继续贴底 */
+  function keepTail(el: HTMLElement, _msgs: unknown[]) {
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return {
+      update() {
+        const tail = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (tail < 48) el.scrollTop = el.scrollHeight;
+      }
+    };
   }
 </script>
 
@@ -75,9 +89,12 @@
     </div>
   </div>
 
-  <!-- 消息列表:倒序渲染 + flex-col-reverse → 视觉顺序为正序、锚定底部 -->
-  <div class="flex-1 overflow-y-auto flex flex-col-reverse px-4 py-3 gap-2.5 min-h-0">
-    {#each [...danmakuStore.messages].reverse() as m (m.id)}
+  <!-- 消息列表:正序(旧上新下),滚动策略见 keepTail -->
+  <div
+    class="flex-1 overflow-y-auto flex flex-col px-4 py-3 gap-2.5 min-h-0"
+    use:keepTail={danmakuStore.messages}
+  >
+    {#each danmakuStore.messages as m (m.id)}
       <div class="group/msg flex items-start gap-1 text-sm leading-snug">
         <span class="text-primary text-xs font-medium mr-1.5 mt-0.5 shrink-0">{m.nickname}</span>
         <span class="text-[10px] text-muted-foreground mr-1.5 mt-1 tabular-nums shrink-0"
