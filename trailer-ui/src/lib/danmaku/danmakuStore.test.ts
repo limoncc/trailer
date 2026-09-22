@@ -34,42 +34,102 @@ describe('DanmakuStore', () => {
     vi.resetModules();
   });
 
-  // ── Danmu 开关与列表浮层 ──
+  // ── Danmu 三态(off/live/loop)与列表浮层 ──
 
-  it('默认 barrageOff + listClosed', () => {
+  it('默认 off + listClosed', () => {
     const s = new DanmakuStore();
-    expect(s.barrageOn).toBe(false);
+    expect(s.playMode).toBe('off');
     expect(s.listOpen).toBe(false);
   });
 
-  it('toggleBarrage 持久化 barrage/off;旧值 list 读为关', () => {
+  it('cyclePlayMode 循环 off→live→loop→off 并持久化;旧值迁移', () => {
     const s = new DanmakuStore();
-    s.toggleBarrage();
-    expect(s.barrageOn).toBe(true);
-    expect(localStorage.getItem(MODE_KEY)).toBe('barrage');
+    s.cyclePlayMode();
+    expect(s.playMode).toBe('live');
+    expect(localStorage.getItem(MODE_KEY)).toBe('live');
+    s.cyclePlayMode();
+    expect(s.playMode).toBe('loop');
+    expect(localStorage.getItem(MODE_KEY)).toBe('loop');
+    s.cyclePlayMode();
+    expect(s.playMode).toBe('off');
+    expect(localStorage.getItem(MODE_KEY)).toBe('off');
+
+    // 恢复
+    localStorage.setItem(MODE_KEY, 'loop');
+    expect(new DanmakuStore().playMode).toBe('loop');
+    // 旧值迁移:barrage→live;list/非法→off
     localStorage.setItem(MODE_KEY, 'barrage');
-    expect(new DanmakuStore().barrageOn).toBe(true);
-    localStorage.setItem(MODE_KEY, 'list'); // 旧三态残留
-    expect(new DanmakuStore().barrageOn).toBe(false);
+    expect(new DanmakuStore().playMode).toBe('live');
+    localStorage.setItem(MODE_KEY, 'list');
+    expect(new DanmakuStore().playMode).toBe('off');
     localStorage.setItem(MODE_KEY, 'yes');
-    expect(new DanmakuStore().barrageOn).toBe(false);
+    expect(new DanmakuStore().playMode).toBe('off');
   });
 
-  it('toggleBarrage 关闭时清空 flying;listOpen 不持久化', () => {
+  it('回到 off 清空 flying;listOpen 独立且不持久化', () => {
     const s = new DanmakuStore();
-    s.toggleBarrage();
+    s.cyclePlayMode(); // live
     s.flying = [msg(1)];
     s.listOpen = true;
-    s.toggleBarrage();
-    expect(s.barrageOn).toBe(false);
+    s.cyclePlayMode(); // loop
+    s.cyclePlayMode(); // off
+    expect(s.playMode).toBe('off');
     expect(s.flying).toHaveLength(0);
     expect(localStorage.getItem(MODE_KEY)).toBe('off');
-    // listOpen 是会话态,不写 localStorage(MODE_KEY 只记横飘开关)
+    // listOpen 是会话态,不写 localStorage(MODE_KEY 只记播放模式)
     s.openList();
     expect(s.listOpen).toBe(true);
     expect(localStorage.getItem(MODE_KEY)).toBe('off');
     s.closeList();
     expect(s.listOpen).toBe(false);
+  });
+
+  it('loop:消息源按游标循环填满,flyDone 补位', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson({ messages: [msg(1), msg(2)] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const s = new DanmakuStore();
+    s.attach('r1');
+    await vi.waitFor(() => expect(s.messages).toHaveLength(2));
+    s.cyclePlayMode(); // live
+    s.cyclePlayMode(); // loop:fillLoop 首填
+    // 2 条源循环填满 6 条:1,2,1,2,1,2
+    expect(s.flying).toHaveLength(6);
+    expect(s.flying.map((m) => m.id)).toEqual([1, 2, 1, 2, 1, 2]);
+    // fkey 各不相同(同消息重复起飞各自独立)
+    expect(new Set(s.flying.map((m) => m.fkey)).size).toBe(6);
+    // 飞走一条 → 补位(游标继续:下一条是源首 1)
+    const gone = s.flying[0].fkey!;
+    s.flyDone(gone);
+    expect(s.flying).toHaveLength(6);
+    expect(s.flying[5].id).toBe(1);
+    s.detach();
+  });
+
+  it('loop:空源时 flying 为空,轮询到新消息后自动补满', async () => {
+    vi.useFakeTimers();
+    let pollN = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('since_id')) {
+        // 第 1 次 = 进模式的 silent poll(空);之后 = 正式轮询带回 msg5
+        pollN += 1;
+        return pollN === 1 ? okJson({ messages: [] }) : okJson({ messages: [msg(5)] });
+      }
+      return okJson({ messages: [] }); // 首屏空
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const s = new DanmakuStore();
+    s.attach('r1');
+    await flush();
+    s.cyclePlayMode(); // live(silent 空)
+    s.cyclePlayMode(); // loop:源空 → 不填
+    await flush();
+    expect(s.flying).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(POLL_MS); // 正式轮询带回 msg5 → fillLoop
+    await flush();
+    expect(s.messages.map((m) => m.id)).toEqual([5]);
+    expect(s.flying.length).toBeGreaterThan(0); // 源更新后补位(同一条循环填)
+    expect(s.flying.every((m) => m.id === 5)).toBe(true);
+    s.detach();
   });
 
   // ── 昵称 / 颜色 / client_id ──
@@ -130,7 +190,7 @@ describe('DanmakuStore', () => {
     expect(fetchMock.mock.calls.length).toBe(calls); // off 态 + 已卸载,无轮询
   });
 
-  it('barrageOn 或 listOpen 任一开启即轮询;都关则停', async () => {
+  it('playMode 非 off 或 listOpen 任一开启即轮询;都关则停', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson({ messages: [] }));
     vi.stubGlobal('fetch', fetchMock);
     const s = new DanmakuStore();
@@ -164,7 +224,7 @@ describe('DanmakuStore', () => {
     s.attach('r1');
     await flush();
     expect(s.messages).toHaveLength(1);
-    s.toggleBarrage(); // on:静默 poll 补积压(2 进列表但不飞)
+    s.cyclePlayMode(); // live:静默 poll 补积压(2 进列表但不飞)
     await flush();
     expect(s.messages.map((m) => m.id)).toEqual([1, 2]);
     expect(s.flying).toHaveLength(0); // 积压不飞
@@ -224,7 +284,7 @@ describe('DanmakuStore', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const s = new DanmakuStore();
-    s.toggleBarrage();
+    s.cyclePlayMode(); // live:optimistic 推 flying,429 后应回滚
     s.attach('r1');
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const ok = await s.send('刷');
@@ -267,9 +327,9 @@ describe('DanmakuStore', () => {
     s.nickname = 'n';
     s.attach('r1');
     await flush();
-    s.toggleBarrage(); // on + 静默 poll(返回空,不抢先合并)
+    s.cyclePlayMode(); // live:静默 poll 返回空,不抢先合并
     await flush();
-    const sendP = s.send('hi'); // temp 入队(barrageOn → 进 flying),POST 挂起
+    const sendP = s.send('hi'); // temp 入队(playMode 非 off → 进 flying),POST 挂起
     await flush();
     expect(s.messages.some((m) => m.temp)).toBe(true);
     expect(s.flying).toHaveLength(1);

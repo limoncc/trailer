@@ -1,7 +1,7 @@
 <script lang="ts">
   // ─── Boards tab:run 下多个命名看板(子标签),12 列网格自由布局 ───
   import { onMount } from 'svelte';
-  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause, MessageSquare, Clapperboard } from 'lucide-svelte';
+  import { Plus, Pencil, Check, LayoutDashboard, Magnet, X, Play, Pause, MessageSquare, Radio, Repeat } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import { authReady } from '$lib/utils/auth';
   import { isShareView } from '$lib/utils/shareView';
@@ -476,18 +476,24 @@
         {#if error}
           <span class="text-xs text-destructive">{error}</span>
         {/if}
-        <!-- Danmu:横飘显示开关(消息列表从右侧浮动面板进入);owner 与分享访客都可操作 -->
+        <!-- Danmu:三态循环 off→实时(只飞新到)→循环(存量反复飞)→off;消息列表从右侧浮动面板进入 -->
         <button
-          class="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md transition-colors {danmakuStore.barrageOn
-            ? 'border-primary bg-primary/10 text-primary'
-            : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'}"
-          title={danmakuStore.barrageOn ? 'Danmu: ON — click to hide floating danmaku' : 'Danmu: OFF — click to show floating danmaku'}
-          onclick={() => danmakuStore.toggleBarrage()}
+          class="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md transition-colors {danmakuStore.playMode === 'off'
+            ? 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+            : 'border-primary bg-primary/10 text-primary'}"
+          title={danmakuStore.playMode === 'off'
+            ? 'Danmu: OFF — click for Live (only new messages float by)'
+            : danmakuStore.playMode === 'live'
+              ? 'Danmu: LIVE — click for Loop (replay all messages)'
+              : 'Danmu: LOOP — click to turn off'}
+          onclick={() => danmakuStore.cyclePlayMode()}
         >
-          {#if danmakuStore.barrageOn}
-            <Clapperboard size={12} /> Danmu
-          {:else}
+          {#if danmakuStore.playMode === 'off'}
             <MessageSquare size={12} /> Danmu
+          {:else if danmakuStore.playMode === 'live'}
+            <Radio size={12} /> Danmu · Live
+          {:else}
+            <Repeat size={12} /> Danmu · Loop
           {/if}
         </button>
         {#if activeBoard}
@@ -672,7 +678,7 @@
           onEditContent={openEditContent}
         />
       {/if}
-      {#if danmakuStore.barrageOn}
+      {#if danmakuStore.playMode !== 'off'}
         <DanmakuLayer />
       {/if}
     </div>
