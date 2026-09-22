@@ -120,6 +120,7 @@ async fn main() {
         frontend_dir: cfg.frontend_dir.clone().into(),
         lttb_cache: Arc::new(Mutex::new(LttbCache::new(10, 500))),
         auth,
+        danmaku_rl: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     // Build router
