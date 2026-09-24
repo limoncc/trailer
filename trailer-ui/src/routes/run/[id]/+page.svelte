@@ -313,7 +313,12 @@
   $effect(() => {
     const id = page.params.id;
     if (!id || $refreshInterval <= 0) return;
-    const timer = setInterval(() => { if (id) loadMetrics(id, { refresh: true }); }, $refreshInterval * 1000);
+    const timer = setInterval(() => {
+      // 历史 run 不再轮询(runState 空=元信息未返回,保守继续);running→finished
+      // 由最后一次成功轮询的 fetchRunMeta 翻转后自然停。interval 回调内读取
+      // 不会被本 effect 追踪(只追踪 effect 体同步执行时的读)。
+      if (id && (runState === '' || runState === 'running')) loadMetrics(id, { refresh: true });
+    }, $refreshInterval * 1000);
     return () => clearInterval(timer);
   });
 </script>
