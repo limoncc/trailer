@@ -53,3 +53,24 @@ uv run python scripts/db-diagnostics/e4_inspect.py /tmp/e1.db
 ```
 
 复现时**立即保存 db/-wal/-shm/-journal 四件套副本**（脚本会打印指纹与提示）。
+
+## 2026-09-24 实测二分结论（v0.1.15）
+
+| 实验 | 读者实现 | 结果 |
+|---|---|---|
+| E2（无读者，2000 条/s × 60s ≈ 12 万行） | — | **PASS**（integrity ok） |
+| E1（Python 3.43.1 `mode=ro`+`query_only` 50ms 轮询 ×120s） | 系统 sqlite3 | **REPRO**：轮询 1883 次后 `disk I/O error`；指纹 `-wal=0`（被截断）+ `-shm` mtime 落后主库数分钟 |
+| E1-nc（同上 + `TRAILER_NO_CHECKPOINT=1`） | 同上 | **仍 REPRO** → 10s TRUNCATE checkpoint 任务**排除** |
+| E3（Rust bundled 3.46 `read_only` 50ms 轮询 ×126s，1800 次） | sqlx bundled | **PASS**（integrity ok，零 POLL_ERROR） |
+| E4（对 E1 复现库取证） | `mode=ro` 重开 | **integrity_check = ok——库本体无持久损坏**，错误为读者侧瞬时 I/O 错误 |
+
+**定罪：外部 Python 系统 SQLite（3.43.1）读者与 Rust bundled（3.46.0）写者的跨版本并发**——
+唯一变量是读者实现（E1 vs E3），checkpoint 无关。复现表现为**读者侧瞬时错误**而非持久
+b-tree 损坏；用户报告中更重的 "malformed + Tree 页段" 可能叠加了其他因素（非 ro 打开、
+文件拷贝、26 进程多写者），迁移工具侧建议：
+
+1. 轮询/读取改走 **server API 或 Rust 读路径**（同版本 SQLite）——根治；
+2. 若必须用 Python sqlite3 直读：接受偶发读者错误并**容错重试**（库本体无损，E4 已证），
+   且务必 `mode=ro` + `query_only=1`；
+3. 迁移等重负载场景：先 `finish()` 排空后再读取（trailer ≥0.1.16 的 drain 修复保证
+   finish 后所有批次已落库，读到的是最终状态）。

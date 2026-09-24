@@ -27,7 +27,7 @@ def main() -> None:
     ap.add_argument("--integrity-every", type=int, default=20, help="每 N 次轮询做一次 integrity_check")
     args = ap.parse_args()
 
-    from trailer.trailer import Tracker
+    from trailer import Tracker
 
     print(f"[E1] db={args.db} poll={args.interval_ms}ms mode={args.open_mode} "
           f"query_only={args.query_only} immutable={args.immutable} rate={args.write_rate}/s")

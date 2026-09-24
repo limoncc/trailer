@@ -16,7 +16,7 @@ def main() -> None:
     ap.add_argument("--write-rate", type=int, default=2000)
     args = ap.parse_args()
 
-    from trailer.trailer import Tracker
+    from trailer import Tracker
 
     print(f"[E2] db={args.db} rate={args.write_rate}/s duration={args.duration_s}s (无轮询)")
     print(f"[E2] python sqlite3 = {sqlite_versions()['python_sqlite3']}")

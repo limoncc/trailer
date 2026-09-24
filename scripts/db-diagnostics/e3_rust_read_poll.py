@@ -24,6 +24,8 @@ def main() -> None:
     ap.add_argument("--write-rate", type=int, default=2000)
     args = ap.parse_args()
 
+    from trailer import Tracker
+
     print(f"[E3] db={args.db} rust-read poll={args.interval_ms}ms rate={args.write_rate}/s")
 
     stop_flag = [False]
@@ -38,20 +40,26 @@ def main() -> None:
         cwd=REPO, stderr=subprocess.PIPE, text=True,
     )
 
-    # 等写负载结束
+    # 等写负载结束,再让 ro_reader 多跑 10s 收集错误窗口,然后优雅终止
     tw.join(timeout=args.duration_s + 60)
     stop_flag[0] = True
-
+    time.sleep(10)
+    proc.terminate()
     try:
-        _, stderr = proc.communicate(timeout=120)
+        _, stderr = proc.communicate(timeout=30)
     except subprocess.TimeoutExpired:
         proc.kill()
         _, stderr = proc.communicate()
 
     errors = []
-    if proc.returncode != 0:
-        err_text = (stderr or "").strip().splitlines()
-        errors.append(f"ro_reader exit={proc.returncode}: {err_text[-3:] if err_text else '?'}")
+    stderr_text = stderr or ""
+    # 复现信号 = ro_reader 打印过 POLL_ERROR(读失败)或自身以 3 退出;
+    # 被我方 SIGTERM/SIGKILL 终止不算。
+    if "POLL_ERROR" in stderr_text:
+        tail = [l for l in stderr_text.strip().splitlines() if l.strip()][-3:]
+        errors.append(f"ro_reader reported: {tail}")
+    elif proc.returncode == 3:
+        errors.append(f"ro_reader exit=3: {stderr_text.strip()[-300:]}")
 
     try:
         conn = ro_connect(args.db)
