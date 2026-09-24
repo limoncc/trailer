@@ -63,10 +63,12 @@
   let chart: Chart | null = null;
 
   // ─── 框选窗口/排除(仅图会话状态;回放截断/热更新/主题重建均保留,不入库) ───
+  /// 交互模式:none=默认无手势(与 tooltip 零冲突);select=框选过滤 x 窗口;exclude=框选排除区段+点选排除单点。
+  /// 需先点按钮进入模式再操作(用户反馈:先加按钮,然后选择)。select/exclude 互斥。
+  type BrushMode = 'none' | 'select' | 'exclude';
+  let brushMode = $state<BrushMode>('none');
   /// 框选的 x 显示窗口(数据域,time 轴为 ms)。双击图内还原
   let xWindow = $state<XWindow | null>(null);
-  /// 排除模式开关:开=框选排除区段/点选排除单点;关=框选为显示窗口过滤
-  let excludeMode = $state(false);
   /// 排除的 x 区段与单点((series,x) key)
   let excludeRanges = $state<ExcludeRange[]>([]);
   let excludePoints = $state<Set<string>>(new Set());
@@ -187,16 +189,20 @@
           crosshairsYStroke: '#94a3b8',
         },
         // TensorBoard 式 x 向框选手势:只借其 drag 手势与 brush:end(selection 已是数据域,
-        // selectionOf 完成像素→invert→scale.invert,Date/log 均正确)。显示窗口/排除由组件
-        // 自己的行级过滤实现——不用 brushXFilter(它会钉死 y domain,过滤后 y 无法自适应)。
-        // 拖完立刻 chart.emit('brush:remove') 清 mask 与 active/inactive 态,数据随即热更新。
-        brushXHighlight: {
-          maskFill: '#3b82f6',
-          maskFillOpacity: 0.12,
-          maskStroke: '#3b82f6',
-          maskStrokeOpacity: 0.45,
-          maskLineWidth: 1,
-        },
+        // selectionOf 完成像素→invert→scale.invert,Date/log 均正确)。仅 Select/Exclude
+        /// 模式激活时注入(false 时 G2 update 会销毁旧实例)——默认无手势,与 tooltip 零冲突。
+        // 不用 brushXFilter:它会钉死 y domain,行级过滤后 y 无法自适应。
+        // 排除/过滤完成后立刻 chart.emit('brush:remove') 清 mask 与 active/inactive 态。
+        brushXHighlight:
+          brushMode !== 'none'
+            ? {
+                maskFill: '#3b82f6',
+                maskFillOpacity: 0.22,
+                maskStroke: '#3b82f6',
+                maskStrokeOpacity: 0.85,
+                maskLineWidth: 1.5,
+              }
+            : false,
       },
       animate: { enter: { type: 'waveIn' } }
     };
@@ -340,6 +346,7 @@
 
   // ─── 框选:brushXHighlight 手势完成 → selection[0] 即 x 数据域(selectionOf 已做换算) ───
   function onBrushEnd(e: any) {
+    if (brushMode === 'none') return;
     const selection = e?.data?.selection;
     if (!Array.isArray(selection)) return;
     const domainX = selection[0] as [unknown, unknown];
@@ -350,7 +357,7 @@
     if (!Number.isFinite(x0) || !Number.isFinite(x1) || x0 === x1) return;
     if (x0 > x1) [x0, x1] = [x1, x0];
     lastBrushAt = Date.now();
-    if (excludeMode) {
+    if (brushMode === 'exclude') {
       excludeRanges = [...excludeRanges, [x0, x1] as ExcludeRange];
     } else {
       xWindow = [x0, x1];
@@ -360,36 +367,40 @@
     requestUpdate();
   }
 
-  // ─── 点选排除:line element:click 的 e.data.data 是整条 series 数组(非单点),
-  //     按事件坐标在可见行里找最近点。延迟执行:双击序列的第二次 click 会被 dblclick 取消 ───
-  function onElementClick(e: any) {
-    if (!excludeMode) return;
+  // ─── 点选排除:用 plot:click(图内任意单击都触发,不必命中 1.5px 的线——
+  ///     element:click 命中率过低是"点选不灵敏"的根因之一),按坐标找最近点。
+  ///     延迟执行:双击序列会先发 detail=1 的 click,由 dblclick 在窗口内取消 ───
+  function onPlotClick(e: any) {
+    if (brushMode !== 'exclude') return;
     // 框选拖完浏览器仍会补发 click——短窗内忽略,防框选后误排除最近点
     if (Date.now() - lastBrushAt < 350) return;
     if (clickExcludeTimer) clearTimeout(clickExcludeTimer);
-    const native = e?.nativeEvent ? e : null;
-    // offsetX/offsetY 相对 canvas;拿 plot 区域原点换算成 plot 内坐标
     const ox = e?.offsetX;
     const oy = e?.offsetY;
     if (!Number.isFinite(ox) || !Number.isFinite(oy)) return;
     clickExcludeTimer = setTimeout(() => {
       clickExcludeTimer = null;
-      applyPointExclude(ox, oy, native);
-    }, 220);
+      applyPointExclude(ox, oy);
+    }, 140);
   }
 
-  function applyPointExclude(ox: number, oy: number, _native: any) {
-    if (!chart || !excludeMode) return;
+  function applyPointExclude(ox: number, oy: number) {
+    if (!chart || brushMode !== 'exclude') return;
     try {
       const coordinate = (chart as any).getCoordinate?.();
       const scales = (chart as any).getScale?.();
-      if (!coordinate?.invert || !scales?.x || !scales?.y) return;
-      // offsetX/offsetY 相对 canvas,coordinate.invert 期望 plot 区域内坐标
+      if (!coordinate?.invert || !scales?.x?.invert || !scales?.y?.invert) return;
       const plotRect = getPlotRect();
       if (!plotRect) return;
+      // offsetX/offsetY 相对 canvas → plot 内坐标;coordinate.invert 得到的是 scale range
+      // 空间,**必须再 scale.invert 才是数据域**(selectionOf 同款两步换算——
+      // 之前漏了第二步,点选排除用像素值当数据坐标比对,几乎点不中,用户反馈不灵敏)。
       const px = ox - plotRect.x;
       const py = oy - plotRect.y;
-      const [abstractX, abstractY] = coordinate.invert([px, py]);
+      const [rangeX, rangeY] = coordinate.invert([px, py]);
+      const dataX = toNum(scales.x.invert(rangeX));
+      const dataY = toNum(scales.y.invert(rangeY));
+      if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
       const rows = lastPlotData;
       if (rows.length === 0) return;
       // 域跨度:可见行数据域归一化(找最近点用)
@@ -402,8 +413,10 @@
       }
       const hit = findNearestDatum(rows, {
         xField, yField,
-        clickX: toNum(abstractX), clickY: Number(abstractY),
+        clickX: dataX, clickY: dataY,
         xMin, xMax, yMin, yMax,
+        // 像素阈值:点太远视为误点(排除模式下点击空白不动作)
+        plotW: plotRect.w, plotH: plotRect.h, maxPixelDist: 48,
       });
       if (!hit) return;
       const s = seriesField ? String(hit[seriesField] ?? '') : null;
@@ -414,7 +427,7 @@
 
   /// plot 区域(canvas 内)原点与尺寸:遍历 G 场景找 className='plot' 的 rect。
   /// G 的 getBoundingClientRect 返回 viewport 相对,须再减 canvas 的 viewport 偏移。
-  function getPlotRect(): { x: number; y: number } | null {
+  function getPlotRect(): { x: number; y: number; w: number; h: number } | null {
     const root: any = (chart as any)?.getContext?.().canvas?.document?.documentElement;
     if (!root) return null;
     let plot: any = null;
@@ -428,11 +441,9 @@
     const canvasEl = (container?.querySelector('canvas') ?? null) as HTMLCanvasElement | null;
     const canvasRect = canvasEl?.getBoundingClientRect();
     const rect = plot.getBoundingClientRect();
-    if (!canvasRect) return { x: rect.x ?? rect.left ?? 0, y: rect.y ?? rect.top ?? 0 };
-    return {
-      x: (rect.x ?? rect.left) - canvasRect.left,
-      y: (rect.y ?? rect.top) - canvasRect.top,
-    };
+    const originX = canvasRect ? (rect.x ?? rect.left) - canvasRect.left : (rect.x ?? rect.left ?? 0);
+    const originY = canvasRect ? (rect.y ?? rect.top) - canvasRect.top : (rect.y ?? rect.top ?? 0);
+    return { x: originX, y: originY, w: Number(rect.width) || 0, h: Number(rect.height) || 0 };
   }
 
   function cancelPointExclude() {
@@ -456,14 +467,21 @@
     requestUpdate();
   }
 
+  function toggleSelectMode() {
+    cancelPointExclude();
+    brushMode = brushMode === 'select' ? 'none' : 'select';
+    requestUpdate(); // interaction 开关随 options 重建(G2 update 会销毁/注入 brush 手势)
+  }
+
   function toggleExcludeMode() {
     cancelPointExclude();
-    excludeMode = !excludeMode;
+    brushMode = brushMode === 'exclude' ? 'none' : 'exclude';
+    requestUpdate();
   }
 
   function fmtBound(v: number): string {
     if (xIsTime) {
-      return new Date(v).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+      return new Date(v).toLocaleString('en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
     }
     return String(Math.round(v * 1000) / 1000);
   }
@@ -472,7 +490,7 @@
   /// ?.防御:测试环境中 Chart mock 可能无 emitter 方法。
   function bindChartEvents(c: Chart) {
     c.on?.('brush:end', onBrushEnd);
-    c.on?.('element:click', onElementClick);
+    c.on?.('plot:click', onPlotClick);
   }
 
   function createChart() {
@@ -576,17 +594,18 @@
   <div class="relative w-full">
     <div
       bind:this={container}
-      class="w-full"
+      class="w-full {brushMode !== 'none' ? 'cursor-crosshair' : ''}"
       style="height: {height}px;"
       use:chartSync={{ data, markers }}
     ></div>
-    <!-- 图内工具条:排除模式开关 / 恢复排除 / 显示窗口提示。仅图会话状态 -->
+    <!-- 图内工具条(卡片右上):Select/Exclude 模式按钮(互斥,需先点按钮再操作)、
+         恢复排除、显示窗口提示。仅图会话状态,文案英文。 -->
     <div class="absolute top-1 right-1 z-10 flex items-center gap-1">
       {#if xWindow}
         <button
           type="button"
           class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border border-border rounded bg-background/90 text-muted-foreground hover:text-foreground transition-colors"
-          title="显示范围(双击图内还原)"
+          title="Visible range — click to reset (double-click chart also resets)"
           onclick={clearXWindow}
         >
           {fmtBound(xWindow[0])} ~ {fmtBound(xWindow[1])}
@@ -597,24 +616,37 @@
         <button
           type="button"
           class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border border-border rounded bg-background/90 text-muted-foreground hover:text-foreground transition-colors"
-          title="恢复全部排除"
+          title="Restore all exclusions"
           onclick={restoreExcluded}
         >
-          恢复 ({excludeCount})
+          Restore ({excludeCount})
         </button>
       {/if}
       <button
         type="button"
-        class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border rounded transition-colors {excludeMode
+        class="flex items-center px-1.5 py-0.5 text-[10px] leading-none border rounded transition-colors {brushMode === 'select'
+          ? 'border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400'
+          : 'border-border bg-background/90 text-muted-foreground hover:text-foreground'}"
+        title={brushMode === 'select'
+          ? 'Selecting: drag on chart to filter the x range (double-click to reset)'
+          : 'Select mode: drag on chart to show only a range'}
+        aria-pressed={brushMode === 'select'}
+        onclick={toggleSelectMode}
+      >
+        Select
+      </button>
+      <button
+        type="button"
+        class="flex items-center px-1.5 py-0.5 text-[10px] leading-none border rounded transition-colors {brushMode === 'exclude'
           ? 'border-amber-500 bg-amber-500/15 text-amber-600 dark:text-amber-400'
           : 'border-border bg-background/90 text-muted-foreground hover:text-foreground'}"
-        title={excludeMode
-          ? '排除模式:框选排除 x 区段,点击数据点排除单点'
-          : '开启排除模式(框选/点选排除异常值)'}
-        aria-pressed={excludeMode}
+        title={brushMode === 'exclude'
+          ? 'Excluding: drag to exclude an x span, click a point to exclude it'
+          : 'Exclude mode: remove outlier spans/points (y re-adapts)'}
+        aria-pressed={brushMode === 'exclude'}
         onclick={toggleExcludeMode}
       >
-        排除
+        Exclude
       </button>
     </div>
   </div>
