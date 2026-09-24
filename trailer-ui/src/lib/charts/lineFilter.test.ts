@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { filterLineData, findNearestDatum, pointKey, toNum } from './lineFilter';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { filterLineData, findNearestDatum, pointKey, toNum, loadFilterState, saveFilterState } from './lineFilter';
 
 const rows = [
   { step: 0, value: 1.0, series: 'a' },
@@ -157,5 +157,53 @@ describe('lineFilter 纯函数', () => {
     ).toEqual({ step: 20, value: 100 });
     // 点 (0, 0):距最近点 (10,1) = √(100²+100²)≈141 > 48 → null
     expect(findNearestDatum(rows, { ...base, clickX: 0, clickY: 0 })).toBeNull();
+  });
+});
+
+describe('过滤状态持久化 (localStorage)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('save → load roundtrip（模式/窗口/排除区段/排除点）', () => {
+    saveFilterState('run:1:widget:w1', {
+      brushMode: 'exclude',
+      xWindow: [10, 50],
+      excludeRanges: [[0, 5], [90, 100]],
+      excludePoints: ['a 20', 'b 30'],
+    });
+    expect(loadFilterState('run:1:widget:w1')).toEqual({
+      brushMode: 'exclude',
+      xWindow: [10, 50],
+      excludeRanges: [[0, 5], [90, 100]],
+      excludePoints: ['a 20', 'b 30'],
+    });
+  });
+
+  it('key 间互不干扰；未知 key 返回 null', () => {
+    saveFilterState('k1', { brushMode: 'select', xWindow: [1, 2] });
+    expect(loadFilterState('k2')).toBeNull();
+    expect(loadFilterState('k1')?.xWindow).toEqual([1, 2]);
+  });
+
+  it('损坏 JSON / 非对象内容返回 null', () => {
+    localStorage.setItem('trailer-line-filter-bad', '{not json');
+    expect(loadFilterState('bad')).toBeNull();
+    localStorage.setItem('trailer-line-filter-bad', '"a string"');
+    expect(loadFilterState('bad')).toBeNull();
+  });
+
+  it('非法字段被丢弃、合法字段保留（容错恢复）', () => {
+    localStorage.setItem(
+      'trailer-line-filter-mix',
+      JSON.stringify({
+        brushMode: 'bogus',
+        xWindow: [NaN, 1],
+        excludeRanges: [[1, 2], ['a'], [3]],
+        excludePoints: ['a 1', 42, null],
+      })
+    );
+    expect(loadFilterState('mix')).toEqual({
+      excludeRanges: [[1, 2]],
+      excludePoints: ['a 1'],
+    });
   });
 });
