@@ -463,6 +463,42 @@ describe('LineChart 框选与排除', () => {
     expect(Array.from(b.target.querySelectorAll('button')).some((el) => el.textContent?.includes('~'))).toBe(true);
     b.unmount();
   });
+
+  it('initialFilter 挂载恢复(不读 localStorage)', async () => {
+    const { target, opts, unmount } = await mountLine({
+      data: chartData,
+      initialFilter: {
+        brushMode: 'exclude',
+        xWindow: [15, 35],
+        excludeRanges: [[0, 5]],
+        excludePoints: [' 30'],
+      },
+    });
+    // 窗口 [15,35] → 20,30;点排除 ' 30' → 只剩 20
+    expect(optsRows(opts).map((r: any) => r.step)).toEqual([20]);
+    expect(btn(target, 'Exclude')!.getAttribute('aria-pressed')).toBe('true');
+    expect(btn(target, 'Restore')?.textContent).toContain('2');
+    unmount();
+  });
+
+  it('onFilterChange 优先:回调收到状态且不写 localStorage(即使同传 storageKey)', async () => {
+    const changes: any[] = [];
+    const { target, handler, unmount } = await mountLine({
+      data: chartData,
+      storageKey: 'unit-cb',
+      onFilterChange: (f: any) => changes.push(f),
+    });
+    btn(target, 'Select')!.click();
+    await flush();
+    handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
+    await flush();
+
+    expect(changes).toHaveLength(2);
+    expect(changes[0]).toMatchObject({ brushMode: 'select' });
+    expect(changes[1]).toMatchObject({ xWindow: [15, 35] });
+    expect(localStorage.getItem('trailer-line-filter-unit-cb')).toBeNull();
+    unmount();
+  });
 });
 
 // ── options 断言辅助 ──
