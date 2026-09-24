@@ -158,4 +158,39 @@ describe('LineChart slider', () => {
     expect(opts.slider).toBeUndefined();
     unmount();
   });
+
+  it('热更新重建后保持用户拖动的窗口(values/onChange 持久化)', async () => {
+    const { opts, unmount } = await mountLine({ data: sliderData });
+    expect(opts.slider.x.values).toEqual([0, 1]);
+    expect(typeof opts.slider.x.onChange).toBe('function');
+    // 模拟 G2 slider 拖动完成回调(组件级 sliderValues 回写)
+    opts.slider.x.onChange([0.3, 0.7]);
+    try {
+      // 主题切换 → createChart 全量重建,与回放/实时流的 hotUpdate 同走 buildOptions
+      document.documentElement.classList.add('dark');
+      await new Promise((r) => setTimeout(r, 30));
+      const { Chart } = await import('@antv/g2');
+      const inst = (Chart as any).mock.results.at(-1)?.value;
+      const rebuilt = inst.options.mock.calls.at(-1)?.[0];
+      expect(rebuilt.slider.x.values).toEqual([0.3, 0.7]);
+    } finally {
+      document.documentElement.classList.remove('dark');
+      await new Promise((r) => setTimeout(r, 30));
+      unmount();
+    }
+  });
+
+  it('action 挂载/卸载 window pointerup 监听(图内松手恢复热更新)', async () => {
+    const addSpy = vi.spyOn(window, 'addEventListener');
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+    try {
+      const { unmount } = await mountLine({ data: sliderData });
+      expect(addSpy).toHaveBeenCalledWith('pointerup', expect.any(Function));
+      unmount();
+      expect(removeSpy).toHaveBeenCalledWith('pointerup', expect.any(Function));
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
+  });
 });

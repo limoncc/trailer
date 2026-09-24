@@ -62,6 +62,8 @@
 
   let container: HTMLDivElement;
   let chart: Chart | null = null;
+  /// x 轴缩略滑块当前窗口([0,1] 归一化):热更新重建 slider 组件时注入,防止拖动位置被重置
+  let sliderValues: [number, number] = [0, 1];
 
   /// 结构性选项(log 轴/平滑等)变化需销毁重建,确保 G2 scale 干净切换;纯数据变化走热更新
   function structKey(): string {
@@ -176,12 +178,18 @@
       //    crossPadding 布局间隙也走顶层(总占位 = size + crossPadding,默认 12 太空)。
       // 2) style.trackSize — slider.ts inferPosition 从 style 解构定位轨道;渲染样式同进 style。
       // brushable=false:轨道按下拖动不再被当成刷选重置范围(与卡片拖拽手势体感冲突)。
+      // values/onChange:热更新(回放截断/实时流)每次 chart.options() 全量重建 slider 组件,
+      // 内部拖动状态会回默认 [0,1]——用组件级 sliderValues 持久化,重建时注入、拖动时回写。
       ...(slider
         ? {
             slider: {
               x: {
                 brushable: false,
                 showLabel: false,
+                values: sliderValues,
+                onChange: (v: [number, number]) => {
+                  sliderValues = v;
+                },
                 // selection 与 track 同高(=trackSize,组件无独立键):带高提到 7px 让中间
                 // 选区饱满,轨道再压淡、选区提亮做层次——感知上「中间高、两端细」。
                 // 布局带仍 max(7, 5*2.4)=12,总占位 16px 不变。
@@ -376,8 +384,14 @@
   /// props 变化 → 图表更新的命令式通道:use: action 的 update 在参数表达式
   /// 变化时被模板调用,不经过 $effect。悬停监听也挂在这里(action 挂载即注册)。
   function chartSync(node: HTMLDivElement, _params: { data: DataPoint[]; markers: Props['markers'] }) {
-    node.addEventListener('pointerenter', () => { hoverPause = true; });
+    const onEnter = () => { hoverPause = true; };
+    node.addEventListener('pointerenter', onEnter);
     node.addEventListener('pointerleave', flushPendingHotUpdate);
+    // 图内松开指针(典型:拖 x 轴缩略滑块)也补一次 flush——hoverPause 只在 leave 恢复,
+    // 手停在卡片上时 pending 永不执行,回放/实时流视觉上会"卡死"。拖完即恢复数据流,
+    // 之后继续悬停看 tooltip 若被下一 tick 刷新,以「图继续运行」优先。
+    const onWindowPointerUp = () => flushPendingHotUpdate();
+    window.addEventListener('pointerup', onWindowPointerUp);
     return {
       update() {
         if (!chart) return; // onMount 尚未建图,由 onMount 用最新 props 创建
@@ -388,6 +402,11 @@
         } else {
           hotUpdate();
         }
+      },
+      destroy() {
+        node.removeEventListener('pointerenter', onEnter);
+        node.removeEventListener('pointerleave', flushPendingHotUpdate);
+        window.removeEventListener('pointerup', onWindowPointerUp);
       },
     };
   }
