@@ -182,15 +182,18 @@
               x: {
                 brushable: false,
                 showLabel: false,
-                trackSize: 4,
+                // selection 与 track 同高(=trackSize,组件无独立键):带高提到 7px 让中间
+                // 选区饱满,轨道再压淡、选区提亮做层次——感知上「中间高、两端细」。
+                // 布局带仍 max(7, 5*2.4)=12,总占位 16px 不变。
+                trackSize: 7,
                 handleIconSize: 5,
                 crossPadding: 4,
                 style: {
-                  trackSize: 4,
+                  trackSize: 7,
                   trackFill: '#94a3b8',
-                  trackFillOpacity: 0.12,
+                  trackFillOpacity: 0.1,
                   selectionFill: '#3b82f6',
-                  selectionFillOpacity: 0.08,
+                  selectionFillOpacity: 0.16,
                   handleIconSize: 5,
                   handleIconFill: '#94a3b8',
                   handleIconFillOpacity: 0.45,
