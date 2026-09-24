@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
   import { g2Theme, onChartThemeChange, adaptiveTicks } from './chartTheme.svelte';
+  import { filterLineData, findNearestDatum, pointKey, toNum } from './lineFilter';
+  import type { ExcludeRange, XWindow } from './lineFilter';
 
   interface DataPoint {
     step: number;
@@ -34,8 +36,6 @@
     smoothWindow?: number;
     /// Points to highlight on the chart (e.g. latest data point marker)
     markers?: Array<{ step: number; value: number; color?: string }>;
-    /// X 轴下方缩略滑块(sliderFilter):离群点把主曲线压扁时拖拽查看局部。默认开
-    slider?: boolean;
   }
 
   let {
@@ -57,13 +57,25 @@
     yFormat,
     smoothWindow = 0,
     markers = [],
-    slider = true,
   }: Props = $props();
 
   let container: HTMLDivElement;
   let chart: Chart | null = null;
-  /// x 轴缩略滑块当前窗口([0,1] 归一化):热更新重建 slider 组件时注入,防止拖动位置被重置
-  let sliderValues: [number, number] = [0, 1];
+
+  // ─── 框选窗口/排除(仅图会话状态;回放截断/热更新/主题重建均保留,不入库) ───
+  /// 框选的 x 显示窗口(数据域,time 轴为 ms)。双击图内还原
+  let xWindow = $state<XWindow | null>(null);
+  /// 排除模式开关:开=框选排除区段/点选排除单点;关=框选为显示窗口过滤
+  let excludeMode = $state(false);
+  /// 排除的 x 区段与单点((series,x) key)
+  let excludeRanges = $state<ExcludeRange[]>([]);
+  let excludePoints = $state<Set<string>>(new Set());
+  const excludeCount = $derived(excludeRanges.length + excludePoints.size);
+  /// buildOptions 最近一次过滤后的可见行:点选排除时按其找最近点
+  let lastPlotData: Array<Record<string, unknown>> = [];
+  /// brush 结束时间戳:其后短窗内的 click 视为拖拽副产物,防止误触发点选排除
+  let lastBrushAt = 0;
+  let clickExcludeTimer: ReturnType<typeof setTimeout> | null = null;
 
   /// 结构性选项(log 轴/平滑等)变化需销毁重建,确保 G2 scale 干净切换;纯数据变化走热更新
   function structKey(): string {
@@ -118,10 +130,14 @@
         return { ...d, [xField]: new Date(ms) };
       });
     }
+    // 框选窗口 + 排除(行级过滤 → scale.y 不钉 domain,y 随可见数据自适应)。
+    // 放在 SMA 前:被排除的异常点不污染平滑窗口。
+    plotData = filterLineData(plotData, { xField, seriesField, xWindow, excludeRanges, excludePoints });
     // 移动平均平滑(按 series 分组)
     if (smoothWindow > 1) {
       plotData = applySMA(plotData, smoothWindow);
     }
+    lastPlotData = plotData;
 
     // 网格/刻度随容器尺寸自适应:卡片缩小(Boards 拖拽缩放/列数切换)时自动变稀,
     // 避免 tick 数固定导致网格密集。ResizeObserver 会在尺寸变化时重建触发重算。
@@ -170,50 +186,18 @@
           crosshairsXStroke: '#94a3b8',
           crosshairsYStroke: '#94a3b8',
         },
+        // TensorBoard 式 x 向框选手势:只借其 drag 手势与 brush:end(selection 已是数据域,
+        // selectionOf 完成像素→invert→scale.invert,Date/log 均正确)。显示窗口/排除由组件
+        // 自己的行级过滤实现——不用 brushXFilter(它会钉死 y domain,过滤后 y 无法自适应)。
+        // 拖完立刻 chart.emit('brush:remove') 清 mask 与 active/inactive 态,数据随即热更新。
+        brushXHighlight: {
+          maskFill: '#3b82f6',
+          maskFillOpacity: 0.12,
+          maskStroke: '#3b82f6',
+          maskStrokeOpacity: 0.45,
+          maskLineWidth: 1,
+        },
       },
-      // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽手柄/平移选区查看局部。
-      // 键层级(G2 源码核实,两处都要放尺寸键):
-      // 1) 顶层 trackSize/handleIconSize — computeSliderSize(component.ts) 只读顶层键算布局带
-      //    size=max(trackSize, handleIconSize*2.4),嵌在 style 里读不到会退回主题默认 24px;
-      //    crossPadding 布局间隙也走顶层(总占位 = size + crossPadding,默认 12 太空)。
-      // 2) style.trackSize — slider.ts inferPosition 从 style 解构定位轨道;渲染样式同进 style。
-      // brushable=false:轨道按下拖动不再被当成刷选重置范围(与卡片拖拽手势体感冲突)。
-      // values/onChange:热更新(回放截断/实时流)每次 chart.options() 全量重建 slider 组件,
-      // 内部拖动状态会回默认 [0,1]——用组件级 sliderValues 持久化,重建时注入、拖动时回写。
-      ...(slider
-        ? {
-            slider: {
-              x: {
-                brushable: false,
-                showLabel: false,
-                values: sliderValues,
-                onChange: (v: [number, number]) => {
-                  sliderValues = v;
-                },
-                // selection 与 track 同高(=trackSize,组件无独立键):带高提到 7px 让中间
-                // 选区饱满,轨道再压淡、选区提亮做层次——感知上「中间高、两端细」。
-                // 布局带仍 max(7, 5*2.4)=12,总占位 16px 不变。
-                trackSize: 7,
-                handleIconSize: 5,
-                crossPadding: 4,
-                style: {
-                  trackSize: 7,
-                  trackFill: '#94a3b8',
-                  trackFillOpacity: 0.1,
-                  selectionFill: '#3b82f6',
-                  selectionFillOpacity: 0.16,
-                  handleIconSize: 5,
-                  handleIconFill: '#94a3b8',
-                  handleIconFillOpacity: 0.45,
-                  handleIconStroke: '#94a3b8',
-                  handleIconStrokeOpacity: 0,
-                  handleIconLineWidth: 0,
-                  sparklineLineStrokeOpacity: 0.18,
-                },
-              },
-            },
-          }
-        : {}),
       animate: { enter: { type: 'waveIn' } }
     };
 
@@ -255,9 +239,10 @@
           return { ...m, step: new Date(ms) };
         });
       }
+      // 窗口/排除区段外的最新点标记不画(markers 无 series 信息,点选排除不参与)
+      plotMarkers = filterLineData(plotMarkers, { xField: 'step', xWindow, excludeRanges });
       const lineSpec = { ...options };
       delete lineSpec.animate;
-      delete lineSpec.slider; // slider 是 view 级组件,只在顶层生效(children 里的副本删除)
       options.type = 'view';
       options.children = [
         lineSpec,
@@ -345,6 +330,151 @@
       .catch(() => {});
   }
 
+  /// 本地交互(框选/点选/按钮)引发的重渲染:绕过 hoverPause——这是用户主动操作,
+  /// 立即生效优先于保护 tooltip;pending 一并清掉防止随后重复渲染。
+  function requestUpdate() {
+    if (!chart) return;
+    pendingHotUpdate = false;
+    hotUpdate();
+  }
+
+  // ─── 框选:brushXHighlight 手势完成 → selection[0] 即 x 数据域(selectionOf 已做换算) ───
+  function onBrushEnd(e: any) {
+    const selection = e?.data?.selection;
+    if (!Array.isArray(selection)) return;
+    const domainX = selection[0] as [unknown, unknown];
+    if (!Array.isArray(domainX)) return;
+    // Date(time 轴)→ms;零宽(单击误触)忽略
+    let x0 = toNum(domainX[0]);
+    let x1 = toNum(domainX[1]);
+    if (!Number.isFinite(x0) || !Number.isFinite(x1) || x0 === x1) return;
+    if (x0 > x1) [x0, x1] = [x1, x0];
+    lastBrushAt = Date.now();
+    if (excludeMode) {
+      excludeRanges = [...excludeRanges, [x0, x1] as ExcludeRange];
+    } else {
+      xWindow = [x0, x1];
+    }
+    // 清手势残留 mask(带 active/inactive 态),源码:onRemove 仅 !nativeEvent 时执行
+    try { chart?.emit('brush:remove'); } catch { /* 尚未注册 interaction 时忽略 */ }
+    requestUpdate();
+  }
+
+  // ─── 点选排除:line element:click 的 e.data.data 是整条 series 数组(非单点),
+  //     按事件坐标在可见行里找最近点。延迟执行:双击序列的第二次 click 会被 dblclick 取消 ───
+  function onElementClick(e: any) {
+    if (!excludeMode) return;
+    // 框选拖完浏览器仍会补发 click——短窗内忽略,防框选后误排除最近点
+    if (Date.now() - lastBrushAt < 350) return;
+    if (clickExcludeTimer) clearTimeout(clickExcludeTimer);
+    const native = e?.nativeEvent ? e : null;
+    // offsetX/offsetY 相对 canvas;拿 plot 区域原点换算成 plot 内坐标
+    const ox = e?.offsetX;
+    const oy = e?.offsetY;
+    if (!Number.isFinite(ox) || !Number.isFinite(oy)) return;
+    clickExcludeTimer = setTimeout(() => {
+      clickExcludeTimer = null;
+      applyPointExclude(ox, oy, native);
+    }, 220);
+  }
+
+  function applyPointExclude(ox: number, oy: number, _native: any) {
+    if (!chart || !excludeMode) return;
+    try {
+      const coordinate = (chart as any).getCoordinate?.();
+      const scales = (chart as any).getScale?.();
+      if (!coordinate?.invert || !scales?.x || !scales?.y) return;
+      // offsetX/offsetY 相对 canvas,coordinate.invert 期望 plot 区域内坐标
+      const plotRect = getPlotRect();
+      if (!plotRect) return;
+      const px = ox - plotRect.x;
+      const py = oy - plotRect.y;
+      const [abstractX, abstractY] = coordinate.invert([px, py]);
+      const rows = lastPlotData;
+      if (rows.length === 0) return;
+      // 域跨度:可见行数据域归一化(找最近点用)
+      let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+      for (const r of rows) {
+        const rx = toNum(r[xField]);
+        const ry = Number(r[yField]);
+        if (Number.isFinite(rx)) { if (rx < xMin) xMin = rx; if (rx > xMax) xMax = rx; }
+        if (Number.isFinite(ry)) { if (ry < yMin) yMin = ry; if (ry > yMax) yMax = ry; }
+      }
+      const hit = findNearestDatum(rows, {
+        xField, yField,
+        clickX: toNum(abstractX), clickY: Number(abstractY),
+        xMin, xMax, yMin, yMax,
+      });
+      if (!hit) return;
+      const s = seriesField ? String(hit[seriesField] ?? '') : null;
+      excludePoints = new Set(excludePoints).add(pointKey(s, toNum(hit[xField])));
+      requestUpdate();
+    } catch { /* 坐标换算失败静默,不影响图 */ }
+  }
+
+  /// plot 区域(canvas 内)原点与尺寸:遍历 G 场景找 className='plot' 的 rect。
+  /// G 的 getBoundingClientRect 返回 viewport 相对,须再减 canvas 的 viewport 偏移。
+  function getPlotRect(): { x: number; y: number } | null {
+    const root: any = (chart as any)?.getContext?.().canvas?.document?.documentElement;
+    if (!root) return null;
+    let plot: any = null;
+    const walk = (n: any) => {
+      if (plot) return;
+      if (n?.className === 'plot') { plot = n; return; }
+      for (const c of n?.childNodes ?? []) walk(c);
+    };
+    walk(root);
+    if (!plot?.getBoundingClientRect) return null;
+    const canvasEl = (container?.querySelector('canvas') ?? null) as HTMLCanvasElement | null;
+    const canvasRect = canvasEl?.getBoundingClientRect();
+    const rect = plot.getBoundingClientRect();
+    if (!canvasRect) return { x: rect.x ?? rect.left ?? 0, y: rect.y ?? rect.top ?? 0 };
+    return {
+      x: (rect.x ?? rect.left) - canvasRect.left,
+      y: (rect.y ?? rect.top) - canvasRect.top,
+    };
+  }
+
+  function cancelPointExclude() {
+    if (clickExcludeTimer) {
+      clearTimeout(clickExcludeTimer);
+      clickExcludeTimer = null;
+    }
+  }
+
+  function clearXWindow() {
+    cancelPointExclude();
+    if (xWindow === null) return;
+    xWindow = null;
+    requestUpdate();
+  }
+
+  function restoreExcluded() {
+    if (excludeRanges.length === 0 && excludePoints.size === 0) return;
+    excludeRanges = [];
+    excludePoints = new Set();
+    requestUpdate();
+  }
+
+  function toggleExcludeMode() {
+    cancelPointExclude();
+    excludeMode = !excludeMode;
+  }
+
+  function fmtBound(v: number): string {
+    if (xIsTime) {
+      return new Date(v).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+    return String(Math.round(v * 1000) / 1000);
+  }
+
+  /// G2 emitter 事件统一挂载/卸载(createChart 重建时旧实例已 destroy,只需新挂)。
+  /// ?.防御:测试环境中 Chart mock 可能无 emitter 方法。
+  function bindChartEvents(c: Chart) {
+    c.on?.('brush:end', onBrushEnd);
+    c.on?.('element:click', onElementClick);
+  }
+
   function createChart() {
     stopPulse();
     chart?.destroy();
@@ -357,6 +487,7 @@
       ...(theme ? { theme } : {}),
     });
     chart.options(buildOptions());
+    bindChartEvents(chart);
     prevStructKey = structKey();
     pendingHotUpdate = false;
     renderAndPulse();
@@ -387,11 +518,13 @@
     const onEnter = () => { hoverPause = true; };
     node.addEventListener('pointerenter', onEnter);
     node.addEventListener('pointerleave', flushPendingHotUpdate);
-    // 图内松开指针(典型:拖 x 轴缩略滑块)也补一次 flush——hoverPause 只在 leave 恢复,
+    // 图内松开指针(拖框选/调手柄)也补一次 flush——hoverPause 只在 leave 恢复,
     // 手停在卡片上时 pending 永不执行,回放/实时流视觉上会"卡死"。拖完即恢复数据流,
     // 之后继续悬停看 tooltip 若被下一 tick 刷新,以「图继续运行」优先。
     const onWindowPointerUp = () => flushPendingHotUpdate();
     window.addEventListener('pointerup', onWindowPointerUp);
+    // 双击还原显示窗口(TensorBoard 习惯);顺带取消挂起的点选排除(双击≠两次点选)
+    node.addEventListener('dblclick', clearXWindow);
     return {
       update() {
         if (!chart) return; // onMount 尚未建图,由 onMount 用最新 props 创建
@@ -407,6 +540,7 @@
         node.removeEventListener('pointerenter', onEnter);
         node.removeEventListener('pointerleave', flushPendingHotUpdate);
         window.removeEventListener('pointerup', onWindowPointerUp);
+        node.removeEventListener('dblclick', clearXWindow);
       },
     };
   }
@@ -428,6 +562,7 @@
   onDestroy(() => {
     offChartTheme?.();
     resizeObs?.disconnect();
+    cancelPointExclude();
     stopPulse();
     chart?.destroy();
     chart = null;
@@ -438,10 +573,49 @@
   {#if title}
     <h3 class="text-sm font-semibold mb-2 text-foreground">{title}</h3>
   {/if}
-  <div
-    bind:this={container}
-    class="w-full"
-    style="height: {height}px;"
-    use:chartSync={{ data, markers }}
-  ></div>
+  <div class="relative w-full">
+    <div
+      bind:this={container}
+      class="w-full"
+      style="height: {height}px;"
+      use:chartSync={{ data, markers }}
+    ></div>
+    <!-- 图内工具条:排除模式开关 / 恢复排除 / 显示窗口提示。仅图会话状态 -->
+    <div class="absolute top-1 right-1 z-10 flex items-center gap-1">
+      {#if xWindow}
+        <button
+          type="button"
+          class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border border-border rounded bg-background/90 text-muted-foreground hover:text-foreground transition-colors"
+          title="显示范围(双击图内还原)"
+          onclick={clearXWindow}
+        >
+          {fmtBound(xWindow[0])} ~ {fmtBound(xWindow[1])}
+          <span aria-hidden="true">×</span>
+        </button>
+      {/if}
+      {#if excludeCount > 0}
+        <button
+          type="button"
+          class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border border-border rounded bg-background/90 text-muted-foreground hover:text-foreground transition-colors"
+          title="恢复全部排除"
+          onclick={restoreExcluded}
+        >
+          恢复 ({excludeCount})
+        </button>
+      {/if}
+      <button
+        type="button"
+        class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border rounded transition-colors {excludeMode
+          ? 'border-amber-500 bg-amber-500/15 text-amber-600 dark:text-amber-400'
+          : 'border-border bg-background/90 text-muted-foreground hover:text-foreground'}"
+        title={excludeMode
+          ? '排除模式:框选排除 x 区段,点击数据点排除单点'
+          : '开启排除模式(框选/点选排除异常值)'}
+        aria-pressed={excludeMode}
+        onclick={toggleExcludeMode}
+      >
+        排除
+      </button>
+    </div>
+  </div>
 </div>
