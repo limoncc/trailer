@@ -170,8 +170,11 @@
         },
       },
       // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽手柄/平移选区查看局部。
-      // 键层级(G2 slider.js 源码核实):trackSize 等布局项从 options.style 解构(必须进 style);
-      // brushable/showLabel/selection*/handle*/sparkline* 走 rest 直接键名。
+      // 键层级(G2 源码核实,两处都要放尺寸键):
+      // 1) 顶层 trackSize/handleIconSize — computeSliderSize(component.ts) 只读顶层键算布局带
+      //    size=max(trackSize, handleIconSize*2.4),嵌在 style 里读不到会退回主题默认 24px;
+      //    crossPadding 布局间隙也走顶层(总占位 = size + crossPadding,默认 12 太空)。
+      // 2) style.trackSize — slider.ts inferPosition 从 style 解构定位轨道;渲染样式同进 style。
       // brushable=false:轨道按下拖动不再被当成刷选重置范围(与卡片拖拽手势体感冲突)。
       ...(slider
         ? {
@@ -179,14 +182,22 @@
               x: {
                 brushable: false,
                 showLabel: false,
+                trackSize: 4,
+                handleIconSize: 5,
+                crossPadding: 4,
                 style: {
-                  trackSize: 10,
+                  trackSize: 4,
                   trackFill: '#94a3b8',
-                  trackFillOpacity: 0.18,
+                  trackFillOpacity: 0.12,
                   selectionFill: '#3b82f6',
-                  selectionFillOpacity: 0.12,
-                  handleIconSize: 8,
-                  sparklineLineStrokeOpacity: 0.3,
+                  selectionFillOpacity: 0.08,
+                  handleIconSize: 5,
+                  handleIconFill: '#94a3b8',
+                  handleIconFillOpacity: 0.45,
+                  handleIconStroke: '#94a3b8',
+                  handleIconStrokeOpacity: 0,
+                  handleIconLineWidth: 0,
+                  sparklineLineStrokeOpacity: 0.18,
                 },
               },
             },
