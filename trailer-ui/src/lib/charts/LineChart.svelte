@@ -169,8 +169,29 @@
           crosshairsYStroke: '#94a3b8',
         },
       },
-      // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽/缩放查看局部
-      ...(slider ? { slider: { x: true } } : {}),
+      // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽手柄/平移选区查看局部。
+      // 键层级(G2 slider.js 源码核实):trackSize 等布局项从 options.style 解构(必须进 style);
+      // brushable/showLabel/selection*/handle*/sparkline* 走 rest 直接键名。
+      // brushable=false:轨道按下拖动不再被当成刷选重置范围(与卡片拖拽手势体感冲突)。
+      ...(slider
+        ? {
+            slider: {
+              x: {
+                brushable: false,
+                showLabel: false,
+                style: {
+                  trackSize: 10,
+                  trackFill: '#94a3b8',
+                  trackFillOpacity: 0.18,
+                  selectionFill: '#3b82f6',
+                  selectionFillOpacity: 0.12,
+                  handleIconSize: 8,
+                  sparklineLineStrokeOpacity: 0.3,
+                },
+              },
+            },
+          }
+        : {}),
       animate: { enter: { type: 'waveIn' } }
     };
 
