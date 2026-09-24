@@ -218,6 +218,7 @@ class Tracker:
         self._buffer = RingBuffer(maxlen=100_000)
         self._lock = threading.Lock()
         self._closed = False
+        self._finished = False
 
         # Start background flush thread
         self._thread = threading.Thread(target=self._flush_loop, daemon=True)
@@ -1086,14 +1087,44 @@ class Tracker:
                 pass  # 心跳失败不影响主流程
 
     def finish(self) -> None:
-        """Shutdown: drain buffer, stop monitor + flush thread, mark run finished."""
+        """Shutdown: drain buffer → drain Rust channel → mark run finished.
+
+        顺序保证不丢数据:① 停采样 ② flush 线程排空 RingBuffer ③ final flush
+        把残余 buffer 全部冲进 ingestion channel(不受 1s 节奏/500 上限限制)
+        ④ Rust drain() 阻塞等 channel 存量全部落库 ⑤ 才标记 finished。
+        """
+        if getattr(self, "_finished", False):
+            return
+        self._finished = True
         self._monitor_running = False
         # 唤醒采样线程,让最后一次 step 的采样完成后再退出,避免最后一步系统信息丢失
         self._sample_event.set()
         if self._monitor_thread:
             self._monitor_thread.join(timeout=5)
         self._closed = True
-        self._thread.join(timeout=5)
+        self._thread.join(timeout=10)
+        # final flush:RingBuffer 残余全部入队(flush 线程每秒仅 500 条,靠它收尾必然超时丢数据)
+        while True:
+            batch = self._buffer.pop_batch(5000)
+            if not batch:
+                break
+            try:
+                self._backend.flush(batch)
+            except Exception as e:
+                for item in reversed(batch):
+                    self._buffer.put(item)
+                print(f"Trailer: final flush failed, {len(self._buffer)} records may be lost: {e}")
+                break
+        # Rust 侧排空:关闭 channel 并阻塞等 writer 把存量全部落库(本地模式)
+        if self._mode == "local":
+            drain = getattr(self._backend, "drain", None)
+            if drain is None:
+                drain = getattr(self._backend._rust, "drain", None)
+            if drain is not None:
+                try:
+                    drain()
+                except Exception as e:
+                    print(f"Trailer: drain failed: {e}")
         # 标记 run 为 finished（本地 + 远程都要通知，否则心跳停止后服务端超时检查会标记 crashed）
         try:
             if self._mode == "local":

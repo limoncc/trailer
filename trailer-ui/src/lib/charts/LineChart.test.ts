@@ -111,3 +111,42 @@ describe('LineChart component', () => {
     target.remove();
   });
 });
+
+// ── slider(x 轴缩略滑块):离群点压扁主曲线时拖拽查看局部 ──
+
+const sliderData = [
+  { step: 0, value: 35.0 },
+  { step: 1, value: 0.6 },
+  { step: 2, value: 0.5 },
+];
+
+async function mountLine(props: Record<string, unknown>) {
+  const { mount, unmount } = await import('svelte');
+  const LineChart = (await import('./LineChart.svelte')).default;
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const app = mount(LineChart, { target, props });
+  const { Chart } = await import('@antv/g2');
+  const instance = (Chart as any).mock.results[0].value;
+  const opts = instance.options.mock.calls[0][0];
+  return { app, target, opts, unmount: () => unmount(app) };
+}
+
+describe('LineChart slider', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('x 轴缩略滑块默认注入(view 级)', async () => {
+    const { app, opts, unmount } = await mountLine({ data: sliderData });
+    expect(opts.slider).toBeDefined();
+    expect(opts.slider.x).toBe(true);
+    unmount();
+  });
+
+  it('slider=false 时不注入 slider 配置', async () => {
+    const { app, opts, unmount } = await mountLine({ data: sliderData, slider: false });
+    expect(opts.slider).toBeUndefined();
+    unmount();
+  });
+});
