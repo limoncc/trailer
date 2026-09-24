@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { Chart } from '@antv/g2';
   import { g2Theme, onChartThemeChange, adaptiveTicks } from './chartTheme.svelte';
   import { filterLineData, findNearestDatum, pointKey, toNum, loadFilterState, saveFilterState } from './lineFilter';
@@ -74,7 +74,9 @@
 
   // ─── 框选窗口/排除(会话内经回放/热更新/主题重建保留;看板卡经 onFilterChange
   //     入库,其余调用方传 storageKey 走 localStorage,刷新/重开后恢复) ───
-  const restored = initialFilter ?? (storageKey ? loadFilterState(storageKey) : null);
+  // 恢复只在挂载时做一次(设计如此,不跟随 prop 后续变化):untrack 闭包表达
+  // 「故意只取初始值」,同时消除 state_referenced_locally 编译警告
+  const restored = untrack(() => initialFilter ?? (storageKey ? loadFilterState(storageKey) : null));
   /// 交互模式:none=默认无手势(与 tooltip 零冲突);select=框选过滤 x 窗口;exclude=框选排除区段+点选排除单点。
   /// 需先点按钮进入模式再操作(用户反馈:先加按钮,然后选择)。select/exclude 互斥。
   type BrushMode = 'none' | 'select' | 'exclude';
