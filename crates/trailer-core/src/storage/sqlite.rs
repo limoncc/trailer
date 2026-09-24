@@ -27,6 +27,16 @@ impl SqliteStorage {
             .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
+            // cache_size/mmap_size 是 per-connection pragma(默认页缓存仅 ~2MB,大库
+            // 冷查询全靠磁盘;64MB 页缓存 + 256MB mmap)——须在每条连接建立时执行,
+            // 事后 raw PRAGMA 只影响执行它的单条连接,sqlx 0.8 无对应 options 方法
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    let _ = sqlx::query("PRAGMA cache_size = -65536").execute(&mut *conn).await;
+                    let _ = sqlx::query("PRAGMA mmap_size = 268435456").execute(&mut *conn).await;
+                    Ok(())
+                })
+            })
             .connect_with(opts)
             .await?;
 
@@ -377,42 +387,86 @@ impl Storage for SqliteStorage {
     }
 
     async fn query_metrics(&self, q: &MetricQuery) -> StorageResult<Vec<MetricRow>> {
-        let rows = sqlx::query(
-            "SELECT run_id, step, wall_time, key, context, value FROM (
-                SELECT run_id, step, wall_time, key, context, value,
-                       ROW_NUMBER() OVER (PARTITION BY key, context ORDER BY step ASC) AS rn,
-                       COUNT(*) OVER (PARTITION BY key, context) AS total
-                FROM metrics
-                WHERE (?1 IS NULL OR run_id = ?1)
-                  AND (?2 IS NULL OR key = ?2)
-                  AND (?3 IS NULL OR context = ?3)
-                  AND (?4 IS NULL OR step > ?4 OR key LIKE 'system/%')
-             ) WHERE total <= ?5
-                OR rn = total
-                OR (rn - 1) % ((total + ?5 - 1) / ?5) = 0
-             ORDER BY step ASC",
-        )
-        .bind(&q.run_id)
-        .bind(&q.key)
-        .bind(&q.context)
-        .bind(q.after_step)
-        // 每 (key, context) 均匀采样到 q.max_points 个点(首/尾/每 k 个, k=ceil(total/max)),
-        // 避免全量读取且不截断历史(训练曲线从头到尾完整)
-        .bind(q.max_points.unwrap_or(100_000) as i64)
-        .fetch_all(&self.pool)
-        .await?;
+        // 两段式替代单条窗口函数:ROW_NUMBER/COUNT OVER 必须先把 run 全部行按分区
+        // 物化+TEMP B-TREE 排序(百万级点实测 ~6.5s,是大库卡顿主因)。改为:
+        //   ① bounds: GROUP BY (key, context) 取 MIN/MAX/COUNT——索引序聚合,无排序
+        //   ② 每分区按 stride=ceil(count/max_points) 取模采样+强制保尾——走
+        //      (run_id,key,context,step) 索引段,免物化免排序
+        // 过滤条件两段保持同一形状,与旧窗口语义等价(after_step + system/% 全量)。
+        // 过滤条件动态拼接而非 `(? IS NULL OR col = ?)`:该 OR 形状会让 SQLite
+        // 放弃索引(EXPLAIN 实测 SCAN 全库 1.4s vs SEARCH run_id=? 0.4s,库越大差距越大)
+        let max_points = q.max_points.unwrap_or(100_000) as i64;
+        let mut bb = sqlx::QueryBuilder::new(
+            "SELECT key, context, MIN(step), MAX(step), COUNT(*) FROM metrics WHERE 1=1",
+        );
+        if let Some(v) = &q.run_id {
+            bb.push(" AND run_id = ");
+            bb.push_bind(v.as_str());
+        }
+        if let Some(v) = &q.key {
+            bb.push(" AND key = ");
+            bb.push_bind(v.as_str());
+        }
+        if let Some(v) = &q.context {
+            bb.push(" AND context = ");
+            bb.push_bind(v.as_str());
+        }
+        if let Some(v) = q.after_step {
+            bb.push(" AND (step > ");
+            bb.push_bind(v);
+            bb.push(" OR key LIKE 'system/%')");
+        }
+        bb.push(" GROUP BY key, context");
+        let bounds = bb.build().fetch_all(&self.pool).await?;
 
-        Ok(rows
-            .iter()
-            .map(|r| MetricRow {
+        let mut out: Vec<MetricRow> = Vec::with_capacity(bounds.len() * 64);
+        for b in bounds {
+            let key: String = b.get(0);
+            let context: String = b.get(1);
+            let mn: i64 = b.get(2);
+            let mx: i64 = b.get(3);
+            let count: i64 = b.get(4);
+            let stride = if count <= max_points {
+                1
+            } else {
+                (count + max_points - 1) / max_points
+            };
+            let mut sb = sqlx::QueryBuilder::new(
+                "SELECT run_id, step, wall_time, key, context, value FROM metrics WHERE 1=1",
+            );
+            if let Some(v) = &q.run_id {
+                sb.push(" AND run_id = ");
+                sb.push_bind(v.as_str());
+            }
+            sb.push(" AND key = ");
+            sb.push_bind(key.as_str());
+            sb.push(" AND context = ");
+            sb.push_bind(context.as_str());
+            if let Some(v) = q.after_step {
+                sb.push(" AND (step > ");
+                sb.push_bind(v);
+                sb.push(" OR key LIKE 'system/%')");
+            }
+            sb.push(" AND ((step - ");
+            sb.push_bind(mn);
+            sb.push(") % ");
+            sb.push_bind(stride);
+            sb.push(" = 0 OR step = ");
+            sb.push_bind(mx);
+            sb.push(") ORDER BY step ASC");
+            let rows = sb.build().fetch_all(&self.pool).await?;
+            out.extend(rows.iter().map(|r| MetricRow {
                 run_id: r.get("run_id"),
                 step: r.get("step"),
                 wall_time: r.get("wall_time"),
                 key: r.get("key"),
                 context: r.get("context"),
                 value: r.get("value"),
-            })
-            .collect())
+            }));
+        }
+        // 与旧 SQL 的 ORDER BY step ASC 对齐(跨分区交错序,同 step 跨 key 本就不确定)
+        out.sort_by_key(|r| r.step);
+        Ok(out)
     }
 
     async fn get_max_step(&self, run_id: &str) -> StorageResult<Option<i64>> {
