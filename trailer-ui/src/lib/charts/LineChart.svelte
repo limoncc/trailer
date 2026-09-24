@@ -34,6 +34,8 @@
     smoothWindow?: number;
     /// Points to highlight on the chart (e.g. latest data point marker)
     markers?: Array<{ step: number; value: number; color?: string }>;
+    /// X 轴下方缩略滑块(sliderFilter):离群点把主曲线压扁时拖拽查看局部。默认开
+    slider?: boolean;
   }
 
   let {
@@ -55,6 +57,7 @@
     yFormat,
     smoothWindow = 0,
     markers = [],
+    slider = true,
   }: Props = $props();
 
   let container: HTMLDivElement;
@@ -166,6 +169,8 @@
           crosshairsYStroke: '#94a3b8',
         },
       },
+      // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽/缩放查看局部
+      ...(slider ? { slider: { x: true } } : {}),
       animate: { enter: { type: 'waveIn' } }
     };
 
@@ -209,6 +214,7 @@
       }
       const lineSpec = { ...options };
       delete lineSpec.animate;
+      delete lineSpec.slider; // slider 是 view 级组件,只在顶层生效(children 里的副本删除)
       options.type = 'view';
       options.children = [
         lineSpec,
