@@ -55,6 +55,10 @@ class LocalBackend:
         except Exception as e:
             raise RuntimeError(f"LocalBackend flush failed: {e}")
 
+    def drain(self) -> None:
+        """Close the Rust ingestion channel and block until all queued batches hit storage."""
+        self._rust.drain()
+
     def save_figure(self, name: str, kind: str, body: str, step: int, run_id: str) -> None:
         self._rust.save_figure(name, kind, body, step, run_id)
         self.total_items += 1

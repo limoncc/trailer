@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use trailer_core::domain::{Envelope, FigureRow, RunMeta, TableRow, TextRow};
 use trailer_core::ingest::run_ingestion_writer_with_taps;
 use trailer_core::storage::{new_file_storage, new_sqlite_storage};
@@ -8,9 +9,18 @@ use trailer_core::system_monitor::HardwareSample;
 use trailer_core::taps::SummaryTap;
 
 /// Python-facing Rust tracker. Handles ingestion directly (no HTTP).
+///
+/// 生命周期:log_batch 仅入队(有界 10_000 批),由后台 writer 任务异步落库;
+/// `drain()` 关闭通道并阻塞等待 writer 把存量全部落库,必须在 finish_run 前调用。
+/// Drop 兜底执行同一排空,防止进程退出时 Runtime 关闭丢弃未落库批次。
+/// 注:每实例独占一个 multi-thread Runtime,属既有架构(资源优化另行)。
+/// tx 在 Mutex<Option<_>> 内:关闭通道需要 drop 唯一的 Sender(tokio mpsc 的
+/// close 在 Receiver 侧,Sender 无 close);drain 与 blocking_send 互斥——
+/// channel 满时 drain 等待在途 send 完成后自然继续,无死锁。
 #[pyclass]
 struct RustTracker {
-    tx: Arc<mpsc::Sender<Vec<Envelope>>>,
+    tx: Mutex<Option<mpsc::Sender<Vec<Envelope>>>>,
+    writer_handle: Mutex<Option<JoinHandle<()>>>,
     store: Arc<dyn trailer_core::Storage>,
     _rt: tokio::runtime::Runtime,
 }
@@ -38,11 +48,10 @@ impl RustTracker {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
         let (tx, rx) = mpsc::channel::<Vec<Envelope>>(10_000);
-        let tx = Arc::new(tx);
 
         let writer_store = store.clone();
         let summary_store = store.clone();
-        rt.spawn(async move {
+        let writer_handle = rt.spawn(async move {
             run_ingestion_writer_with_taps(
                 rx,
                 writer_store,
@@ -51,17 +60,33 @@ impl RustTracker {
             .await;
         });
 
-        Ok(RustTracker { tx, store, _rt: rt })
+        Ok(RustTracker {
+            tx: Mutex::new(Some(tx)),
+            writer_handle: Mutex::new(Some(writer_handle)),
+            store,
+            _rt: rt,
+        })
     }
 
     /// Accept msgpack bytes of Vec<Envelope>, push to ingestion channel.
     fn log_batch(&self, batch_bytes: &[u8]) -> PyResult<()> {
         let batch: Vec<Envelope> = rmp_serde::from_slice(batch_bytes)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        self.tx
-            .blocking_send(batch)
+        let guard = self.tx.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = guard.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "RustTracker is drained (finish() was called); cannot accept new batches",
+            )
+        })?;
+        tx.blocking_send(batch)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
+    }
+
+    /// Close the ingestion channel and block until the writer has flushed
+    /// every queued batch to storage. Idempotent; called by finish().
+    fn drain(&self) -> PyResult<()> {
+        self.drain_impl()
     }
 
     /// Update heartbeat timestamp for an active run.
@@ -239,6 +264,39 @@ fn sample_hardware() -> PyResult<String> {
     let sample = HardwareSample::collect();
     serde_json::to_string(&sample)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+}
+
+impl RustTracker {
+    /// 关闭发送端并阻塞等待 writer 把 channel 存量全部落库。幂等。
+    /// Python 侧经 finish() → drain() 显式调用;Drop 兜底再调一次。
+    fn drain_impl(&self) -> PyResult<()> {
+        {
+            // take 并 drop 唯一的 Sender = 关闭通道:
+            // writer 排空存量后 recv()=None 自然退出。二次 drain 时已是 None,幂等。
+            let mut guard = self.tx.lock().unwrap_or_else(|e| e.into_inner());
+            drop(guard.take());
+        }
+        let handle = self
+            .writer_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(handle) = handle {
+            // Python GC/主线程非 runtime worker,此处 block_on 安全;
+            // writer 是纯消费者不调用 block_on,无死锁路径。
+            self._rt
+                .block_on(handle)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("ingestion writer panicked: {e}")))?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for RustTracker {
+    fn drop(&mut self) {
+        // 字段尚未析构,_rt 仍存活;尽力排空(忽略错误),防止 Runtime 关闭丢批
+        let _ = self.drain_impl();
+    }
 }
 
 #[pymodule]
