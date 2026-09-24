@@ -146,10 +146,10 @@ describe('LineChart slider', () => {
 
   it('尺寸键同时进顶层(布局带 computeSliderSize 读)与 style(渲染)', async () => {
     const { opts, unmount } = await mountLine({ data: sliderData });
-    // 顶层:布局带 = max(trackSize, handleIconSize*2.4) = max(4, 12) = 12px + crossPadding 4
-    expect(opts.slider.x).toMatchObject({ trackSize: 4, handleIconSize: 5, crossPadding: 4 });
-    // style:轨道渲染厚度与定位(slider.ts inferPosition 从 style 解构)
-    expect(opts.slider.x.style).toMatchObject({ trackSize: 4, handleIconSize: 5 });
+    // 顶层:布局带 = max(trackSize, handleIconSize*2.4) = max(7, 12) = 12px + crossPadding 4
+    expect(opts.slider.x).toMatchObject({ trackSize: 7, handleIconSize: 5, crossPadding: 4 });
+    // style:轨道渲染厚度与定位(slider.ts inferPosition 从 style 解构);选区同高
+    expect(opts.slider.x.style).toMatchObject({ trackSize: 7, handleIconSize: 5 });
     unmount();
   });
 
