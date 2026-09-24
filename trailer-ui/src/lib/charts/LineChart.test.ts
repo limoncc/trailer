@@ -140,7 +140,7 @@ describe('LineChart slider', () => {
   it('x 轴缩略滑块默认注入(view 级)', async () => {
     const { app, opts, unmount } = await mountLine({ data: sliderData });
     expect(opts.slider).toBeDefined();
-    expect(opts.slider.x).toBe(true);
+    expect(opts.slider.x).toMatchObject({ brushable: false, showLabel: false });
     unmount();
   });
 

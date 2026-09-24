@@ -170,21 +170,24 @@
         },
       },
       // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽手柄/平移选区查看局部。
-      // 样式压缩:细轨道淡色、去数字标签、禁轨道刷选(brushable 默认开会把按下拖动当
-      // 成重置范围,与 Boards 卡片拖拽手势体感冲突);迷你图调淡不抢眼。
+      // 键层级(G2 slider.js 源码核实):trackSize 等布局项从 options.style 解构(必须进 style);
+      // brushable/showLabel/selection*/handle*/sparkline* 走 rest 直接键名。
+      // brushable=false:轨道按下拖动不再被当成刷选重置范围(与卡片拖拽手势体感冲突)。
       ...(slider
         ? {
             slider: {
               x: {
                 brushable: false,
-                trackSize: 10,
-                trackFill: '#94a3b8',
-                trackFillOpacity: 0.18,
-                selectionFill: '#3b82f6',
-                selectionFillOpacity: 0.12,
                 showLabel: false,
-                handleIconSize: 8,
-                sparklineLineStrokeOpacity: 0.3,
+                style: {
+                  trackSize: 10,
+                  trackFill: '#94a3b8',
+                  trackFillOpacity: 0.18,
+                  selectionFill: '#3b82f6',
+                  selectionFillOpacity: 0.12,
+                  handleIconSize: 8,
+                  sparklineLineStrokeOpacity: 0.3,
+                },
               },
             },
           }
