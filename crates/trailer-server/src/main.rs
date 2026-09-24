@@ -140,8 +140,8 @@ async fn main() {
         .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
-    // 带 http:// 前缀,日志里可直接点击/复制成 URL
-    tracing::info!(addr = format!("http://{addr}"), "Trailer Server starting");
+    // 带 http:// 前缀,日志里可直接点击/复制成 URL(% 走 Display,不带引号)
+    tracing::info!(addr = %format!("http://{addr}"), "Trailer Server starting");
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     tracing::info!("Press Ctrl+C to stop");
