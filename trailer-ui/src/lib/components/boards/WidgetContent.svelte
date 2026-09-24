@@ -17,6 +17,7 @@
   import { metricId } from '$lib/utils/metricGroups';
   import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
   import type { BoardsData, MediaRow, MetricSeries } from './boardsData';
+  import type { FilterPersistState } from '$lib/charts/lineFilter';
   import InfoCard from './InfoCard.svelte';
 
   interface Props {
@@ -37,11 +38,13 @@
     onLabelEdit?: (itemIdx: number, label: string) => void;
     /** info 卡编辑态:双击模型名改显示别名 */
     onModelLabelEdit?: (label: string) => void;
+    /** line 卡 Select/Exclude 过滤状态变更 → 上抛写回 widget.filter 并入库 */
+    onFilterChange?: (filter: FilterPersistState) => void;
     /** 全局回放步(Boards 回放);null = 非回放态 */
     replayStep?: number | null;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, replayStep = null }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, onFilterChange, replayStep = null }: Props = $props();
 
   // ─── 视口内懒挂载:G2/Three 实例创建贵(单卡 100ms+),新增卡/整板加载时
   // 只渲染视口附近的卡,滚到附近(300px 预载)才挂载真实内容;一次性闩,之后保持
@@ -263,7 +266,8 @@
 {:else if widget.type === 'line'}
   <!-- LineChart 始终挂载:回放从全局 min step 截断时本卡可能瞬时变空,
        用 {#if} 卸载会销毁组件 → 框选窗口/排除状态全部丢失(用户反馈:回放后排除消失)。
-       空数据由 G2 graceful 渲染,占位文案仅作 overlay 提示。 -->
+       空数据由 G2 graceful 渲染,占位文案仅作 overlay 提示。
+       过滤状态经 widget.filter 随 layout 入库(initialFilter 恢复 + onFilterChange 写回)。 -->
   <div class="relative h-full">
     <LineChart
       data={lineData}
@@ -274,7 +278,8 @@
       logY={widget.yLog === true}
       yFormat={lineYFormat}
       markers={lineMarkers}
-      storageKey={`run:${runId}:widget:${widget.id}`}
+      initialFilter={widget.filter}
+      {onFilterChange}
     />
     {#if lineData.length === 0}
       <div

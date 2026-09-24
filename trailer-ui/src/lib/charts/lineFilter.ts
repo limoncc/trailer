@@ -70,7 +70,8 @@ export function filterLineData<T extends Row>(rows: T[], opts: FilterOptions): T
   });
 }
 
-// ─── 持久化（localStorage，键前缀同项目惯例 trailer-*；不入库，仅浏览器本地） ───
+// ─── 持久化（看板卡经 layout 入库；MetricCard/Explore/compare 仍走
+//     localStorage，键前缀同项目惯例 trailer-*） ───
 
 const FILTER_STORAGE_PREFIX = 'trailer-line-filter';
 
@@ -89,6 +90,27 @@ function isRange(v: unknown): v is XWindow {
 }
 
 /**
+ * 容错解析过滤状态载荷（入库 layout 与 localStorage 共用）：
+ * 非法字段丢弃，整体非对象返回 null。
+ */
+export function parseFilterState(raw: unknown): FilterPersistState | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const out: FilterPersistState = {};
+  const r = raw as Record<string, unknown>;
+  if (r.brushMode === 'select' || r.brushMode === 'exclude' || r.brushMode === 'none') {
+    out.brushMode = r.brushMode;
+  }
+  if (isRange(r.xWindow)) out.xWindow = [r.xWindow[0], r.xWindow[1]];
+  if (Array.isArray(r.excludeRanges)) {
+    out.excludeRanges = r.excludeRanges.filter(isRange).map((p) => [p[0], p[1]]);
+  }
+  if (Array.isArray(r.excludePoints)) {
+    out.excludePoints = r.excludePoints.filter((p): p is string => typeof p === 'string');
+  }
+  return out;
+}
+
+/**
  * 按 storageKey 读回过滤状态。损坏/缺字段的条目安全降级
  * （非法字段丢弃，整体解析失败返回 null）。
  */
@@ -97,21 +119,7 @@ export function loadFilterState(key: string): FilterPersistState | null {
   try {
     const raw = localStorage.getItem(`${FILTER_STORAGE_PREFIX}-${key}`);
     if (!raw) return null;
-    const v: unknown = JSON.parse(raw);
-    if (typeof v !== 'object' || v === null) return null;
-    const out: FilterPersistState = {};
-    const r = v as Record<string, unknown>;
-    if (r.brushMode === 'select' || r.brushMode === 'exclude' || r.brushMode === 'none') {
-      out.brushMode = r.brushMode;
-    }
-    if (isRange(r.xWindow)) out.xWindow = [r.xWindow[0], r.xWindow[1]];
-    if (Array.isArray(r.excludeRanges)) {
-      out.excludeRanges = r.excludeRanges.filter(isRange).map((p) => [p[0], p[1]]);
-    }
-    if (Array.isArray(r.excludePoints)) {
-      out.excludePoints = r.excludePoints.filter((p): p is string => typeof p === 'string');
-    }
-    return out;
+    return parseFilterState(JSON.parse(raw));
   } catch {
     return null;
   }

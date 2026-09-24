@@ -3,7 +3,7 @@
   import { Chart } from '@antv/g2';
   import { g2Theme, onChartThemeChange, adaptiveTicks } from './chartTheme.svelte';
   import { filterLineData, findNearestDatum, pointKey, toNum, loadFilterState, saveFilterState } from './lineFilter';
-  import type { ExcludeRange, XWindow } from './lineFilter';
+  import type { ExcludeRange, XWindow, FilterPersistState } from './lineFilter';
 
   interface DataPoint {
     step: number;
@@ -39,6 +39,10 @@
     /// 持久化标识：传入后 Select/Exclude 状态写入 localStorage 并在挂载时恢复
     /// （键 trailer-line-filter-<key>，按图表实例区分；缺省不持久化）
     storageKey?: string;
+    /// 受控恢复：传入后优先生于 storageKey 的 localStorage 恢复（看板卡入库路径）
+    initialFilter?: FilterPersistState | null;
+    /// 过滤状态变更回调（看板卡写回 widget.filter → 入库）；存在时回调优先、不再写 localStorage
+    onFilterChange?: (filter: FilterPersistState) => void;
   }
 
   let {
@@ -61,14 +65,16 @@
     smoothWindow = 0,
     markers = [],
     storageKey,
+    initialFilter = null,
+    onFilterChange,
   }: Props = $props();
 
   let container: HTMLDivElement;
   let chart: Chart | null = null;
 
-  // ─── 框选窗口/排除(会话内经回放/热更新/主题重建保留;传 storageKey 时另存
-  //     localStorage,刷新/重开浏览器后恢复——不入库,仅浏览器本地) ───
-  const restored = storageKey ? loadFilterState(storageKey) : null;
+  // ─── 框选窗口/排除(会话内经回放/热更新/主题重建保留;看板卡经 onFilterChange
+  //     入库,其余调用方传 storageKey 走 localStorage,刷新/重开后恢复) ───
+  const restored = initialFilter ?? (storageKey ? loadFilterState(storageKey) : null);
   /// 交互模式:none=默认无手势(与 tooltip 零冲突);select=框选过滤 x 窗口;exclude=框选排除区段+点选排除单点。
   /// 需先点按钮进入模式再操作(用户反馈:先加按钮,然后选择)。select/exclude 互斥。
   type BrushMode = 'none' | 'select' | 'exclude';
@@ -350,15 +356,20 @@
     hotUpdate();
   }
 
-  /// 任一过滤状态变更后写 localStorage(storageKey 缺省时 no-op)
+  /// 任一过滤状态变更后持久化:有 onFilterChange 走回调(入库),
+  /// 否则 storageKey 写 localStorage,两者皆无则 no-op
   function persistFilter() {
-    if (!storageKey) return;
-    saveFilterState(storageKey, {
+    const state: FilterPersistState = {
       brushMode,
       xWindow,
       excludeRanges,
       excludePoints: [...excludePoints],
-    });
+    };
+    if (onFilterChange) {
+      onFilterChange(state);
+      return;
+    }
+    if (storageKey) saveFilterState(storageKey, state);
   }
 
   // ─── 框选:brushXHighlight 手势完成 → selection[0] 即 x 数据域(selectionOf 已做换算) ───

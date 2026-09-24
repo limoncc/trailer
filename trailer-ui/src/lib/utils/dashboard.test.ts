@@ -492,6 +492,52 @@ describe('info widgets', () => {
     expect((again.widgets[0] as any).hFixed).toBe(true);
   });
 
+  it('parses line card filter (Select/Exclude state) with roundtrip', () => {
+    const filter = {
+      brushMode: 'exclude',
+      xWindow: [15, 35],
+      excludeRanges: [[0, 5], [90, 100]],
+      excludePoints: ['acc 20'],
+    };
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'l1', type: 'line', w: 9, h: 6, metrics: [{ key: 'loss', context: '' }], filter },
+        { id: 'l2', type: 'line', w: 9, h: 6, metrics: [{ key: 'loss', context: '' }] },
+      ],
+    }));
+    expect((parsed.widgets[0] as any).filter).toEqual(filter);
+    expect((parsed.widgets[1] as any).filter).toBeUndefined();
+    const again = parseLayout(serializeLayout(parsed));
+    expect((again.widgets[0] as any).filter).toEqual(filter);
+  });
+
+  it('line card filter: 容错白名单与非法载荷丢弃', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        {
+          id: 'l1', type: 'line', w: 9, h: 6, metrics: [{ key: 'loss', context: '' }],
+          filter: {
+            brushMode: 'bogus',
+            xWindow: [NaN, 1],
+            excludeRanges: [[1, 2], ['a'], [3]],
+            excludePoints: ['a 1', 42, null],
+          },
+        },
+        {
+          id: 'l2', type: 'line', w: 9, h: 6, metrics: [{ key: 'loss', context: '' }],
+          filter: 'not-object',
+        },
+      ],
+    }));
+    expect((parsed.widgets[0] as any).filter).toEqual({
+      excludeRanges: [[1, 2]],
+      excludePoints: ['a 1'],
+    });
+    expect((parsed.widgets[1] as any).filter).toBeUndefined();
+  });
+
   it('defaultSize and defaultWidgetTitle', () => {
     expect(defaultSize('info')).toEqual({ w: 9, h: 6 });
     expect(defaultWidgetTitle({ id: 'i', type: 'info', items: [], w: 9, h: 6 })).toBe('Training Info');

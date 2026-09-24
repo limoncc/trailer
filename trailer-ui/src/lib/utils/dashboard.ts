@@ -1,4 +1,5 @@
 import { parseSummaryKey, type MetricRef } from './explore';
+import { parseFilterState, type FilterPersistState } from '../charts/lineFilter';
 
 // ─── Run 看板(Boards)布局模型 ───
 // 持久化为 run_dashboards.layout 的 JSON 串;新增 widget 类型时:
@@ -47,6 +48,8 @@ export interface LineWidget extends WidgetBase {
   /** 平滑窗口(1..20,同 MetricCard 语义);0/缺省不平滑 */
   smooth?: number;
   yLog?: boolean;
+  /** Select/Exclude 过滤状态(brushMode/xWindow/excludes,随 layout 入库跨设备共享) */
+  filter?: FilterPersistState;
 }
 
 export type LatestOrStep = 'latest' | number;
@@ -237,6 +240,8 @@ function parseWidget(raw: unknown): DashWidget | null {
         xKind: r.xKind === 'wall_time' ? 'wall_time' : 'step',
         smooth: smooth && smooth > 0 ? smooth : undefined,
         yLog: r.yLog === true,
+        // 该分支显式构造,未知字段必丢——filter 必须显式解析(非法/缺失 → undefined)
+        filter: parseFilterState(r.filter) ?? undefined,
       };
     }
     case 'hist': {
