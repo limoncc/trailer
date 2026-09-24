@@ -1795,3 +1795,63 @@ async fn pg_insert_and_query_metrics() {
 
     run_contract_tests(store).await;
 }
+
+// ─── stride 采样(bounds + 取模替代窗口函数)的行为契约 ───
+#[tokio::test]
+async fn sqlite_metrics_stride_sampling() {
+    let store = trailer_core::storage::new_sqlite_storage("sqlite::memory:")
+        .await
+        .expect("open in-memory sqlite");
+    let rows: Vec<MetricRow> = (0..100)
+        .map(|i| MetricRow {
+            run_id: "big".into(),
+            step: i,
+            wall_time: 1000.0 + i as f64,
+            key: "loss".into(),
+            context: "train".into(),
+            value: 1.0 / (i as f64 + 1.0),
+        })
+        .collect();
+    store.insert_metrics(&rows).await.expect("insert");
+
+    // 100 点采样到 10:stride=ceil(100/10)=10 → 0,10,…,90 + 强制保尾 99
+    let q = MetricQuery {
+        run_id: Some("big".into()),
+        max_points: Some(10),
+        ..Default::default()
+    };
+    let got = store.query_metrics(&q).await.expect("query");
+    let steps: Vec<i64> = got.iter().map(|r| r.step).collect();
+    assert_eq!(steps.first(), Some(&0), "首点保留");
+    assert!(steps.contains(&99), "尾点强制保留");
+    assert!(
+        steps.len() <= 11,
+        "采样数不超过 max_points+1(保尾), got {}",
+        steps.len()
+    );
+    assert!(steps.windows(2).all(|w| w[0] < w[1]), "step 严格递增");
+    assert!(got.iter().all(|r| r.key == "loss" && r.context == "train"));
+
+    // 点数 ≤ max_points 时全量
+    let all = store
+        .query_metrics(&MetricQuery {
+            run_id: Some("big".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("query all");
+    assert_eq!(all.len(), 100);
+
+    // 指定 key 采样不影响其他分区;after_step 与采样叠加
+    let after = store
+        .query_metrics(&MetricQuery {
+            run_id: Some("big".into()),
+            after_step: Some(85),
+            max_points: Some(10),
+            ..Default::default()
+        })
+        .await
+        .expect("query after");
+    assert!(after.iter().all(|r| r.step > 85), "after_step 过滤");
+    assert_eq!(after.last().map(|r| r.step), Some(99), "增量也保尾");
+}

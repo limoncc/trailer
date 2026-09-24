@@ -333,10 +333,12 @@ pub async fn query_metrics(
         }
     }
 
+    // key/context 下推 SQL:此前恒传 None(全 run 全 key 物化后再内存过滤),
+    // 指定 key 时白算白传;下推后 bounds/采样只覆盖目标分区
     let q = MetricQuery {
         run_id: Some(params.run_id.clone()),
-        key: None,
-        context: None,
+        key: params.key.clone(),
+        context: params.context.clone(),
         after_step: params.after_step,
         max_points: Some(max_points * 10),
         downsample: false,

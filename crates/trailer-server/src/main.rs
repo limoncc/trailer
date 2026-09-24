@@ -118,7 +118,9 @@ async fn main() {
         sse_tx,
         artifacts_dir: cfg.artifacts_dir.clone().into(),
         frontend_dir: cfg.frontend_dir.clone().into(),
-        lttb_cache: Arc::new(Mutex::new(LttbCache::new(10, 500))),
+        // TTL 30s > 前端 5s 轮询周期:10s 时「第 3 次轮询必过期」,大 run 冷查询
+        // 每 10s 重演一次形成周期性卡顿;30s 把冷查摊薄到 1/6 轮询
+        lttb_cache: Arc::new(Mutex::new(LttbCache::new(30, 500))),
         auth,
         danmaku_rl: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
