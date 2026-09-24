@@ -7,7 +7,7 @@ vi.mock('@antv/g2', () => {
   const mockOn = vi.fn();
   const mockEmit = vi.fn();
   // G 场景:一棵含 className='plot' 的最小树,让 getPlotRect 能换算点击坐标
-  // (plot 原点 (10,20),jsdom 无 canvas 元素 → 直接取 rect 值)
+  // (plot 原点 (10,20)、尺寸 400×150,jsdom 无 canvas 元素 → 直接取 rect 值)
   const mockGetContext = vi.fn(() => ({
     canvas: {
       document: {
@@ -17,16 +17,26 @@ vi.mock('@antv/g2', () => {
             {
               className: 'plot',
               childNodes: [],
-              getBoundingClientRect: () => ({ x: 10, y: 20, left: 10, top: 20 }),
+              getBoundingClientRect: () => ({
+                x: 10,
+                y: 20,
+                left: 10,
+                top: 20,
+                width: 400,
+                height: 150,
+              }),
             },
           ],
         },
       },
     },
   }));
-  // coordinate.invert 恒等 → abstractX = offsetX - 10
+  // coordinate.invert / scale.invert 恒等 → dataX = offsetX - 10, dataY = offsetY - 20
   const mockGetCoordinate = vi.fn(() => ({ invert: ([x, y]: number[]) => [x, y] }));
-  const mockGetScale = vi.fn(() => ({ x: {}, y: {} }));
+  const mockGetScale = vi.fn(() => ({
+    x: { invert: (v: number) => v },
+    y: { invert: (v: number) => v },
+  }));
   const mockChart = {
     options: mockOptions,
     render: mockRender,
@@ -173,26 +183,48 @@ describe('LineChart 框选与排除', () => {
     vi.clearAllMocks();
   });
 
-  it('不再注入 slider,注入 brushXHighlight 手势', async () => {
-    const { opts, unmount } = await mountLine({ data: chartData });
+  /// 按文案找工具条按钮(英文:Select / Exclude / Restore)
+  function btn(target: HTMLElement, label: string) {
+    return Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim().startsWith(label));
+  }
+
+  it('不再注入 slider;默认无框选手势,Select 模式激活后注入 brushXHighlight', async () => {
+    const { target, opts, instance, unmount } = await mountLine({ data: chartData });
     expect(opts.slider).toBeUndefined();
-    expect(opts.interaction.brushXHighlight).toMatchObject({ maskFill: '#3b82f6' });
+    // 默认 brushMode='none' → 手势关闭(与 tooltip 零冲突)
+    expect(opts.interaction.brushXHighlight).toBe(false);
+
+    btn(target, 'Select')!.click();
+    await flush();
+    const after = instance.options.mock.calls.at(-1)?.[0];
+    expect(after.interaction.brushXHighlight).toMatchObject({ maskFill: '#3b82f6' });
     unmount();
   });
 
-  it('挂载 brush:end 与 element:click 处理器', async () => {
+  it('挂载 brush:end 与 plot:click 处理器', async () => {
     const { instance, unmount } = await mountLine({ data: chartData });
     const events = instance.on.mock.calls.map((c: any[]) => c[0]);
     expect(events).toContain('brush:end');
-    expect(events).toContain('element:click');
+    expect(events).toContain('plot:click');
     unmount();
   });
 
-  it('框选(非排除模式)设置显示窗口:y 钉域不写入、数据行过滤、发 brush:remove 清 mask', async () => {
+  it('默认模式下框选/点选均无效(需先点按钮)', async () => {
     const { instance, handler, unmount } = await mountLine({ data: chartData });
+    const before = instance.options.mock.calls.length;
+    handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
+    handler('plot:click')!({ offsetX: 30, offsetY: 25 });
+    await flush(200);
+    expect(instance.options.mock.calls.length).toBe(before);
+    unmount();
+  });
+
+  it('Select 模式框选设置显示窗口:y 钉域不写入、数据行过滤、发 brush:remove 清 mask', async () => {
+    const { target, instance, handler, unmount } = await mountLine({ data: chartData });
+    btn(target, 'Select')!.click();
+    await flush();
     // 初始无窗口:全量数据、y 无固定 domain
-    expect(optsData(instance, 0)).toHaveLength(5);
-    expect(optsYDomain(instance, 0)).toBeUndefined();
+    expect(optsYDomain(instance, instance.options.mock.calls.length - 1)).toBeUndefined();
 
     handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
     await flush();
@@ -206,7 +238,9 @@ describe('LineChart 框选与排除', () => {
   });
 
   it('零宽/非法 selection 忽略(单击不误触发)', async () => {
-    const { instance, handler, unmount } = await mountLine({ data: chartData });
+    const { target, instance, handler, unmount } = await mountLine({ data: chartData });
+    btn(target, 'Select')!.click();
+    await flush();
     const before = instance.options.mock.calls.length;
     handler('brush:end')!({ data: { selection: [[20, 20], [0, 1]] } });
     handler('brush:end')!({ data: { selection: undefined } });
@@ -216,7 +250,9 @@ describe('LineChart 框选与排除', () => {
   });
 
   it('反序 selection 归一为正向窗口', async () => {
-    const { instance, handler, unmount } = await mountLine({ data: chartData });
+    const { target, instance, handler, unmount } = await mountLine({ data: chartData });
+    btn(target, 'Select')!.click();
+    await flush();
     handler('brush:end')!({ data: { selection: [[35, 15], [0, 1]] } });
     await flush();
     const latest = instance.options.mock.calls.at(-1)?.[0];
@@ -224,11 +260,9 @@ describe('LineChart 框选与排除', () => {
     unmount();
   });
 
-  it('排除模式下框选加入 excludeRanges(多次累积),恢复按钮清空', async () => {
+  it('Exclude 模式下框选加入 excludeRanges(多次累积),Restore 按钮清空', async () => {
     const { target, instance, handler, unmount } = await mountLine({ data: chartData });
-    // 开排除模式
-    const toggle = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('排除'));
-    toggle!.click();
+    btn(target, 'Exclude')!.click();
     await flush();
 
     handler('brush:end')!({ data: { selection: [[-5, 5], [0, 1]] } });
@@ -238,8 +272,8 @@ describe('LineChart 框选与排除', () => {
 
     let latest = instance.options.mock.calls.at(-1)?.[0];
     expect(optsRows(latest).map((r: any) => r.step)).toEqual([10, 20, 40]);
-    // 恢复按钮出现并可清空
-    const restore = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('恢复'));
+    // Restore 按钮出现并可清空(英文文案)
+    const restore = btn(target, 'Restore');
     expect(restore).toBeTruthy();
     expect(restore!.textContent).toContain('2');
     restore!.click();
@@ -249,37 +283,70 @@ describe('LineChart 框选与排除', () => {
     unmount();
   });
 
-  it('element:click 延迟 220ms 后点选排除(排除模式),双击取消不误排除', async () => {
+  it('Select 与 Exclude 互斥', async () => {
+    const { target, instance, unmount } = await mountLine({ data: chartData });
+    btn(target, 'Select')!.click();
+    await flush();
+    expect(btn(target, 'Select')!.getAttribute('aria-pressed')).toBe('true');
+    btn(target, 'Exclude')!.click();
+    await flush();
+    expect(btn(target, 'Select')!.getAttribute('aria-pressed')).toBe('false');
+    expect(btn(target, 'Exclude')!.getAttribute('aria-pressed')).toBe('true');
+    // 模式切换后 options 重渲染(interaction 注入随模式变化)
+    const latest = instance.options.mock.calls.at(-1)?.[0];
+    expect(latest.interaction.brushXHighlight).toMatchObject({ maskFill: '#3b82f6' });
+    unmount();
+  });
+
+  it('plot:click 延迟 140ms 后点选排除(Exclude 模式),双击取消不误排除', async () => {
     // 先真实 timers 下 mount/开关,fake timers 只包「延迟执行」段——
     // fake timers 下 await flush() 会死锁(setTimeout 永不触发)。
     const { target, instance, handler, unmount } = await mountLine({ data: chartData });
-    const toggle = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('排除'));
-    toggle!.click();
+    btn(target, 'Exclude')!.click();
     await flush();
 
     vi.useFakeTimers();
     try {
-      // offsetX=30,offsetY=50 → plot 内 (20,30) → invert 恒等 → click(20,30)。
-      // y=30 归一化后离异常点 35 最近(dy≈0.14 vs 其余 ≈0.85)→ 排除 step=0(value 35)
-      handler('element:click')!({ offsetX: 30, offsetY: 50 });
-      expect(instance.options.mock.calls.length).toBe(1); // 延迟未到,尚未重渲染
-      vi.advanceTimersByTime(300); // 过 220ms → applyPointExclude → 点选排除
-      expect(instance.options.mock.calls.length).toBe(2);
+      // offsetX=30,offsetY=25 → plot 内 (20,5) → 双 invert 恒等 → data(20,5)。
+      // 像素距离:step20/value0.5 点 dy≈19px、dx=0 < 48px 阈值 → 排除 step=20
+      handler('plot:click')!({ offsetX: 30, offsetY: 25 });
+      expect(instance.options.mock.calls.length).toBeGreaterThan(0);
+      const before = instance.options.mock.calls.length;
+      vi.advanceTimersByTime(200); // 过 140ms → applyPointExclude → 点选排除
+      expect(instance.options.mock.calls.length).toBe(before + 1);
       let latest = instance.options.mock.calls.at(-1)?.[0];
-      expect(optsRows(latest).map((r: any) => r.step)).toEqual([10, 20, 30, 40]);
+      expect(optsRows(latest).map((r: any) => r.step)).toEqual([0, 10, 30, 40]);
 
       // 框选后 350ms 内的 click 被 lastBrushAt 抑制:再点不再新增排除
-      handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
+      handler('brush:end')!({ data: { selection: [[25, 35], [0, 1]] } });
       const afterBrush = instance.options.mock.calls.length;
-      handler('element:click')!({ offsetX: 30, offsetY: 50 });
+      handler('plot:click')!({ offsetX: 30, offsetY: 25 });
       vi.advanceTimersByTime(400);
       expect(instance.options.mock.calls.length).toBe(afterBrush);
-      // 恢复按钮:点选 1 + 框选排除 1 = 2(排除模式下框选进 excludeRanges)。
+      // Restore:点选 1 + 框选排除 1 = 2(Exclude 模式下框选进 excludeRanges)。
       // $state → DOM 走微任务,fake timers 不拦 Promise,用 tick 刷一遍
       const { tick } = await import('svelte');
       await tick();
-      const restore = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('恢复'));
+      const restore = btn(target, 'Restore');
       expect(restore?.textContent).toContain('2');
+    } finally {
+      vi.useRealTimers();
+      unmount();
+    }
+  });
+
+  it('点选距离超像素阈值不排除(点击空白)', async () => {
+    const { target, instance, handler, unmount } = await mountLine({ data: chartData });
+    btn(target, 'Exclude')!.click();
+    await flush();
+
+    vi.useFakeTimers();
+    try {
+      // plot (10,120):x 近 step10 但 y=100 远离所有点(y 跨度仅 0.3~35 → dy 数百 px)
+      const before = instance.options.mock.calls.length;
+      handler('plot:click')!({ offsetX: 20, offsetY: 140 });
+      vi.advanceTimersByTime(200);
+      expect(instance.options.mock.calls.length).toBe(before);
     } finally {
       vi.useRealTimers();
       unmount();
@@ -288,6 +355,8 @@ describe('LineChart 框选与排除', () => {
 
   it('双击清空显示窗口(排除不受影响)', async () => {
     const { target, instance, handler, unmount } = await mountLine({ data: chartData });
+    btn(target, 'Select')!.click();
+    await flush();
     handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
     await flush();
     expect(optsRows(instance.options.mock.calls.at(-1)?.[0])).toHaveLength(2);
@@ -306,7 +375,9 @@ describe('LineChart 框选与排除', () => {
   });
 
   it('热更新/重建(主题切换)后窗口与排除保留', async () => {
-    const { instance, handler, unmount } = await mountLine({ data: chartData });
+    const { target, instance, handler, unmount } = await mountLine({ data: chartData });
+    btn(target, 'Select')!.click();
+    await flush();
     handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
     await flush();
     try {

@@ -261,11 +261,10 @@
 {#if widget.type !== 'info' && !inView}
   <!-- 未进入视口:占位(卡片高度由网格保证),滚到附近再挂载重型内容 -->
 {:else if widget.type === 'line'}
-  {#if lineData.length === 0}
-    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">
-      Waiting for metric data…
-    </div>
-  {:else}
+  <!-- LineChart 始终挂载:回放从全局 min step 截断时本卡可能瞬时变空,
+       用 {#if} 卸载会销毁组件 → 框选窗口/排除状态全部丢失(用户反馈:回放后排除消失)。
+       空数据由 G2 graceful 渲染,占位文案仅作 overlay 提示。 -->
+  <div class="relative h-full">
     <LineChart
       data={lineData}
       height={heightPx}
@@ -276,7 +275,14 @@
       yFormat={lineYFormat}
       markers={lineMarkers}
     />
-  {/if}
+    {#if lineData.length === 0}
+      <div
+        class="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground pointer-events-none"
+      >
+        Waiting for metric data…
+      </div>
+    {/if}
+  </div>
 {:else if widget.type === 'hist'}
   {#if histFrames.length === 0}
     <div class="h-full flex items-center justify-center text-xs text-muted-foreground">
