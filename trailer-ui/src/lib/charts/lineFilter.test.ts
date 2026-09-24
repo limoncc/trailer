@@ -134,4 +134,28 @@ describe('lineFilter 纯函数', () => {
     });
     expect(hit && +hit.step).toBe(3000);
   });
+
+  it('findNearestDatum: 像素阈值内命中,超阈值返回 null', () => {
+    const rows = [
+      { step: 10, value: 1 },
+      { step: 20, value: 100 },
+    ];
+    const base = {
+      xField: 'step',
+      yField: 'value',
+      xMin: 0,
+      xMax: 40,
+      yMin: 0,
+      yMax: 100,
+      plotW: 400, // xSpan 40 → 10px/step
+      plotH: 100, // ySpan 100 → 1px/单位
+      maxPixelDist: 48,
+    };
+    // 点 (18, 90):距 (20,100) 像素 = √(20²+10²)≈22 < 48 → 命中
+    expect(
+      findNearestDatum(rows, { ...base, clickX: 18, clickY: 90 })
+    ).toEqual({ step: 20, value: 100 });
+    // 点 (0, 0):距最近点 (10,1) = √(100²+100²)≈141 > 48 → null
+    expect(findNearestDatum(rows, { ...base, clickX: 0, clickY: 0 })).toBeNull();
+  });
 });

@@ -73,7 +73,7 @@ export function filterLineData<T extends Row>(rows: T[], opts: FilterOptions): T
 export interface NearestOptions {
   xField: string;
   yField: string;
-  /// 点击位置，coordinate.invert 得到的数据域坐标（time 轴为 ms/Date）
+  /// 点击位置，coordinate.invert + scale.invert 得到的数据域坐标（time 轴为 ms/Date）
   clickX: number;
   clickY: number;
   /// 当前可见数据的域跨度（用于归一化 x/y 距离，消除量纲差异）
@@ -81,6 +81,11 @@ export interface NearestOptions {
   xMax: number;
   yMin: number;
   yMax: number;
+  /// plot 区域像素尺寸 + 阈值:点太远视为误点返回 null。距离按
+  /// ((Δx/xSpan)·W)² + ((Δy/ySpan)·H)² 计算(线性 scale 下即像素²,time/log 近似)。
+  plotW?: number;
+  plotH?: number;
+  maxPixelDist?: number;
 }
 
 /**
@@ -91,9 +96,13 @@ export interface NearestOptions {
  * （卡片数据量 ≤ 数千点，O(n) 足够）。
  */
 export function findNearestDatum<T extends Row>(rows: T[], opts: NearestOptions): T | null {
-  const { xField, yField, clickX, clickY, xMin, xMax, yMin, yMax } = opts;
+  const { xField, yField, clickX, clickY, xMin, xMax, yMin, yMax, plotW, plotH, maxPixelDist } = opts;
   const xSpan = Number.isFinite(xMax - xMin) && xMax > xMin ? xMax - xMin : 1;
   const ySpan = Number.isFinite(yMax - yMin) && yMax > yMin ? yMax - yMin : 1;
+  // 传了 plot 尺寸+阈值 → 直接按像素欧氏距离²比较((dx·W)²+(dy·H)²);
+  // 否则退回归一化距离²(无阈值限制)。归一化距离不能直接换算像素——x/y 系数不同。
+  const usePx = maxPixelDist != null && !!plotW && !!plotH;
+  const maxD = usePx ? maxPixelDist! * maxPixelDist! : Infinity;
   const cx = toNum(clickX);
   let best: T | null = null;
   let bestD = Infinity;
@@ -101,13 +110,14 @@ export function findNearestDatum<T extends Row>(rows: T[], opts: NearestOptions)
     const x = toNum(row[xField]);
     const y = Number(row[yField]);
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const dx = (x - cx) / xSpan;
-    const dy = (y - toNum(clickY)) / ySpan;
+    const dx = ((x - cx) / xSpan) * (usePx ? plotW! : 1);
+    const dy = ((y - toNum(clickY)) / ySpan) * (usePx ? plotH! : 1);
     const d = dx * dx + dy * dy;
     if (d < bestD) {
       bestD = d;
       best = row;
     }
   }
+  if (!best || bestD > maxD) return null;
   return best;
 }
