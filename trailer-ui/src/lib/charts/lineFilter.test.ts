@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { filterLineData, findNearestDatum, pointKey, toNum, loadFilterState, saveFilterState } from './lineFilter';
+import { filterLineData, findNearestDatum, pointKey, toNum, loadFilterState, saveFilterState, parseFilterState } from './lineFilter';
 
 const rows = [
   { step: 0, value: 1.0, series: 'a' },
@@ -205,5 +205,40 @@ describe('过滤状态持久化 (localStorage)', () => {
       excludeRanges: [[1, 2]],
       excludePoints: ['a 1'],
     });
+  });
+});
+
+describe('parseFilterState 容错解析（入库/localStorage 共用）', () => {
+  it('完整四字段解析', () => {
+    expect(
+      parseFilterState({
+        brushMode: 'select',
+        xWindow: [1, 2],
+        excludeRanges: [[3, 4]],
+        excludePoints: ['a 1'],
+      })
+    ).toEqual({ brushMode: 'select', xWindow: [1, 2], excludeRanges: [[3, 4]], excludePoints: ['a 1'] });
+  });
+
+  it('null / 字符串 / 数字 → null', () => {
+    expect(parseFilterState(null)).toBeNull();
+    expect(parseFilterState('x')).toBeNull();
+    expect(parseFilterState(42)).toBeNull();
+    expect(parseFilterState(undefined)).toBeNull();
+  });
+
+  it('非法字段丢弃、合法字段保留', () => {
+    expect(
+      parseFilterState({
+        brushMode: 'bogus',
+        xWindow: [NaN, 1],
+        excludeRanges: [[1, 2], ['a']],
+        excludePoints: ['ok', 7],
+      })
+    ).toEqual({ excludeRanges: [[1, 2]], excludePoints: ['ok'] });
+  });
+
+  it('空对象 → 空状态对象', () => {
+    expect(parseFilterState({})).toEqual({});
   });
 });
