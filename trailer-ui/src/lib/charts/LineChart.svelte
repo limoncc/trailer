@@ -169,8 +169,26 @@
           crosshairsYStroke: '#94a3b8',
         },
       },
-      // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽/缩放查看局部
-      ...(slider ? { slider: { x: true } } : {}),
+      // x 轴下方缩略滑块:离群点(如训练开头的尖峰)把主曲线压扁时,拖拽手柄/平移选区查看局部。
+      // 样式压缩:细轨道淡色、去数字标签、禁轨道刷选(brushable 默认开会把按下拖动当
+      // 成重置范围,与 Boards 卡片拖拽手势体感冲突);迷你图调淡不抢眼。
+      ...(slider
+        ? {
+            slider: {
+              x: {
+                brushable: false,
+                trackSize: 10,
+                trackFill: '#94a3b8',
+                trackFillOpacity: 0.18,
+                selectionFill: '#3b82f6',
+                selectionFillOpacity: 0.12,
+                showLabel: false,
+                handleIconSize: 8,
+                sparklineLineStrokeOpacity: 0.3,
+              },
+            },
+          }
+        : {}),
       animate: { enter: { type: 'waveIn' } }
     };
 
