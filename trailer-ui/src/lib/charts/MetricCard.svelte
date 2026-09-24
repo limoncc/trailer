@@ -167,6 +167,7 @@ import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics
       point={false}
       yFormat={yFmt}
       metricLabel={label}
+      storageKey={`metric:${key}:${context}`}
       markers={running ? getLatestMarkers(chartData, seriesField ? true : smooth >= 1) : []}
     />
   </div>
