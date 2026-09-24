@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
   import { g2Theme, onChartThemeChange, adaptiveTicks } from './chartTheme.svelte';
-  import { filterLineData, findNearestDatum, pointKey, toNum } from './lineFilter';
+  import { filterLineData, findNearestDatum, pointKey, toNum, loadFilterState, saveFilterState } from './lineFilter';
   import type { ExcludeRange, XWindow } from './lineFilter';
 
   interface DataPoint {
@@ -36,6 +36,9 @@
     smoothWindow?: number;
     /// Points to highlight on the chart (e.g. latest data point marker)
     markers?: Array<{ step: number; value: number; color?: string }>;
+    /// 持久化标识：传入后 Select/Exclude 状态写入 localStorage 并在挂载时恢复
+    /// （键 trailer-line-filter-<key>，按图表实例区分；缺省不持久化）
+    storageKey?: string;
   }
 
   let {
@@ -57,21 +60,24 @@
     yFormat,
     smoothWindow = 0,
     markers = [],
+    storageKey,
   }: Props = $props();
 
   let container: HTMLDivElement;
   let chart: Chart | null = null;
 
-  // ─── 框选窗口/排除(仅图会话状态;回放截断/热更新/主题重建均保留,不入库) ───
+  // ─── 框选窗口/排除(会话内经回放/热更新/主题重建保留;传 storageKey 时另存
+  //     localStorage,刷新/重开浏览器后恢复——不入库,仅浏览器本地) ───
+  const restored = storageKey ? loadFilterState(storageKey) : null;
   /// 交互模式:none=默认无手势(与 tooltip 零冲突);select=框选过滤 x 窗口;exclude=框选排除区段+点选排除单点。
   /// 需先点按钮进入模式再操作(用户反馈:先加按钮,然后选择)。select/exclude 互斥。
   type BrushMode = 'none' | 'select' | 'exclude';
-  let brushMode = $state<BrushMode>('none');
+  let brushMode = $state<BrushMode>(restored?.brushMode ?? 'none');
   /// 框选的 x 显示窗口(数据域,time 轴为 ms)。双击图内还原
-  let xWindow = $state<XWindow | null>(null);
+  let xWindow = $state<XWindow | null>(restored?.xWindow ?? null);
   /// 排除的 x 区段与单点((series,x) key)
-  let excludeRanges = $state<ExcludeRange[]>([]);
-  let excludePoints = $state<Set<string>>(new Set());
+  let excludeRanges = $state<ExcludeRange[]>(restored?.excludeRanges ?? []);
+  let excludePoints = $state<Set<string>>(new Set(restored?.excludePoints ?? []));
   const excludeCount = $derived(excludeRanges.length + excludePoints.size);
   /// buildOptions 最近一次过滤后的可见行:点选排除时按其找最近点
   let lastPlotData: Array<Record<string, unknown>> = [];
@@ -344,6 +350,17 @@
     hotUpdate();
   }
 
+  /// 任一过滤状态变更后写 localStorage(storageKey 缺省时 no-op)
+  function persistFilter() {
+    if (!storageKey) return;
+    saveFilterState(storageKey, {
+      brushMode,
+      xWindow,
+      excludeRanges,
+      excludePoints: [...excludePoints],
+    });
+  }
+
   // ─── 框选:brushXHighlight 手势完成 → selection[0] 即 x 数据域(selectionOf 已做换算) ───
   function onBrushEnd(e: any) {
     if (brushMode === 'none') return;
@@ -364,6 +381,7 @@
     }
     // 清手势残留 mask(带 active/inactive 态),源码:onRemove 仅 !nativeEvent 时执行
     try { chart?.emit('brush:remove'); } catch { /* 尚未注册 interaction 时忽略 */ }
+    persistFilter();
     requestUpdate();
   }
 
@@ -421,6 +439,7 @@
       if (!hit) return;
       const s = seriesField ? String(hit[seriesField] ?? '') : null;
       excludePoints = new Set(excludePoints).add(pointKey(s, toNum(hit[xField])));
+      persistFilter();
       requestUpdate();
     } catch { /* 坐标换算失败静默,不影响图 */ }
   }
@@ -457,6 +476,7 @@
     cancelPointExclude();
     if (xWindow === null) return;
     xWindow = null;
+    persistFilter();
     requestUpdate();
   }
 
@@ -464,18 +484,21 @@
     if (excludeRanges.length === 0 && excludePoints.size === 0) return;
     excludeRanges = [];
     excludePoints = new Set();
+    persistFilter();
     requestUpdate();
   }
 
   function toggleSelectMode() {
     cancelPointExclude();
     brushMode = brushMode === 'select' ? 'none' : 'select';
+    persistFilter();
     requestUpdate(); // interaction 开关随 options 重建(G2 update 会销毁/注入 brush 手势)
   }
 
   function toggleExcludeMode() {
     cancelPointExclude();
     brushMode = brushMode === 'exclude' ? 'none' : 'exclude';
+    persistFilter();
     requestUpdate();
   }
 

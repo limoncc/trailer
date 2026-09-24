@@ -64,6 +64,7 @@ describe('LineChart component', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('builds chart with correct options for line data', async () => {
@@ -181,6 +182,7 @@ async function flush(ms = 30) {
 describe('LineChart 框选与排除', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   /// 按文案找工具条按钮(英文:Select / Exclude / Restore)
@@ -408,6 +410,58 @@ describe('LineChart 框选与排除', () => {
       addSpy.mockRestore();
       removeSpy.mockRestore();
     }
+  });
+
+  it('storageKey: 状态变更写入 localStorage;未传 key 不写', async () => {
+    const { target, handler, instance, unmount } = await mountLine({ data: chartData, storageKey: 'unit-write' });
+    // 开 Select 模式 → 立即落盘
+    btn(target, 'Select')!.click();
+    await flush();
+    let saved = JSON.parse(localStorage.getItem('trailer-line-filter-unit-write') || 'null');
+    expect(saved?.brushMode).toBe('select');
+
+    // 框选窗口 → 落盘
+    handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
+    await flush();
+    saved = JSON.parse(localStorage.getItem('trailer-line-filter-unit-write') || 'null');
+    expect(saved?.xWindow).toEqual([15, 35]);
+    expect(instance.emit).toHaveBeenCalledWith('brush:remove');
+    unmount();
+
+    // 无 storageKey:任何操作都不产生键
+    const noKey = await mountLine({ data: chartData });
+    btn(noKey.target, 'Select')!.click();
+    await flush();
+    noKey.handler('brush:end')!({ data: { selection: [[15, 35], [0, 1]] } });
+    await flush();
+    expect(localStorage.getItem('trailer-line-filter-')).toBeNull();
+    noKey.unmount();
+  });
+
+  it('storageKey: 排除/恢复按钮操作落盘;挂载时恢复模式+窗口+排除', async () => {
+    // 先在有 key 的实例上产生排除状态
+    const a = await mountLine({ data: chartData, storageKey: 'unit-roundtrip' });
+    btn(a.target, 'Exclude')!.click();
+    await flush();
+    a.handler('brush:end')!({ data: { selection: [[-5, 5], [0, 1]] } });
+    await flush();
+    const saved = JSON.parse(localStorage.getItem('trailer-line-filter-unit-roundtrip') || 'null');
+    expect(saved?.brushMode).toBe('exclude');
+    expect(saved?.excludeRanges).toEqual([[-5, 5]]);
+    a.unmount();
+
+    // 模拟刷新:同 key 重新挂载 → 模式/排除/窗口全部恢复,过滤立即生效
+    localStorage.setItem(
+      'trailer-line-filter-unit-roundtrip',
+      JSON.stringify({ brushMode: 'exclude', xWindow: [15, 35], excludeRanges: [[0, 5]], excludePoints: [' 30'] })
+    );
+    const b = await mountLine({ data: chartData, storageKey: 'unit-roundtrip' });
+    // 窗口 [15,35] → 20,30;点排除 ' 30' → 只剩 20
+    expect(optsRows(b.opts).map((r: any) => r.step)).toEqual([20]);
+    expect(btn(b.target, 'Exclude')!.getAttribute('aria-pressed')).toBe('true');
+    expect(btn(b.target, 'Restore')?.textContent).toContain('2');
+    expect(Array.from(b.target.querySelectorAll('button')).some((el) => el.textContent?.includes('~'))).toBe(true);
+    b.unmount();
   });
 });
 

@@ -70,6 +70,63 @@ export function filterLineData<T extends Row>(rows: T[], opts: FilterOptions): T
   });
 }
 
+// ─── 持久化（localStorage，键前缀同项目惯例 trailer-*；不入库，仅浏览器本地） ───
+
+const FILTER_STORAGE_PREFIX = 'trailer-line-filter';
+
+/// 持久化载荷：与组件状态一一对应（excludePoints 存 key 字符串数组）
+export interface FilterPersistState {
+  brushMode?: 'none' | 'select' | 'exclude';
+  xWindow?: XWindow | null;
+  excludeRanges?: ExcludeRange[];
+  excludePoints?: string[];
+}
+
+function isRange(v: unknown): v is XWindow {
+  return (
+    Array.isArray(v) && v.length === 2 && Number.isFinite(v[0]) && Number.isFinite(v[1])
+  );
+}
+
+/**
+ * 按 storageKey 读回过滤状态。损坏/缺字段的条目安全降级
+ * （非法字段丢弃，整体解析失败返回 null）。
+ */
+export function loadFilterState(key: string): FilterPersistState | null {
+  if (typeof localStorage === 'undefined' || !key) return null;
+  try {
+    const raw = localStorage.getItem(`${FILTER_STORAGE_PREFIX}-${key}`);
+    if (!raw) return null;
+    const v: unknown = JSON.parse(raw);
+    if (typeof v !== 'object' || v === null) return null;
+    const out: FilterPersistState = {};
+    const r = v as Record<string, unknown>;
+    if (r.brushMode === 'select' || r.brushMode === 'exclude' || r.brushMode === 'none') {
+      out.brushMode = r.brushMode;
+    }
+    if (isRange(r.xWindow)) out.xWindow = [r.xWindow[0], r.xWindow[1]];
+    if (Array.isArray(r.excludeRanges)) {
+      out.excludeRanges = r.excludeRanges.filter(isRange).map((p) => [p[0], p[1]]);
+    }
+    if (Array.isArray(r.excludePoints)) {
+      out.excludePoints = r.excludePoints.filter((p): p is string => typeof p === 'string');
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/// 按 storageKey 写入过滤状态；localStorage 不可用/超限时静默失败（同 columnConfig）
+export function saveFilterState(key: string, state: FilterPersistState): void {
+  if (typeof localStorage === 'undefined' || !key) return;
+  try {
+    localStorage.setItem(`${FILTER_STORAGE_PREFIX}-${key}`, JSON.stringify(state));
+  } catch {
+    /* ignore */
+  }
+}
+
 export interface NearestOptions {
   xField: string;
   yField: string;

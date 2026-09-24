@@ -2,7 +2,7 @@
   import LineChart from './LineChart.svelte';
   import ScatterChart from './ScatterChart.svelte';
   import ParallelChart from './ParallelChart.svelte';
-  import type { ChartDef } from '$lib/utils/explore';
+  import { serializeDefs, type ChartDef } from '$lib/utils/explore';
 
   interface Props {
     def: ChartDef;
@@ -28,6 +28,7 @@
     smoothWindow={def.smoothWindow}
     metricLabel={def.metrics.map((m) => (m.context ? `${m.context}/${m.key}` : m.key)).join(', ')}
     {height}
+    storageKey={`explore:${serializeDefs([def])}`}
   />
 {:else if def.type === 'scatter' || def.type === 'scatter-pair'}
   <ScatterChart

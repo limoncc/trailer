@@ -274,6 +274,7 @@
       logY={widget.yLog === true}
       yFormat={lineYFormat}
       markers={lineMarkers}
+      storageKey={`run:${runId}:widget:${widget.id}`}
     />
     {#if lineData.length === 0}
       <div

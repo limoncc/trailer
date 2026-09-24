@@ -305,6 +305,7 @@
                 markers={cd.markers}
                 height={280}
                 point={false}
+                storageKey={`compare:${cd.key}:${cd.context}`}
               />
             </div>
           </div>
