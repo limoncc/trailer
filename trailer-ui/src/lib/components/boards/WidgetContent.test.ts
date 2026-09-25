@@ -118,16 +118,19 @@ describe('WidgetContent line — Boards path (no explore ctx)', () => {
   });
 });
 
-describe('WidgetContent line — explore legend', () => {
+describe('WidgetContent line — no legend under explore ctx', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('turns the legend on under explore ctx', async () => {
+  it('keeps the legend off; run names ride in the tooltip series instead', async () => {
     const { target, component } = await mountContent(lineWidget(), {
       metrics: [...metricSeries('r1'), ...metricSeries('r2')],
       explore: makeCtx(),
     });
     const spec = await lastSpec();
-    expect(spec!.legend).toMatchObject({ position: 'top' });
+    expect(spec!.legend).toBeFalsy();
+    // 系列名仍是 "<run> | <metric>",tooltip 用它区分是哪条线
+    const rows = spec!.data as Array<{ series: string }>;
+    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha | loss', 'beta | loss']);
     unmount(component);
     target.remove();
   });

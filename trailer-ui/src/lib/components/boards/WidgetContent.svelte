@@ -370,7 +370,6 @@
       xIsTime={widget.xKind === 'wall_time'}
       logX={widget.xLog === true}
       logY={widget.yLog === true}
-      legend={!!explore}
       yFormat={lineYFormat}
       markers={lineMarkers}
       initialFilter={widget.filter}
