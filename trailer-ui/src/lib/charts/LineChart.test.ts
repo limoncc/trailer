@@ -592,3 +592,16 @@ describe('LineChart tooltip wrapping (long run|metric names)', () => {
     unmount();
   });
 });
+
+describe('LineChart shared tooltip (every run visible at one x)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('turns on shared so all series list their run name at the hovered step', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series' });
+    expect(opts.interaction.tooltip.shared).toBe(true);
+    unmount();
+  });
+});

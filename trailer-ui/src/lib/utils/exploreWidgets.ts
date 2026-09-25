@@ -3,6 +3,7 @@
  * 只依赖 config + summary(打开时快照,不随 metrics 轮询刷新)。
  */
 
+import type { DashWidget } from './dashboard';
 import {
   collectConfigPaths,
   collectSummaryOptions,
@@ -93,6 +94,63 @@ export function buildSummaryRows(runs: RunRecord[], metrics?: MetricRef[]): Summ
 /** 表格单元格:缺失 → "—",数值 → 4 位有效数字 */
 export function formatStat(v: number | undefined): string {
   return v === undefined ? '—' : v.toPrecision(4);
+}
+
+// ─── line 卡的系列键与显示名 ───
+
+/** line 系列配色键:<run>|<context>/<key> —— 一卡一色,同 run 多指标不再挤同色 */
+export function lineSeriesKey(runId: string, m: MetricRef): string {
+  return `${runId}|${m.context ? `${m.context}/${m.key}` : m.key}`;
+}
+
+/** 显示名的 metric 段取 context 首段(如 train/s1_seq32k → train),短且够用 */
+export function shortMetricPath(m: MetricRef): string {
+  const ns = m.context ? m.context.split('/')[0] : '';
+  return ns ? `${ns}/${m.key}` : m.key;
+}
+
+/** 显示名的 metric 段:完整 context/key(同卡短名冲突时用于消歧) */
+export function fullMetricPath(m: MetricRef): string {
+  return m.context ? `${m.context}/${m.key}` : m.key;
+}
+
+/** line 卡的系列键:(run, 指标) 组合,run 外层 —— 同 run 的几条线在色板上相邻。
+ *  传入 series 缓存时**只算已有数据的组合**:否则 6 run × 5 指标 = 30 键会绕 10 色板循环,
+ *  让没有数据的空组合挤掉槽位、真实曲线互相撞色。 */
+export function lineSeriesKeys(
+  runs: RunRecord[],
+  widgets: DashWidget[],
+  series?: SeriesData
+): string[] {
+  const keys: string[] = [];
+  for (const w of widgets) {
+    if (w.type !== 'line') continue;
+    for (const r of runs) {
+      const groups = series ? series.get(r.run_id) : undefined;
+      for (const m of w.metrics) {
+        if (series && !groups?.some((g) => g.key === m.key && g.context === m.context)) continue;
+        keys.push(lineSeriesKey(r.run_id, m));
+      }
+    }
+  }
+  return keys;
+}
+
+/** run 级卡的着色键:colorBy 缺省/run → run_id;选了 config 等维度 → 其解析值。
+ *  与 line 系列键**分表累积** —— 混在一张表里 line 卡首条线会拿到中间槽,颜色就不按色板顺序了。 */
+export function runScopeKeys(runs: RunRecord[], widgets: DashWidget[]): string[] {
+  const keys: string[] = [];
+  for (const w of widgets) {
+    if (w.type !== 'scatter' && w.type !== 'scatter-pair' && w.type !== 'parallel') continue;
+    const cb = w.colorBy;
+    for (const r of runs) keys.push(!cb || cb.kind === 'run' ? r.run_id : colorValueOf(r, cb));
+  }
+  return keys;
+}
+
+/** 收集全部配色键(两条通道合并,仅测试/调试用) */
+export function colorKeysOf(runs: RunRecord[], widgets: DashWidget[]): string[] {
+  return [...lineSeriesKeys(runs, widgets), ...runScopeKeys(runs, widgets)];
 }
 
 // ─── 稳定配色:颜色是「系列身份」的函数,显隐/排序变化不换色 ───

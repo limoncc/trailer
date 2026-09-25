@@ -136,3 +136,22 @@ describe('ExploreWidgetEditor', () => {
     target.remove();
   });
 });
+
+describe('metric options name their runs (selector had no run names)', () => {
+  it('labels a metric owned by only some runs with those run names', async () => {
+    const { target, component } = mountEditor(lineWidget);
+    await tick();
+    // 打开 MetricPicker
+    const trigger = target.querySelector('[data-slot="popover-trigger"]') as HTMLElement;
+    trigger.click();
+    await tick();
+    await tick();
+    const body = document.body.textContent ?? '';
+    // r1/r2 都有 loss/ → 不加后缀;只有 r1 有 acc/ → 标出归属 run
+    expect(body).toContain('acc — r1');
+    expect(body).not.toContain('loss — r1');
+    unmount(component);
+    target.remove();
+    document.querySelectorAll('[data-slot="popover-content"]').forEach((e) => e.remove());
+  });
+});

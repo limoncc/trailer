@@ -114,9 +114,14 @@
     return m.context ? `${m.context}/${m.key}` : m.key;
   }
 
-  // 展示名:系统指标用友好名,选项 value 仍用 metricLabel 保证 round-trip
+  // 展示名:系统指标用友好名,选项 value 仍用 metricLabel 保证 round-trip。
+  // 部分 run 才有该指标时标注归属 run —— 否则选择器里看不出选了它会画哪几条线。
   function metricDisplay(m: MetricRef): string {
-    return displayMetricName(m.key, m.context) ?? metricLabel(m);
+    const base = displayMetricName(m.key, m.context) ?? metricLabel(m);
+    const summaryKey = `${m.key}/${m.context}`;
+    const owners = runs.filter((r) => Object.keys(r.summary ?? {}).includes(summaryKey));
+    if (owners.length === 0 || owners.length === runs.length) return base;
+    return `${base} — ${owners.map((r) => r.name ?? r.run_id.slice(0, 12)).join(', ')}`;
   }
 
   function colorLabel(c: ColorSpec): string {

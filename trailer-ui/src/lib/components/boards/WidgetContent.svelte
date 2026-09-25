@@ -29,7 +29,15 @@
     scalarAxisName,
     safeFieldName,
   } from '$lib/utils/explore';
-  import { computeConfigDiff, buildSummaryRows, formatStat, type ExploreCtx } from '$lib/utils/exploreWidgets';
+  import {
+    computeConfigDiff,
+    buildSummaryRows,
+    formatStat,
+    lineSeriesKey,
+    shortMetricPath,
+    fullMetricPath,
+    type ExploreCtx,
+  } from '$lib/utils/exploreWidgets';
 
   interface Props {
     widget: DashWidget;
@@ -123,19 +131,32 @@
   let lineSeriesList = $derived.by((): LineSeries[] => {
     if (widget.type !== 'line') return [];
     if (explore) {
-      const out: LineSeries[] = [];
+      // 着色按 run(缺省)时每 (run, 指标) 一个色键 —— 同 run 的多指标不再挤同一种颜色;
+      // 选了 config/project 等维度时仍按该维度的值着色(用户主动要按值分组)
+      const byRun = !widget.colorBy || widget.colorBy.kind === 'run';
+      const raw: Array<{ label: string; m: (typeof widget.metrics)[number]; cv: string; groups: MetricSeries[] }> = [];
       for (const m of widget.metrics) {
         for (const g of metrics) {
           if (g.key !== m.key || g.context !== m.context) continue;
           const runId = g.run_id ?? '';
           const run = explore.runs.find((r) => r.run_id === runId);
-          const cv = run ? explore.colorValueOf(run, widget.colorBy) : runId;
-          // 着色按 run 时用友好名;按其他维度(project/config/…)时直接显示色值
-          const label = runId && cv === runId ? explore.labelOf(runId) : cv;
-          out.push({ name: `${label} | ${seriesName(m.key, m.context)}`, cv, groups: [g] });
+          const cv = byRun ? lineSeriesKey(runId, m) : run ? explore.colorValueOf(run, widget.colorBy) : runId;
+          // 着色按 run → 显示 run 名;按其他维度 → 显示该维度的值(project 名/config 值)
+          const label = byRun ? (runId ? explore.labelOf(runId) : '') : cv;
+          raw.push({ label, m, cv, groups: [g] });
         }
       }
-      return out;
+      // 显示名:<run>/<context 首段>/<key>(如 midtrain-x/train/loss);
+      // 同卡内短名撞车(同 run 的 train/s1 与 train/s2 两级 context)才补全完整 context 消歧
+      const short = (x: (typeof raw)[number]) => `${x.label}/${shortMetricPath(x.m)}`;
+      const full = (x: (typeof raw)[number]) => `${x.label}/${fullMetricPath(x.m)}`;
+      const hits = new Map<string, number>();
+      for (const x of raw) hits.set(short(x), (hits.get(short(x)) ?? 0) + 1);
+      return raw.map((x) => ({
+        name: (hits.get(short(x)) ?? 0) > 1 ? full(x) : short(x),
+        cv: x.cv,
+        groups: x.groups,
+      }));
     }
     return widget.metrics
       .filter((m) => metrics.some((g) => g.key === m.key && g.context === m.context))
@@ -367,6 +388,7 @@
       height={heightPx}
       seriesField="series"
       colors={lineColors}
+      lineWidth={explore ? 2 : undefined}
       xIsTime={widget.xKind === 'wall_time'}
       logX={widget.xLog === true}
       logY={widget.yLog === true}
