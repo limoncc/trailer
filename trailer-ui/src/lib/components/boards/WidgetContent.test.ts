@@ -211,9 +211,19 @@ describe('WidgetContent line — explore (multi run)', () => {
       explore: makeCtx(),
     });
     const rows = [...target.querySelectorAll('[data-series-row]')];
-    expect(rows.map((r) => (r.textContent ?? '').trim())).toEqual([
-      'alpha/train/loss',
-      'beta/train/loss',
+    expect(rows.length).toBe(2);
+    // 层级分列:run | context | 指标(而不是拼成一整行)
+    expect(rows.map((r) => (r.querySelector('[data-series-run]')?.textContent ?? '').trim())).toEqual([
+      'alpha',
+      'beta',
+    ]);
+    expect(rows.map((r) => (r.querySelector('[data-series-context]')?.textContent ?? '').trim())).toEqual([
+      'train',
+      'train',
+    ]);
+    expect(rows.map((r) => (r.querySelector('[data-series-metric]')?.textContent ?? '').trim())).toEqual([
+      'loss',
+      'loss',
     ]);
     // 每行带色点(颜色与曲线同源)与分隔线
     for (const row of rows) {
@@ -222,6 +232,9 @@ describe('WidgetContent line — explore (multi run)', () => {
       expect(dot.style.background).toMatch(/^rgb|^#/);
       expect(row.classList.contains('border-b')).toBe(true);
     }
+    // 表头
+    const table = target.querySelector('[data-series-table]') as HTMLElement;
+    expect(table.getAttribute('data-has-head')).toBe('true');
     unmount(component);
     target.remove();
   });

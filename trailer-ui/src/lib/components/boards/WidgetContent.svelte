@@ -16,6 +16,7 @@
   } from '$lib/utils/systemMetrics';
   import { metricId } from '$lib/utils/metricGroups';
   import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
+  import type { MetricRef } from '$lib/utils/explore';
   import type { BoardsData, MediaRow, MetricSeries } from './boardsData';
   import type { FilterPersistState } from '$lib/charts/lineFilter';
   import InfoCard from './InfoCard.svelte';
@@ -125,6 +126,10 @@
   // cv = 该系列所属 run 在 colorBy 维度下的色值,供稳定配色查表
   interface LineSeries {
     name: string;
+    /** 系列的 run 显示名(Explore);Boards 单 run 为空串 */
+    label: string;
+    /** 系列的指标(context/key 完整信息,表格分列用) */
+    m: MetricRef;
     cv: string;
     groups: MetricSeries[];
   }
@@ -154,6 +159,8 @@
       for (const x of raw) hits.set(short(x), (hits.get(short(x)) ?? 0) + 1);
       return raw.map((x) => ({
         name: (hits.get(short(x)) ?? 0) > 1 ? full(x) : short(x),
+        label: x.label,
+        m: x.m,
         cv: x.cv,
         groups: x.groups,
       }));
@@ -162,6 +169,8 @@
       .filter((m) => metrics.some((g) => g.key === m.key && g.context === m.context))
       .map((m) => ({
         name: seriesName(m.key, m.context),
+        label: '',
+        m,
         cv: '',
         groups: [metrics.find((g) => g.key === m.key && g.context === m.context)!],
       }));
@@ -171,16 +180,30 @@
 
   // ─── Explore 系列清单(表格化图例):名 = <run>/<context>/<key>,色与曲线同源 ───
   // 首现序 = lineData 排序后的序 = G2 color domain 序 → 表格行序与曲线颜色一一对齐
-  const seriesLegend = $derived.by((): Array<{ name: string; color: string }> => {
+  const seriesLegend = $derived.by((): Array<{
+    name: string;
+    run: string;
+    context: string;
+    metric: string;
+    color: string;
+  }> => {
     if (widget.type !== 'line' || !explore) return [];
     const strip = (s: string) => (lineSmoothOn ? s.replace(/__(raw|smooth)$/, '') : s);
-    const cvByName = new Map<string, string>();
+    const byName = new Map<string, LineSeries>();
     for (const row of lineData) {
       const key = strip(row.series);
-      if (cvByName.has(key)) continue;
-      cvByName.set(key, lineSeriesList.find((s) => s.name === key)?.cv ?? '');
+      if (byName.has(key)) continue;
+      const item = lineSeriesList.find((x) => x.name === key);
+      if (item) byName.set(key, item);
     }
-    return [...cvByName.entries()].map(([name, cv]) => ({ name, color: explore.colorOfValue(cv) }));
+    // 层级拆列:run / context / 指标 —— context 用完整值(分列后不会与 run 挤在一起)
+    return [...byName.entries()].map(([name, item]) => ({
+      name,
+      run: item.label,
+      context: item.m.context,
+      metric: item.m.key,
+      color: explore.colorOfValue(item.cv),
+    }));
   });
 
   // smooth>0 时同一逻辑系列的两条线共用一个基色(色板索引按指标序而非 series 序)。
@@ -391,18 +414,32 @@
   <div class="h-full flex flex-col">
     <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
     {#if seriesLegend.length > 0}
-      <div class="shrink-0 max-h-[45%] overflow-y-auto border border-border/50 border-b-0 rounded-t" data-series-table>
+      <div
+        class="shrink-0 max-h-[45%] overflow-y-auto border border-border/50 border-b-0 rounded-t text-[11px]"
+        data-series-table
+        data-has-head="true"
+      >
+        <!-- 表头:层级分列 run / context / 指标 -->
+        <div
+          class="grid grid-cols-[12px_minmax(0,1.8fr)_minmax(0,1.1fr)_minmax(0,0.7fr)] gap-x-2 px-2 py-[3px] bg-muted/50 border-b border-border/60 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sticky top-0"
+        >
+          <span></span><span>Run</span><span>Context</span><span>Metric</span>
+        </div>
         {#each seriesLegend as s (s.name)}
           <div
-            class="flex items-center gap-1.5 px-2 py-[3px] text-[11px] leading-tight border-b border-border/40 last:border-b-0"
+            class="grid grid-cols-[12px_minmax(0,1.8fr)_minmax(0,1.1fr)_minmax(0,0.7fr)] gap-x-2 items-center px-2 py-[3px] leading-tight border-b border-border/40 last:border-b-0"
             data-series-row
           >
             <span
               data-series-dot
-              class="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10"
+              class="w-2.5 h-2.5 rounded-full border border-black/10"
               style="background: {s.color}"
             ></span>
-            <span class="truncate font-mono" title={s.name}>{s.name}</span>
+            <span data-series-run class="truncate font-mono" title={s.run}>{s.run}</span>
+            <span data-series-context class="truncate font-mono text-muted-foreground" title={s.context}>
+              {s.context || '—'}
+            </span>
+            <span data-series-metric class="truncate font-mono" title={s.metric}>{s.metric}</span>
           </div>
         {/each}
       </div>
