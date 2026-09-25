@@ -180,30 +180,43 @@
 
   // ─── Explore 系列清单(表格化图例):名 = <run>/<context>/<key>,色与曲线同源 ───
   // 首现序 = lineData 排序后的序 = G2 color domain 序 → 表格行序与曲线颜色一一对齐
-  const seriesLegend = $derived.by((): Array<{
+  // 系列清单按名字母序(= 曲线 color domain 序),**不依赖 lineData** —— 否则被筛掉的
+  // 行会从表里消失,就点不回来了
+  interface LegendItem {
     name: string;
     run: string;
     context: string;
     metric: string;
     color: string;
-  }> => {
+    hidden: boolean;
+  }
+  const seriesLegend = $derived.by((): LegendItem[] => {
     if (widget.type !== 'line' || !explore) return [];
-    const strip = (s: string) => (lineSmoothOn ? s.replace(/__(raw|smooth)$/, '') : s);
-    const byName = new Map<string, LineSeries>();
-    for (const row of lineData) {
-      const key = strip(row.series);
-      if (byName.has(key)) continue;
-      const item = lineSeriesList.find((x) => x.name === key);
-      if (item) byName.set(key, item);
+    // 只列**图上真的画了**的系列:batch-query 对无数据的 (run, 指标) 也回一个空组,
+    // lineSeriesList 因此会含 6 run × N 指标的全组合,过滤掉空组才是"图有的指标"
+    const drawn = (item: LineSeries) => item.groups.some((g) => g.points.length > 0);
+    return [...lineSeriesList]
+      .filter(drawn)
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .map((item) => ({
+        name: item.name,
+        run: item.label,
+        context: item.m.context,
+        metric: item.m.key,
+        color: explore.colorOfValue(item.cv),
+        hidden: hiddenSeries.has(item.name),
+      }));
+  });
+
+  /** 层级树的层1:按 run 分组(legend 已按 name 排序 → 组序与组内序都稳定) */
+  const seriesGroups = $derived.by((): Array<[string, LegendItem[]]> => {
+    const map = new Map<string, LegendItem[]>();
+    for (const item of seriesLegend) {
+      const list = map.get(item.run);
+      if (list) list.push(item);
+      else map.set(item.run, [item]);
     }
-    // 层级拆列:run / context / 指标 —— context 用完整值(分列后不会与 run 挤在一起)
-    return [...byName.entries()].map(([name, item]) => ({
-      name,
-      run: item.label,
-      context: item.m.context,
-      metric: item.m.key,
-      color: explore.colorOfValue(item.cv),
-    }));
+    return [...map.entries()];
   });
 
   // smooth>0 时同一逻辑系列的两条线共用一个基色(色板索引按指标序而非 series 序)。
@@ -212,9 +225,19 @@
     if (widget.type !== 'line') return PALETTE;
     const out: string[] = [];
     if (explore) {
-      for (const s of seriesLegend) {
-        if (lineSmoothOn) out.push(withAlpha(s.color, RAW_ALPHA), s.color);
-        else out.push(s.color);
+      // 按可见系列在 lineData 中的首现序(= 排序后的 domain 序)取稳定色,
+      // 被筛掉的系列不占 range 槽位,G2 domain 与数组一一对齐
+      const strip = (s: string) => (lineSmoothOn ? s.replace(/__(raw|smooth)$/, '') : s);
+      const seen = new Map<string, string>();
+      for (const row of lineData) {
+        const key = strip(row.series);
+        if (seen.has(key)) continue;
+        const item = lineSeriesList.find((x) => x.name === key);
+        seen.set(key, item ? explore.colorOfValue(item.cv) : PALETTE[0]);
+      }
+      for (const color of seen.values()) {
+        if (lineSmoothOn) out.push(withAlpha(color, RAW_ALPHA), color);
+        else out.push(color);
       }
       return out;
     }
@@ -232,6 +255,7 @@
     const xWall = widget.xKind === 'wall_time';
     const win = (widget.smooth ?? 0) * 2 + 1;
     for (const s of lineSeriesList) {
+      if (explore && hiddenSeries.has(s.name)) continue; // 筛选:被点掉的系列不画
       const name = s.name;
       for (const g of s.groups) {
         const pts = g.points
@@ -384,6 +408,15 @@
 
   let tableVisibleRows = $state(50);
 
+  // ─── Explore 系列筛选(会话态,不入库):点系列表格的行切换显隐 ───
+  let hiddenSeries = $state<Set<string>>(new Set());
+  function toggleSeries(name: string) {
+    const next = new Set(hiddenSeries);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    hiddenSeries = next;
+  }
+
   // 媒体文件流需鉴权:fetch(带 token)→ object URL(同 MediaExplorer)。
   // 网络请求属于 effect 的合法用途;缓存读用 untrack 包住,避免 effect 读写自身依赖的状态。
   let blobUrls = $state<Map<number, string>>(new Map());
@@ -413,35 +446,70 @@
        过滤状态经 widget.filter 随 layout 入库(initialFilter 恢复 + onFilterChange 写回)。 -->
   <div class="h-full flex flex-col">
     <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
+    <!-- 系列按钮:不占图高;hover 展开层级表格浮层,点行筛选显隐(会话态) -->
     {#if seriesLegend.length > 0}
-      <div
-        class="shrink-0 max-h-[45%] overflow-y-auto border border-border/50 border-b-0 rounded-t text-[11px]"
-        data-series-table
-        data-has-head="true"
-      >
-        <!-- 表头:层级分列 run / context / 指标 -->
-        <div
-          class="grid grid-cols-[12px_minmax(0,1.8fr)_minmax(0,1.1fr)_minmax(0,0.7fr)] gap-x-2 px-2 py-[3px] bg-muted/50 border-b border-border/60 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sticky top-0"
+      <div class="group/series absolute top-1 right-1 z-10" data-series-toggle>
+        <button
+          type="button"
+          class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium border border-border/70 bg-background/95 rounded shadow-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
+          title="Series — hover to view and filter"
         >
-          <span></span><span>Run</span><span>Context</span><span>Metric</span>
-        </div>
-        {#each seriesLegend as s (s.name)}
+          <span aria-hidden="true">▤</span>
+          Series {seriesLegend.filter((l) => !l.hidden).length}/{seriesLegend.length}
+        </button>
+        <div data-series-panel class="hidden group-hover/series:block absolute right-0 top-full pt-1">
           <div
-            class="grid grid-cols-[12px_minmax(0,1.8fr)_minmax(0,1.1fr)_minmax(0,0.7fr)] gap-x-2 items-center px-2 py-[3px] leading-tight border-b border-border/40 last:border-b-0"
-            data-series-row
+            class="w-[min(480px,84vw)] max-h-[55vh] overflow-auto bg-card border border-border rounded-md shadow-lg text-[11px]"
           >
-            <span
-              data-series-dot
-              class="w-2.5 h-2.5 rounded-full border border-black/10"
-              style="background: {s.color}"
-            ></span>
-            <span data-series-run class="truncate font-mono" title={s.run}>{s.run}</span>
-            <span data-series-context class="truncate font-mono text-muted-foreground" title={s.context}>
-              {s.context || '—'}
-            </span>
-            <span data-series-metric class="truncate font-mono" title={s.metric}>{s.metric}</span>
+            <div data-series-table data-has-head="true">
+              <div
+                class="px-2.5 py-1.5 bg-muted/50 border-b border-border/60 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0"
+              >
+                Series · {seriesLegend.length} — click a line to show/hide
+              </div>
+              <!-- 层级树:层1 = run 分组标题,层2 = 缩进的 context/指标;组间横线 -->
+              {#each seriesGroups as [run, items] (run)}
+                <div
+                  data-series-group
+                  class="flex items-center gap-1.5 px-2.5 pt-2 pb-1 border-t border-border/50 first:border-t-0"
+                >
+                  <span class="size-1.5 rounded-full bg-muted-foreground/40 shrink-0"></span>
+                  <span class="font-semibold truncate" title={run}>{run}</span>
+                  <span class="text-[10px] font-normal text-muted-foreground shrink-0">
+                    {items.filter((i) => !i.hidden).length}/{items.length}
+                  </span>
+                </div>
+                {#each items as s (s.name)}
+                  <div
+                    class="flex items-center gap-1.5 pl-7 pr-2.5 py-1 border-b border-border/30 last:border-b-0 cursor-pointer hover:bg-accent/50 {s.hidden
+                      ? 'opacity-40'
+                      : ''}"
+                    data-series-row
+                    data-series-hidden={s.hidden ? 'true' : 'false'}
+                    role="button"
+                    tabindex="0"
+                    onclick={() => toggleSeries(s.name)}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleSeries(s.name);
+                      }
+                    }}
+                  >
+                    <span
+                      data-series-dot
+                      class="size-2.5 rounded-full border border-black/10 shrink-0"
+                      style="background: {s.color}"
+                    ></span>
+                    <span data-series-leaf class="font-mono truncate" title={s.name}>
+                      {s.context ? `${s.context}/${s.metric}` : s.metric}
+                    </span>
+                  </div>
+                {/each}
+              {/each}
+            </div>
           </div>
-        {/each}
+        </div>
       </div>
     {/if}
     <div class="relative flex-1 min-h-0">
