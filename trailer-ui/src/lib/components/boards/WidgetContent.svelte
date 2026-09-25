@@ -19,6 +19,17 @@
   import type { BoardsData, MediaRow, MetricSeries } from './boardsData';
   import type { FilterPersistState } from '$lib/charts/lineFilter';
   import InfoCard from './InfoCard.svelte';
+  // ─── Explore 对比看板分支(scatter/pair/parallel/diff/summary)与多 run line ───
+  import ScatterChart from '$lib/charts/ScatterChart.svelte';
+  import ParallelChart from '$lib/charts/ParallelChart.svelte';
+  import {
+    buildScalarScatterRows,
+    buildPairScatterRows,
+    buildParallelData,
+    scalarAxisName,
+    safeFieldName,
+  } from '$lib/utils/explore';
+  import { computeConfigDiff, buildSummaryRows, formatStat, type ExploreCtx } from '$lib/utils/exploreWidgets';
 
   interface Props {
     widget: DashWidget;
@@ -42,9 +53,11 @@
     onFilterChange?: (filter: FilterPersistState) => void;
     /** 全局回放步(Boards 回放);null = 非回放态 */
     replayStep?: number | null;
+    /** Explore 对比看板上下文;缺省 = Boards 单 run 原逻辑 */
+    explore?: ExploreCtx;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, onFilterChange, replayStep = null }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, onFilterChange, replayStep = null, explore }: Props = $props();
 
   // ─── 视口内懒挂载:G2/Three 实例创建贵(单卡 100ms+),新增卡/整板加载时
   // 只渲染视口附近的卡,滚到附近(300px 预载)才挂载真实内容;一次性闩,之后保持
@@ -100,17 +113,61 @@
     return /^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}${alphaHex}` : hex;
   }
 
-  let lineSeriesNames = $derived.by(() => {
+  // ─── line 逻辑系列:Boards = 每指标一条(单 run);Explore = 每 (指标 × 可见 run) 一条 ───
+  // cv = 该系列所属 run 在 colorBy 维度下的色值,供稳定配色查表
+  interface LineSeries {
+    name: string;
+    cv: string;
+    groups: MetricSeries[];
+  }
+  let lineSeriesList = $derived.by((): LineSeries[] => {
     if (widget.type !== 'line') return [];
+    if (explore) {
+      const out: LineSeries[] = [];
+      for (const m of widget.metrics) {
+        for (const g of metrics) {
+          if (g.key !== m.key || g.context !== m.context) continue;
+          const runId = g.run_id ?? '';
+          const run = explore.runs.find((r) => r.run_id === runId);
+          const cv = run ? explore.colorValueOf(run, widget.colorBy) : runId;
+          // 着色按 run 时用友好名;按其他维度(project/config/…)时直接显示色值
+          const label = runId && cv === runId ? explore.labelOf(runId) : cv;
+          out.push({ name: `${label} | ${seriesName(m.key, m.context)}`, cv, groups: [g] });
+        }
+      }
+      return out;
+    }
     return widget.metrics
       .filter((m) => metrics.some((g) => g.key === m.key && g.context === m.context))
-      .map((m) => seriesName(m.key, m.context));
+      .map((m) => ({
+        name: seriesName(m.key, m.context),
+        cv: '',
+        groups: [metrics.find((g) => g.key === m.key && g.context === m.context)!],
+      }));
   });
+  let lineSeriesNames = $derived(lineSeriesList.map((s) => s.name));
   let lineSmoothOn = $derived(widget.type === 'line' && (widget.smooth ?? 0) > 0);
-  // smooth>0 时同一指标的两条线共用一个基色(色板索引按指标序而非 series 序)
+  // smooth>0 时同一逻辑系列的两条线共用一个基色(色板索引按指标序而非 series 序)。
+  // Explore:颜色是系列身份的函数(取稳定配色表),按 lineData 出现序展开 → 显隐不换色。
   let lineColors = $derived.by(() => {
     if (widget.type !== 'line') return PALETTE;
     const out: string[] = [];
+    if (explore) {
+      // 逻辑系列在 lineData 中的首现序 = G2 color domain 序,颜色与系列一一对齐
+      const seen = new Map<string, string>();
+      const strip = (s: string) => (lineSmoothOn ? s.replace(/__(raw|smooth)$/, '') : s);
+      for (const row of lineData) {
+        const key = strip(row.series);
+        if (seen.has(key)) continue;
+        const base = explore.colorOfValue(lineSeriesList.find((s) => s.name === key)?.cv ?? '');
+        seen.set(key, base);
+      }
+      for (const base of seen.values()) {
+        if (lineSmoothOn) out.push(withAlpha(base, RAW_ALPHA), base);
+        else out.push(base);
+      }
+      return out;
+    }
     lineSeriesNames.forEach((_, i) => {
       const base = PALETTE[i % PALETTE.length];
       if (lineSmoothOn) out.push(withAlpha(base, RAW_ALPHA), base);
@@ -124,23 +181,23 @@
     const rows: Array<{ step: number; value: number; series: string }> = [];
     const xWall = widget.xKind === 'wall_time';
     const win = (widget.smooth ?? 0) * 2 + 1;
-    for (const m of widget.metrics) {
-      const g = metrics.find((g) => g.key === m.key && g.context === m.context);
-      if (!g) continue;
-      const name = seriesName(m.key, m.context);
-      const pts = g.points
-        .map((p) => ({ step: xWall && p.wall_time != null ? p.wall_time * 1000 : p.step, value: p.value }))
-        .sort((a, b) => a.step - b.step);
-      if (lineSmoothOn && pts.length > 1) {
-        for (const p of pts) rows.push({ ...p, series: `${name}__raw` });
-        const half = Math.floor(win / 2);
-        for (let i = 0; i < pts.length; i++) {
-          const slice = pts.slice(Math.max(0, i - half), Math.min(pts.length, i + half + 1));
-          const avg = slice.reduce((s, q) => s + q.value, 0) / slice.length;
-          rows.push({ step: pts[i].step, value: avg, series: `${name}__smooth` });
+    for (const s of lineSeriesList) {
+      const name = s.name;
+      for (const g of s.groups) {
+        const pts = g.points
+          .map((p) => ({ step: xWall && p.wall_time != null ? p.wall_time * 1000 : p.step, value: p.value }))
+          .sort((a, b) => a.step - b.step);
+        if (lineSmoothOn && pts.length > 1) {
+          for (const p of pts) rows.push({ ...p, series: `${name}__raw` });
+          const half = Math.floor(win / 2);
+          for (let i = 0; i < pts.length; i++) {
+            const slice = pts.slice(Math.max(0, i - half), Math.min(pts.length, i + half + 1));
+            const avg = slice.reduce((sum, q) => sum + q.value, 0) / slice.length;
+            rows.push({ step: pts[i].step, value: avg, series: `${name}__smooth` });
+          }
+        } else {
+          for (const p of pts) rows.push({ ...p, series: name });
         }
-      } else {
-        for (const p of pts) rows.push({ ...p, series: name });
       }
     }
     // 按 series 分组排序,保证 G2 连线连续(series 序:同指标的 raw 在 smooth 前)
@@ -154,14 +211,50 @@
     return fams.every((f) => f === first) ? UNIT_FMT[first] : undefined;
   });
 
-  // 运行中:每条 series 的最新点做绿色脉冲标记(step 已是绘图坐标,wall_time 视图即 ms)
+  // 运行中:每条 series 的最新点做绿色脉冲标记(step 已是绘图坐标,wall_time 视图即 ms)。
+  // Explore 多 run:按各系列所属 run 的运行态逐系列判断(卡级 running 只服务 Boards)。
   let lineMarkers = $derived.by(() => {
-    if (!running || widget.type !== 'line' || lineData.length === 0) return [];
-    // 平滑关闭时每条指标一个点;开启时原始线/平滑线各一个(与 Metrics 一致)
+    if (widget.type !== 'line' || lineData.length === 0) return [];
+    const live = new Set<string>();
+    for (const s of lineSeriesList) {
+      const rid = s.groups[0]?.run_id;
+      const on = explore ? (rid ? explore.isRunning(rid) : false) : running;
+      if (on) live.add(s.name);
+    }
+    if (live.size === 0) return [];
+    // 平滑关闭时每条逻辑系列一个点;开启时原始线/平滑线各一个(与 Metrics 一致)
     const lastBySeries = new Map<string, { step: number; value: number }>();
-    for (const row of lineData) lastBySeries.set(row.series, { step: row.step, value: row.value });
+    for (const row of lineData) {
+      const key = lineSmoothOn ? row.series.replace(/__(raw|smooth)$/, '') : row.series;
+      if (!live.has(key)) continue;
+      lastBySeries.set(row.series, { step: row.step, value: row.value });
+    }
     return [...lastBySeries.values()].map((p) => ({ ...p, color: '#22c55e' }));
   });
+
+  // ─── Explore 专用卡数据(无 explore ctx 时渲染空态) ───
+  let scatterRows = $derived.by(() => {
+    if (widget.type !== 'scatter' || !explore) return null;
+    return buildScalarScatterRows(explore.runs, widget.x, widget.y, widget.colorBy ?? { kind: 'run' });
+  });
+  let pairRows = $derived.by(() => {
+    if (widget.type !== 'scatter-pair' || !explore) return null;
+    return buildPairScatterRows(explore.runs, widget.x, widget.y, widget.colorBy ?? { kind: 'run' }, explore.series);
+  });
+  let parallelData = $derived.by(() => {
+    if (widget.type !== 'parallel' || !explore) return null;
+    return buildParallelData(explore.runs, widget.dims);
+  });
+  // parallel 的着色字段:取第一个 summary 维度(如 accuracy.last),缺省按 run
+  let parallelMetricField = $derived.by(() => {
+    if (widget.type !== 'parallel') return undefined;
+    const s = widget.dims.find((d) => d.kind === 'summary');
+    return s ? safeFieldName(scalarAxisName(s)) : undefined;
+  });
+  let diffRows = $derived.by(() => (widget.type === 'diff' && explore ? computeConfigDiff(explore.runs) : []));
+  let summaryTable = $derived.by(() =>
+    widget.type === 'summary' && explore ? buildSummaryRows(explore.runs, widget.metrics) : null
+  );
 
   // ─── hist ───
   let histFrames = $derived.by(() => {
@@ -275,6 +368,7 @@
       seriesField="series"
       colors={lineColors}
       xIsTime={widget.xKind === 'wall_time'}
+      logX={widget.xLog === true}
       logY={widget.yLog === true}
       yFormat={lineYFormat}
       markers={lineMarkers}
@@ -403,6 +497,111 @@
     <audio controls class="w-full" preload="metadata">
       <source src={blobUrls.get(mediaRow.id)} />
     </audio>
+  {/if}
+{:else if widget.type === 'scatter'}
+  {#if !scatterRows}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Select runs to plot</div>
+  {:else}
+    <ScatterChart
+      data={scatterRows.rows as Array<{ x: number; y: number; [k: string]: unknown }>}
+      xField="x"
+      yField="y"
+      colorField={scatterRows.colorField}
+      logX={widget.xLog === true}
+      logY={widget.yLog === true}
+      regression={widget.regression === true}
+      height={heightPx}
+    />
+  {/if}
+{:else if widget.type === 'scatter-pair'}
+  {#if !pairRows}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Select runs to plot</div>
+  {:else}
+    <ScatterChart
+      data={pairRows.rows as Array<{ x: number; y: number; [k: string]: unknown }>}
+      xField="x"
+      yField="y"
+      colorField={pairRows.colorField}
+      height={heightPx}
+    />
+  {/if}
+{:else if widget.type === 'parallel'}
+  {#if !parallelData}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Select runs to plot</div>
+  {:else}
+    <ParallelChart data={parallelData.rows} dimensions={parallelData.dimensions} metricField={parallelMetricField} height={heightPx} title="Parallel" />
+  {/if}
+{:else if widget.type === 'diff'}
+  {#if !explore || explore.runs.length < 2}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Select 2+ runs to diff</div>
+  {:else if diffRows.length === 0}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">No config differences</div>
+  {:else}
+    <div class="h-full overflow-auto border border-border rounded">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="border-b border-border bg-muted/50">
+            <th class="px-2 py-1.5 text-left text-muted-foreground font-medium sticky left-0 bg-muted/50 z-10">Config key</th>
+            {#each explore.runs as r (r.run_id)}
+              <th class="px-2 py-1.5 text-left text-muted-foreground font-medium whitespace-nowrap">{explore.labelOf(r.run_id)}</th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each diffRows as row (row.path)}
+            <tr class="border-b border-border/50 hover:bg-accent/30 even:bg-muted/10">
+              <td class="px-2 py-1 font-mono sticky left-0 bg-card z-10">{row.path}</td>
+              {#each row.values as v, i (i)}
+                <td class="px-2 py-1 whitespace-nowrap">{v}</td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {/if}
+{:else if widget.type === 'summary'}
+  {#if !summaryTable || summaryTable.metrics.length === 0}
+    <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Runs have no summary yet</div>
+  {:else}
+    <div class="h-full overflow-auto border border-border rounded">
+      <table class="w-full text-xs border-collapse">
+        <thead>
+          <tr class="border-b border-border bg-muted/50">
+            <th class="px-2 py-1.5 text-left text-muted-foreground font-medium sticky left-0 bg-muted/50 z-10">Run</th>
+            {#each summaryTable.metrics as m, i (i)}
+              <th colspan="4" class="px-2 py-1.5 text-center text-muted-foreground font-medium whitespace-nowrap border-l border-border">
+                {m.context ? `${m.context}/${m.key}` : m.key}
+              </th>
+            {/each}
+          </tr>
+          <tr class="border-b border-border bg-muted/30">
+            <th class="px-2 py-1 sticky left-0 bg-muted/30 z-10"></th>
+            {#each summaryTable.metrics as m, i (i)}
+              {#each ['Last', 'Best', 'Min', 'Max'] as col, j (j)}
+                <th
+                  class="px-2 py-1 text-[10px] text-muted-foreground font-normal whitespace-nowrap {j === 0 ? 'border-l border-border' : ''}"
+                  title={col === 'Best' ? 'best_step 见 hover 提示' : undefined}
+                >{col}</th>
+              {/each}
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each summaryTable.rows as row, i (row.runId)}
+            <tr class="border-b border-border/50 hover:bg-accent/30 even:bg-muted/10">
+              <td class="px-2 py-1 font-medium sticky left-0 bg-card z-10 whitespace-nowrap">{explore?.labelOf(row.runId)}</td>
+              {#each row.cells as cell, ci (ci)}
+                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap {ci === 0 ? 'border-l border-border' : ''}">{formatStat(cell?.last)}</td>
+                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap" title={cell?.best_step != null ? `best @ step ${cell.best_step}` : undefined}>{formatStat(cell?.best)}</td>
+                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap">{formatStat(cell?.min)}</td>
+                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap">{formatStat(cell?.max)}</td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 {:else if widget.type === 'info'}
   <InfoCard {widget} {metrics} {running} {runState} {runInfo} {editing} {onLabelEdit} {onModelLabelEdit} />

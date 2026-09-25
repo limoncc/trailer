@@ -1,7 +1,6 @@
 // Chart index — re-export all G2/G6 chart components
 
 export { default as LineChart } from './LineChart.svelte';
-export { default as ExploreChart } from './ExploreChart.svelte';
 export { default as MultiRunChart } from './MultiRunChart.svelte';
 export { default as HeatmapChart } from './HeatmapChart.svelte';
 export { default as ScatterChart } from './ScatterChart.svelte';

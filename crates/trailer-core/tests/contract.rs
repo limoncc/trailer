@@ -1490,7 +1490,6 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
         title: "scaling law".into(),
         description: "log-log".into(),
         run_ids: "[\"r1\"]".into(),
-        chart_defs: "[{\"type\":\"line\"}]".into(),
         config: "{}".into(),
         created_at: 1000.0,
         updated_at: 1000.0,
@@ -1544,7 +1543,6 @@ async fn run_contract_tests(store: Arc<dyn Storage>) {
             "scaling v2",
             "desc2",
             "[\"r1\",\"r2\"]",
-            "[{\"type\":\"scatter\"}]",
             "{}",
         )
         .await
