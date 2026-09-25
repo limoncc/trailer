@@ -1775,8 +1775,6 @@ pub struct CreateExploreRequest {
     pub description: Option<String>,
     /// JSON array of run_id strings
     pub run_ids: String,
-    /// JSON array of ChartDef
-    pub chart_defs: String,
     pub config: Option<String>,
 }
 
@@ -1832,7 +1830,6 @@ pub async fn create_explore_handler(
         title: body.title,
         description: body.description.unwrap_or_default(),
         run_ids: body.run_ids,
-        chart_defs: body.chart_defs,
         config: body.config.unwrap_or_else(|| "{}".into()),
         created_at: now,
         updated_at: now,
@@ -1894,7 +1891,6 @@ pub async fn update_explore_handler(
             &body.title,
             &body.description.unwrap_or_default(),
             &body.run_ids,
-            &body.chart_defs,
             &body.config.unwrap_or_else(|| "{}".into()),
         )
         .await
@@ -3442,7 +3438,6 @@ mod tests {
             "title": "scaling law",
             "description": "log-log",
             "run_ids": "[\"r1\"]",
-            "chart_defs": "[{\"type\":\"line\",\"metric\":{\"key\":\"loss\",\"context\":\"\"}}]",
             "config": "{}",
         });
         let req = Request::builder()
@@ -3473,10 +3468,12 @@ mod tests {
         let list: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["title"], "scaling law");
+        // chart_defs 已删除:响应(整行序列化)不应再出现该字段
+        assert!(list[0].get("chart_defs").is_none(), "chart_defs must be gone from API");
 
         // Update
         let body = serde_json::json!({
-            "title": "scaling v2", "run_ids": "[\"r1\",\"r2\"]", "chart_defs": "[]", "config": "{}",
+            "title": "scaling v2", "run_ids": "[\"r1\",\"r2\"]", "config": "{}",
         });
         let req = Request::builder()
             .method("PUT")

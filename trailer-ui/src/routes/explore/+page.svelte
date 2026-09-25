@@ -3,13 +3,14 @@
   import { goto } from '$app/navigation';
   import { api } from '$lib/utils/api';
   import PaginationBar from '$lib/components/PaginationBar.svelte';
+import { parseLayout } from '$lib/utils/dashboard';
 
   interface ExploreItem {
     id: string;
     title: string;
     description: string;
     run_ids: string;
-    chart_defs: string;
+    config: string;
     updated_at: number;
   }
 
@@ -27,6 +28,17 @@
       return Array.isArray(v) ? v : [];
     } catch {
       return [];
+    }
+  }
+
+  /** 卡片数来自 config.layout(旧分析无 layout → 0) */
+  function widgetCount(config: string): number {
+    try {
+      const c = JSON.parse(config || '{}') as { layout?: unknown };
+      if (typeof c.layout !== 'string') return 0;
+      return parseLayout(c.layout).widgets.length;
+    } catch {
+      return 0;
     }
   }
 
@@ -104,7 +116,7 @@
             <div class="text-xs text-muted-foreground truncate">{e.description || '—'}</div>
           </div>
           <div class="px-3 py-2 flex items-center justify-between text-xs text-muted-foreground">
-            <span>{parseJson(e.run_ids).length} runs · {parseJson(e.chart_defs).length} charts</span>
+            <span>{parseJson(e.run_ids).length} runs · {widgetCount(e.config)} charts</span>
             <button type="button" onclick={() => remove(e.id)} class="text-destructive hover:underline">Delete</button>
           </div>
         </div>

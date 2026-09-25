@@ -110,7 +110,6 @@ pub trait Storage: Send + Sync {
         title: &str,
         description: &str,
         run_ids: &str,
-        chart_defs: &str,
         config: &str,
     ) -> StorageResult<()>;
     async fn delete_explore(&self, id: &str) -> StorageResult<()>;

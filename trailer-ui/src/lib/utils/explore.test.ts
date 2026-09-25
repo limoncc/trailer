@@ -4,17 +4,13 @@ import {
   collectConfigPaths,
   collectSummaryOptions,
   resolveRunScalar,
-  buildLineRows,
   buildScalarScatterRows,
   buildPairScatterRows,
   buildParallelData,
   scalarAxisName,
-  serializeDefs,
-  deserializeDefs,
-  healChartDefs,
   loadSeries,
 } from './explore';
-import type { RunRecord, SeriesData, BatchQuery, ChartDef } from './explore';
+import type { RunRecord, SeriesData, BatchQuery } from './explore';
 
 const runs: RunRecord[] = [
   {
@@ -100,7 +96,7 @@ describe('collectSummaryOptions', () => {
 
   // 原始 bug 回归:context 含斜杠(eval/train)时按最后一个 '/' 切分会解错,
   // 导致 Explore 选 eval 指标后 batch-query 查 0 行、不出图
-  it('decodes slash contexts and matches series end-to-end (regression)', () => {
+  it('decodes slash contexts and aligns with series groups (regression)', () => {
     const evalRuns: RunRecord[] = [
       {
         run_id: 'e1',
@@ -133,9 +129,10 @@ describe('collectSummaryOptions', () => {
     const opts = collectSummaryOptions(evalRuns);
     const sr = opts.find((o) => o.key === 'sr_d2');
     expect(sr).toEqual({ summaryKey: 'sr_d2/eval/train', key: 'sr_d2', context: 'eval/train' });
-    const { rows } = buildLineRows(evalRuns, [sr!], { kind: 'run' }, evalSeries);
-    expect(rows.length).toBe(2);
-    expect(rows[0]).toMatchObject({ step: 0, value: 0.1, run_id: 'e1', _series: 'e1 | eval/train/sr_d2' });
+    // 与 series 组精确对齐(key/context 同源解析,batch-query 才查得到行)
+    const group = evalSeries.get('e1')!.find((g) => g.key === sr!.key && g.context === sr!.context);
+    expect(group).toBeDefined();
+    expect(group!.points).toHaveLength(2);
   });
 });
 
@@ -207,36 +204,6 @@ describe('chart data builders', () => {
     ],
   ]);
 
-  it('buildLineRows expands points with color value injected', () => {
-    const { rows, colorField } = buildLineRows(runs, [{ key: 'loss', context: '' }], { kind: 'run' }, series);
-    expect(colorField).toBe('_series');
-    expect(rows.length).toBe(3);
-    expect(rows[0]).toMatchObject({ step: 0, value: 1.0, run_id: 'r1', _series: 'r1 | loss' });
-    expect(rows[2]).toMatchObject({ step: 0, value: 2.0, run_id: 'r2', _series: 'r2 | loss' });
-  });
-
-  it('buildLineRows skips runs missing the metric', () => {
-    const { rows } = buildLineRows(runs, [{ key: 'acc', context: '' }], { kind: 'run' }, series);
-    // 只有 r1 有 acc → 2 个点;r2 无 acc 被跳过
-    expect(rows.length).toBe(2);
-  });
-
-  it('buildLineRows supports multiple metrics', () => {
-    const { rows } = buildLineRows(
-      runs,
-      [
-        { key: 'loss', context: '' },
-        { key: 'acc', context: '' },
-      ],
-      { kind: 'run' },
-      series,
-    );
-    // loss: r1 2点 + r2 1点;acc: r1 2点(r2 无) → 5 行
-    expect(rows.length).toBe(5);
-    const seriesVals = [...new Set(rows.map((r) => r._series))].sort();
-    expect(seriesVals).toEqual(['r1 | acc', 'r1 | loss', 'r2 | loss']);
-  });
-
   it('buildScalarScatterRows gives one point per run (scaling law)', () => {
     const { rows, colorField } = buildScalarScatterRows(
       runs,
@@ -281,31 +248,6 @@ describe('chart data builders', () => {
     expect(scalarAxisName({ kind: 'config', path: 'model.depth' })).toBe('cfg.model.depth');
   });
 
-  it('serializeDefs/deserializeDefs roundtrip chart defs', () => {
-    const defs: ChartDef[] = [
-      { type: 'line', x: { kind: 'step' }, metrics: [{ key: 'loss', context: '' }], color: { kind: 'run' }, yLog: true },
-      { type: 'scatter', x: { kind: 'config', path: 'params' }, y: { kind: 'summary', summaryKey: 'loss/', field: 'last' }, color: { kind: 'project' } },
-    ];
-    const s = serializeDefs(defs);
-    expect(s.length).toBeGreaterThan(0);
-    const back = deserializeDefs(s);
-    expect(back).toEqual(defs);
-  });
-
-  it('deserializeDefs migrates legacy single metric to metrics', () => {
-    const legacy = [{ type: 'line', x: { kind: 'step' }, metric: { key: 'loss', context: '' }, color: { kind: 'run' } }];
-    const s = btoa(encodeURIComponent(JSON.stringify(legacy)));
-    const back = deserializeDefs(s);
-    expect(back?.[0]).toMatchObject({ type: 'line', metrics: [{ key: 'loss', context: '' }] });
-    expect((back?.[0] as any).metric).toBeUndefined();
-  });
-
-  it('deserializeDefs returns null on invalid input', () => {
-    expect(deserializeDefs('not-base64!!!')).toBeNull();
-    expect(deserializeDefs(btoa('not json'))).toBeNull();
-    expect(deserializeDefs(btoa('{}'))).toBeNull();
-  });
-
   it('loadSeries fetches missing metrics once and caches', async () => {
     const cache: SeriesData = new Map();
     const fetcher = vi.fn(async (queries: BatchQuery[]) =>
@@ -324,70 +266,3 @@ describe('chart data builders', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
-
-describe('healChartDefs', () => {
-  // 旧版 parseSummaryKey 按最后一个 '/' 切分,保存的 MetricRef key 会吞进 context 前缀。
-  // 合法 key 永不含 '/',凡 key 含 '/' 的按首斜杠重切修复
-  it('heals line/scatter-pair MetricRefs saved with the legacy wrong split', () => {
-    const defs: ChartDef[] = [
-      {
-        type: 'line',
-        x: { kind: 'step' },
-        metrics: [
-          { key: 'sr_d2/eval', context: 'train' },
-          { key: 'loss', context: '' },
-        ],
-        color: { kind: 'run' },
-      },
-      {
-        type: 'scatter-pair',
-        x: { kind: 'metric', metric: { key: 'sr/eval', context: 'test' } },
-        y: { kind: 'metric', metric: { key: 'loss', context: 'train' } },
-        color: { kind: 'run' },
-      },
-    ];
-    const healed = healChartDefs(defs);
-    expect((healed[0] as Extract<ChartDef, { type: 'line' }>).metrics).toEqual([
-      { key: 'sr_d2', context: 'eval/train' },
-      { key: 'loss', context: '' },
-    ]);
-    const pair = healed[1] as Extract<ChartDef, { type: 'scatter-pair' }>;
-    expect(pair.x.metric).toEqual({ key: 'sr', context: 'eval/test' });
-    expect(pair.y.metric).toEqual({ key: 'loss', context: 'train' });
-  });
-
-  it('leaves summary axes, colors and configs untouched', () => {
-    const defs: ChartDef[] = [
-      {
-        type: 'scatter',
-        x: { kind: 'summary', summaryKey: 'sr_d2/eval/train', field: 'last' },
-        y: { kind: 'config', path: 'params' },
-        color: { kind: 'summary', summaryKey: 'loss/train', field: 'best' },
-      },
-      { type: 'parallel', dims: [{ kind: 'summary', summaryKey: 'acc/', field: 'max' }] },
-    ];
-    expect(healChartDefs(defs)).toEqual(defs);
-  });
-
-  it('does not mutate the input defs', () => {
-    const defs: ChartDef[] = [
-      { type: 'line', x: { kind: 'step' }, metrics: [{ key: 'sr_d2/eval', context: 'train' }], color: { kind: 'run' } },
-    ];
-    healChartDefs(defs);
-    expect((defs[0] as Extract<ChartDef, { type: 'line' }>).metrics[0]).toEqual({
-      key: 'sr_d2/eval',
-      context: 'train',
-    });
-  });
-
-  it('deserializeDefs heals legacy defs from saved explores / share URLs', () => {
-    const legacy = [
-      { type: 'line', x: { kind: 'step' }, metrics: [{ key: 'sr_d2/eval', context: 'train' }], color: { kind: 'run' } },
-    ];
-    const back = deserializeDefs(btoa(encodeURIComponent(JSON.stringify(legacy))));
-    expect((back?.[0] as Extract<ChartDef, { type: 'line' }>).metrics).toEqual([
-      { key: 'sr_d2', context: 'eval/train' },
-    ]);
-  });
-});
-

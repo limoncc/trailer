@@ -43,6 +43,8 @@ export interface MetricSeries {
   key: string;
   context: string;
   points: Array<{ step: number; value: number; idx: number; wall_time?: number }>;
+  /** 来源 run(Explore 多 run 展平);Boards 单 run 不传 → 原逻辑不变 */
+  run_id?: string;
 }
 
 export interface BoardsData {

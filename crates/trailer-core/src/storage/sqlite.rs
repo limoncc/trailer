@@ -237,7 +237,6 @@ impl SqliteStorage {
                 title       TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 run_ids     TEXT NOT NULL,
-                chart_defs  TEXT NOT NULL,
                 config      TEXT NOT NULL DEFAULT '{}',
                 created_at  REAL NOT NULL,
                 updated_at  REAL NOT NULL
@@ -245,6 +244,12 @@ impl SqliteStorage {
         )
         .execute(&self.pool)
         .await?;
+        // 迁移:chart_defs 已并入 explores.config(layout JSON),旧库删列
+        // (新库该列不存在,报 Duplicate column/无该列容错忽略——同 ADD COLUMN 先例)。
+        // 必须执行:旧列 NOT NULL 而 INSERT 不再写它,不删则每次插入必失败。
+        let _ = sqlx::query("ALTER TABLE explores DROP COLUMN chart_defs")
+            .execute(&self.pool)
+            .await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS run_dashboards (
@@ -1156,11 +1161,11 @@ impl Storage for SqliteStorage {
     async fn insert_explore(&self, e: &ExploreRow) -> StorageResult<String> {
         let id = format!("explore_{:x}", rand::random::<u64>());
         sqlx::query(
-            "INSERT INTO explores (id, owner_id, project, title, description, run_ids, chart_defs, config, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO explores (id, owner_id, project, title, description, run_ids, config, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id).bind(e.owner_id).bind(&e.project).bind(&e.title).bind(&e.description)
-        .bind(&e.run_ids).bind(&e.chart_defs).bind(&e.config)
+        .bind(&e.run_ids).bind(&e.config)
         .bind(e.created_at).bind(e.updated_at)
         .execute(&self.pool).await?;
         Ok(id)
@@ -1172,7 +1177,6 @@ impl Storage for SqliteStorage {
         title: &str,
         description: &str,
         run_ids: &str,
-        chart_defs: &str,
         config: &str,
     ) -> StorageResult<()> {
         let now = std::time::SystemTime::now()
@@ -1180,9 +1184,9 @@ impl Storage for SqliteStorage {
             .unwrap()
             .as_secs_f64();
         sqlx::query(
-            "UPDATE explores SET title = ?, description = ?, run_ids = ?, chart_defs = ?, config = ?, updated_at = ? WHERE id = ?"
+            "UPDATE explores SET title = ?, description = ?, run_ids = ?, config = ?, updated_at = ? WHERE id = ?"
         )
-        .bind(title).bind(description).bind(run_ids).bind(chart_defs).bind(config).bind(now).bind(id)
+        .bind(title).bind(description).bind(run_ids).bind(config).bind(now).bind(id)
         .execute(&self.pool).await?;
         Ok(())
     }
@@ -1204,7 +1208,7 @@ impl Storage for SqliteStorage {
     ) -> StorageResult<Vec<ExploreRow>> {
         // owner_id = 0 表示不过滤(admin 看全部)
         let rows = sqlx::query(
-            "SELECT id, owner_id, project, title, description, run_ids, chart_defs, config, created_at, updated_at
+            "SELECT id, owner_id, project, title, description, run_ids, config, created_at, updated_at
              FROM explores
              WHERE (?1 = 0 OR owner_id = ?1)
                AND (?2 IS NULL OR project = ?2)
@@ -1221,7 +1225,6 @@ impl Storage for SqliteStorage {
                 title: r.get("title"),
                 description: r.get("description"),
                 run_ids: r.get("run_ids"),
-                chart_defs: r.get("chart_defs"),
                 config: r.get("config"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
@@ -1239,7 +1242,7 @@ impl Storage for SqliteStorage {
 
     async fn get_explore(&self, id: &str) -> StorageResult<Option<ExploreRow>> {
         let rows = sqlx::query(
-            "SELECT id, owner_id, project, title, description, run_ids, chart_defs, config, created_at, updated_at
+            "SELECT id, owner_id, project, title, description, run_ids, config, created_at, updated_at
              FROM explores WHERE id = ?"
         )
         .bind(id).fetch_all(&self.pool).await?;
@@ -1252,7 +1255,6 @@ impl Storage for SqliteStorage {
                 title: r.get("title"),
                 description: r.get("description"),
                 run_ids: r.get("run_ids"),
-                chart_defs: r.get("chart_defs"),
                 config: r.get("config"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
