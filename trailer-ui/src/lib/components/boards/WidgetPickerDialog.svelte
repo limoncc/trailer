@@ -6,7 +6,7 @@
   import { filterMetrics, groupMetricsByContext, metricId, type MetricOption } from '$lib/utils/metricGroups';
   import type { DashWidget, InfoItem, RunInfo } from '$lib/utils/dashboard';
   import { flattenConfigKeys } from '$lib/utils/infoCard';
-  import { WIDGET_TYPES, widgetTypeAvailability } from '$lib/utils/widgetTypes';
+  import { widgetTypesFor, widgetTypeAvailability } from '$lib/utils/widgetTypes';
   import type { BoardsData } from './boardsData';
 
   interface Props {
@@ -82,7 +82,8 @@
       media: boardsData.media.length,
     })
   );
-  const visibleTypes = $derived(WIDGET_TYPES.filter((t) => typeAvail[t.type] || t.type === initWidget?.type));
+  // hosts 过滤:Explore 专用类型(diff/summary/…)不出现在 Boards 弹窗
+  const visibleTypes = $derived(widgetTypesFor('boards').filter((t) => typeAvail[t.type] || t.type === initWidget?.type));
   const filteredConfigKeys = $derived(
     query.trim() ? configKeys.filter((k) => k.toLowerCase().includes(query.trim().toLowerCase())) : configKeys
   );

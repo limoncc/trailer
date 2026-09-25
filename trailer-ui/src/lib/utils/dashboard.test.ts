@@ -577,6 +577,157 @@ describe('layout compact (snap)', () => {
   });
 });
 
+describe('explore widget types', () => {
+  const base = { id: 'w', w: 12, h: 8 };
+
+  it('parses scatter with config/summary axes, colorBy and flags', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [{
+        ...base,
+        type: 'scatter',
+        x: { kind: 'config', path: 'params' },
+        y: { kind: 'summary', summaryKey: 'acc', field: 'best' },
+        colorBy: { kind: 'project' },
+        xLog: true,
+        regression: true,
+      }],
+    }));
+    expect(parsed.widgets).toHaveLength(1);
+    expect(parsed.widgets[0]).toMatchObject({
+      type: 'scatter',
+      x: { kind: 'config', path: 'params' },
+      y: { kind: 'summary', summaryKey: 'acc', field: 'best' },
+      colorBy: { kind: 'project' },
+      xLog: true,
+      regression: true,
+    });
+  });
+
+  it('drops scatter with an invalid axis or an unknown summary field', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { ...base, type: 'scatter', x: { kind: 'config', path: 'params' }, y: 'nope' },
+        { ...base, type: 'scatter', x: { kind: 'summary', summaryKey: 'acc', field: 'median' }, y: { kind: 'config', path: 'a' } },
+        { ...base, type: 'scatter', x: { kind: 'config', path: '' }, y: { kind: 'config', path: 'a' } },
+      ],
+    }));
+    expect(parsed.widgets).toHaveLength(0);
+  });
+
+  it('parses scatter-pair with healed metric refs and drops broken ones', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { ...base, type: 'scatter-pair', x: { key: 'loss', context: '' }, y: { key: 'acc', context: 'eval' } },
+        { ...base, type: 'scatter-pair', x: { key: 'loss' }, y: { key: 'acc', context: '' } },
+      ],
+    }));
+    expect(parsed.widgets).toHaveLength(1);
+    expect(parsed.widgets[0]).toMatchObject({
+      type: 'scatter-pair',
+      x: { key: 'loss', context: '' },
+      y: { key: 'acc', context: 'eval' },
+    });
+  });
+
+  it('parses parallel dims, dropping unresolvable dims and empty sets', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { ...base, type: 'parallel', dims: [{ kind: 'config', path: 'lr' }, 'junk', { kind: 'summary', summaryKey: 'acc', field: 'last' }] },
+        { ...base, type: 'parallel', dims: [] },
+        { ...base, type: 'parallel' },
+      ],
+    }));
+    expect(parsed.widgets).toHaveLength(1);
+    expect((parsed.widgets[0] as { dims: unknown[] }).dims).toEqual([
+      { kind: 'config', path: 'lr' },
+      { kind: 'summary', summaryKey: 'acc', field: 'last' },
+    ]);
+  });
+
+  it('parses diff (no config) and summary (optional metrics, empty list = default union)', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { ...base, id: 'd1', type: 'diff' },
+        { ...base, id: 's1', type: 'summary' },
+        { ...base, id: 's2', type: 'summary', metrics: [{ key: 'loss', context: 'train' }] },
+        { ...base, id: 's3', type: 'summary', metrics: [] },
+      ],
+    }));
+    expect(parsed.widgets).toHaveLength(4);
+    expect(parsed.widgets[0]).toMatchObject({ type: 'diff' });
+    expect((parsed.widgets[1] as { metrics?: unknown }).metrics).toBeUndefined();
+    expect((parsed.widgets[2] as { metrics: unknown }).metrics).toEqual([{ key: 'loss', context: 'train' }]);
+    expect((parsed.widgets[3] as { metrics?: unknown }).metrics).toBeUndefined();
+  });
+
+  it('line widgets accept xLog and colorBy', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [{ ...base, type: 'line', metrics: [{ key: 'loss', context: '' }], xLog: true, colorBy: { kind: 'config', path: 'lr' } }],
+    }));
+    expect(parsed.widgets[0]).toMatchObject({ type: 'line', xLog: true, colorBy: { kind: 'config', path: 'lr' } });
+  });
+
+  it('drops an invalid colorBy and keeps valid ones (unknown fields discarded)', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { ...base, type: 'diff', colorBy: { kind: 'bogus' } },
+        { ...base, type: 'diff', colorBy: 'blue', extra: 'ignored' },
+        { ...base, type: 'diff' },
+      ],
+    }));
+    expect((parsed.widgets[0] as { colorBy?: unknown }).colorBy).toBeUndefined();
+    expect((parsed.widgets[1] as { colorBy?: unknown; extra?: unknown }).colorBy).toBeUndefined();
+    expect((parsed.widgets[1] as { extra?: unknown }).extra).toBeUndefined();
+    expect(parsed.widgets[2]).toMatchObject({ type: 'diff' });
+  });
+
+  it('round-trips every explore widget type through serializeLayout', () => {
+    const layout: DashboardLayout = {
+      version: 3,
+      widgets: [
+        { ...base, id: 'a', type: 'line', metrics: [{ key: 'loss', context: '' }], xLog: true, colorBy: { kind: 'run' as const } },
+        { ...base, id: 'b', type: 'scatter', x: { kind: 'config' as const, path: 'lr' }, y: { kind: 'summary' as const, summaryKey: 'acc', field: 'last' as const }, colorBy: { kind: 'run' as const } },
+        { ...base, id: 'c', type: 'scatter-pair', x: { key: 'loss', context: '' }, y: { key: 'acc', context: '' } },
+        { ...base, id: 'd', type: 'parallel', dims: [{ kind: 'config' as const, path: 'lr' }] },
+        { ...base, id: 'e', type: 'diff' },
+        { ...base, id: 'f', type: 'summary', metrics: [{ key: 'loss', context: '' }] },
+      ],
+    };
+    const again = parseLayout(serializeLayout(layout));
+    expect(again.widgets).toHaveLength(6);
+    expect(again.widgets.map((w) => w.type)).toEqual(['line', 'scatter', 'scatter-pair', 'parallel', 'diff', 'summary']);
+    expect(again).toEqual(parseLayout(serializeLayout(again)));
+  });
+
+  it('defaultSize covers the five new types', () => {
+    expect(defaultSize('scatter')).toEqual({ w: 12, h: 8 });
+    expect(defaultSize('scatter-pair')).toEqual({ w: 12, h: 8 });
+    expect(defaultSize('parallel')).toEqual({ w: 12, h: 8 });
+    expect(defaultSize('diff')).toEqual({ w: 12, h: 6 });
+    expect(defaultSize('summary')).toEqual({ w: 18, h: 6 });
+  });
+
+  it('defaultWidgetTitle describes each explore type', () => {
+    expect(defaultWidgetTitle({
+      id: 'w', type: 'scatter', x: { kind: 'config', path: 'lr' },
+      y: { kind: 'summary', summaryKey: 'acc', field: 'last' }, w: 12, h: 8,
+    })).toBe('cfg.lr → acc.last');
+    expect(defaultWidgetTitle({
+      id: 'w', type: 'scatter-pair', x: { key: 'loss', context: '' }, y: { key: 'acc', context: 'eval' }, w: 12, h: 8,
+    }, (m) => (m.context ? `${m.context}/${m.key}` : m.key))).toBe('loss vs eval/acc');
+    expect(defaultWidgetTitle({ id: 'w', type: 'parallel', dims: [{ kind: 'config', path: 'a' }, { kind: 'config', path: 'b' }], w: 12, h: 8 })).toBe('2 dims');
+    expect(defaultWidgetTitle({ id: 'w', type: 'diff', w: 12, h: 6 })).toBe('Config Diff');
+    expect(defaultWidgetTitle({ id: 'w', type: 'summary', w: 18, h: 6 })).toBe('Summary');
+  });
+});
+
 describe('computeSnapSeams', () => {
   const line = (id: string, w: number, h: number, snap?: SnapDir[]) =>
     ({ id, type: 'line' as const, metrics: [{ key: id, context: '' }], w, h, snap });
