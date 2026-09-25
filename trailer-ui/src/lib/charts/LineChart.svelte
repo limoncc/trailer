@@ -225,17 +225,20 @@
           // 且 name 被推到两端中间留大空。改法:总宽收紧到 340px,item 用 grid
           // (name 占 1fr 换行完整显示,数值紧贴其右上角对齐)。
           css: {
-            // 紧凑不透底的卡片(G2 默认背景半透明,曲线会透出来显脏)
+            // 紧凑不透底的卡片(G2 默认背景半透明,曲线会透出来显脏);
+            // 背景/边框/文字全部走主题变量 —— 暗夜模式下不能是硬编码白底黑字
             '.g2-tooltip': {
               'max-width': '340px',
-              background: '#ffffff',
+              // 走主题变量:暗夜/cyber 等主题下不能是硬编码白底
+              background: 'var(--card)',
+              color: 'var(--card-foreground)',
               opacity: '1',
-              border: '1px solid rgba(148,163,184,0.45)',
+              border: '1px solid var(--border)',
               'border-radius': '8px',
               'box-shadow': '0 8px 20px rgba(15,23,42,0.16)',
               padding: '8px 10px',
             },
-            '.g2-tooltip-title': { 'font-weight': '600', color: '#0f172a', 'padding-bottom': '4px' },
+            '.g2-tooltip-title': { 'font-weight': '600', 'padding-bottom': '4px' },
             '.g2-tooltip-list': { 'row-gap': '5px' },
             '.g2-tooltip-list-item': {
               display: 'grid',
@@ -403,7 +406,8 @@
     const c = chart;
     Promise.resolve(c.render())
       .then(() => { if (chart === c) startPulse(); })
-      .catch(() => {});
+      // 不要静默吞:渲染失败时保留错误现场(后台 tab 的动画冻结不算失败,可见后会恢复)
+      .catch((e) => console.error('[trailer] line chart render failed', e));
   }
 
   /// 本地交互(框选/点选/按钮)引发的重渲染:绕过 hoverPause——这是用户主动操作,
