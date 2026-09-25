@@ -255,7 +255,8 @@ describe('WidgetContent line — explore (multi run)', () => {
     expect(btn.textContent ?? '').toContain('2'); // 系列数
     // 定位在**内容容器**内(容器 relative),top-6 让开 y 轴刻度,不压标题栏
     expect(btn.className).toContain('top-6');
-    expect(btn.className).toContain('left-1');
+    // 右移让开 y 轴刻度列(不压 1.8/1.7 标签,也少遮图)
+    expect(btn.className).toContain('left-8');
     const content = btn.closest('[data-series-anchor]') as HTMLElement;
     expect(content).toBeTruthy();
     expect(content.className).toContain('relative');
@@ -266,6 +267,10 @@ describe('WidgetContent line — explore (multi run)', () => {
     expect(panel.className).toContain('fixed');
     expect(panel.style.left).toBeTruthy();
     expect(panel.style.top).toBeTruthy();
+    // 半透明 + 背景模糊:展开时不把下方曲线完全挡死
+    const panelCard = panel.querySelector('div') as HTMLElement;
+    expect(panelCard.className).toContain('bg-card/90');
+    expect(panelCard.className).toContain('backdrop-blur');
     unmount(component);
     target.remove();
   });

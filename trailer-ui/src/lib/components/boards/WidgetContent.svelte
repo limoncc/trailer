@@ -463,10 +463,10 @@
     <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
     <!-- 系列按钮:不占图高;hover 展开层级表格浮层,点行筛选显隐(会话态) -->
     {#if seriesLegend.length > 0}
-      <!-- top-6 让开 y 轴顶部刻度;相对内容区定位(见 data-series-anchor),不压标题栏 -->
-      <!-- mouseleave 在 wrapper(含浮层子树,移入浮层不关闭);enter/click 在 button -->
+      <!-- top-6 让开标题栏与首行刻度;left-8 让开 y 轴刻度列、少遮曲线;
+           相对内容区定位(见 data-series-anchor);mouseleave 在 wrapper(移入浮层不关闭) -->
       <div
-        class="absolute top-6 left-1 z-30"
+        class="absolute top-6 left-8 z-30"
         data-series-toggle
         bind:this={seriesAnchor}
         role="group"
@@ -485,7 +485,7 @@
         {#if seriesPanel}
         <div class="fixed z-50 pt-1" style="left: {seriesPanelPos.x}px; top: {seriesPanelPos.y}px" data-series-panel>
           <div
-            class="w-[min(480px,84vw)] max-h-[55vh] overflow-auto bg-card border border-border rounded-md shadow-lg text-[11px]"
+            class="w-[min(480px,84vw)] max-h-[55vh] overflow-auto bg-card/90 backdrop-blur-[3px] border border-border/60 rounded-md shadow-lg text-[11px]"
           >
             <div data-series-table data-has-head="true">
               <div
