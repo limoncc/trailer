@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeConfigDiff, buildSummaryRows, formatStat, assignStableColors, colorValueOf, PALETTE } from './exploreWidgets';
+import { computeConfigDiff, buildSummaryRows, formatStat, assignStableColors, colorValueOf, lineSeriesKey, lineSeriesKeys, runScopeKeys, colorKeysOf, PALETTE } from './exploreWidgets';
 import type { RunRecord } from './explore';
 
 function run(partial: Partial<RunRecord> & { run_id: string }): RunRecord {
@@ -182,5 +182,55 @@ describe('stable colours end-to-end (run + value channels)', () => {
     map = assignStableColors(map, ['r1']); // 卸选 r2(色不回收)
     map = assignStableColors(map, ['r1', 'r2']);
     expect(map.get('r2')).toBe(PALETTE[1]);
+  });
+});
+
+describe('lineSeriesKey / colorKeysOf', () => {
+  const rs = [run({ run_id: 'r1', config: { lr: 0.1 } }), run({ run_id: 'r2', config: { lr: 0.2 } })];
+
+  it('keys one colour per (run, metric) so multi-metric cards never collapse to one colour', () => {
+    // 键与显示名同构:<run>|<context>/<key>
+    expect(lineSeriesKey('r1', { key: 'loss', context: 'train' })).toBe('r1|train/loss');
+    expect(lineSeriesKey('r1', { key: 'loss', context: '' })).toBe('r1|loss');
+    expect(lineSeriesKey('r1', { key: 'loss', context: 'eval' })).not.toBe(
+      lineSeriesKey('r1', { key: 'loss', context: 'train' })
+    );
+  });
+
+  it('collects line card keys for every visible run × metric', () => {
+    const widgets = [
+      { id: 'w', type: 'line' as const, metrics: [{ key: 'loss', context: 'train' }, { key: 'acc', context: '' }], w: 12, h: 4 },
+    ];
+    expect(colorKeysOf(rs, widgets)).toEqual(['r1|train/loss', 'r1|acc', 'r2|train/loss', 'r2|acc']);
+  });
+
+  it('with a series cache, only keys that actually have data take palette slots', () => {
+    const widgets = [
+      { id: 'a', type: 'line' as const, metrics: [{ key: 'loss', context: 'train' }, { key: 'acc', context: 'train' }], w: 12, h: 4 },
+    ];
+    // 只有 r1 有 loss、r2 有 acc → 两个键各得一槽,不会因为空组合挤掉 8 个槽位
+    const cache = new Map([
+      ['r1', [{ run_id: 'r1', key: 'loss', context: 'train', points: [] }]],
+      ['r2', [{ run_id: 'r2', key: 'acc', context: 'train', points: [] }]],
+    ]);
+    expect(lineSeriesKeys(rs, widgets, cache)).toEqual(['r1|train/loss', 'r2|train/acc']);
+  });
+
+  it('splits keys into two channels: series (line) keys and run-scope keys', () => {
+    const widgets = [
+      { id: 'a', type: 'line' as const, metrics: [{ key: 'loss', context: 'train' }], w: 12, h: 4 },
+      { id: 'b', type: 'scatter' as const, x: { kind: 'config' as const, path: 'lr' }, y: { kind: 'config' as const, path: 'lr' }, w: 12, h: 8 },
+      { id: 'c', type: 'parallel' as const, dims: [{ kind: 'config' as const, path: 'lr' }], colorBy: { kind: 'config' as const, path: 'lr' }, w: 12, h: 8 },
+    ];
+    // 两个通道各自独立从色板槽 0 开始分配 —— 混在一张表里,line 卡首条线会拿到中间槽而"不按顺序"
+    expect(lineSeriesKeys(rs, widgets)).toEqual(['r1|train/loss', 'r2|train/loss']);
+    expect(runScopeKeys(rs, widgets)).toEqual(['r1', 'r2', '0.1', '0.2']);
+  });
+
+  it('keeps non-run colourBy keyed by its resolved value (shared colour is intentional there)', () => {
+    const widgets = [
+      { id: 'w', type: 'scatter' as const, x: { kind: 'config' as const, path: 'lr' }, y: { kind: 'config' as const, path: 'lr' }, colorBy: { kind: 'config' as const, path: 'lr' }, w: 12, h: 8 },
+    ];
+    expect(colorKeysOf(rs, widgets)).toEqual(['0.1', '0.2']);
   });
 });

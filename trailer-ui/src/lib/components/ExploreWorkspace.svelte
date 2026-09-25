@@ -11,7 +11,7 @@
   import { loadSeries, parseSummaryKey, refreshSeriesIncremental } from '$lib/utils/explore';
   import type { DashWidget } from '$lib/utils/dashboard';
   import { defaultSize, newWidgetId, serializeLayout } from '$lib/utils/dashboard';
-  import { assignStableColors, colorValueOf } from '$lib/utils/exploreWidgets';
+  import { assignStableColors, lineSeriesKeys, runScopeKeys } from '$lib/utils/exploreWidgets';
 
   interface Props {
     initialRunIds?: string[];
@@ -42,8 +42,13 @@
   // svelte-ignore state_referenced_locally
   let widgets: DashWidget[] = $state(initialWidgets);
   let runStates = $state<Map<string, string>>(new Map());
-  /** 稳定配色表:只增不减(显隐/排序不换色),在事件回调里累积 */
-  let colors = $state<Map<string, string>>(new Map());
+  /** 稳定配色表分两条通道累积,只增不减(显隐/排序不换色),在事件回调里维护:
+   *  seriesColors = line 卡的 (run, 指标) 组合键;runColors = run 级卡的 run_id/维度值。
+   *  分表的原因:混一张表时 run_id 先占走前 N 槽,line 卡首条线会拿到中间槽 → 颜色不按色板顺序。 */
+  let seriesColors = $state<Map<string, string>>(new Map());
+  let runColors = $state<Map<string, string>>(new Map());
+  /** 键空间天然分离(系列键含 '|'),合并即查询视图 */
+  const colors = $derived(new Map([...runColors, ...seriesColors]));
   let loading = $state(true);
   // svelte-ignore state_referenced_locally
   let title = $state(initialTitle);
@@ -96,18 +101,11 @@
     );
   }
 
-  /** 把当前需要的色值补进配色表(事件回调中调用,只增不减) */
+  /** 把当前需要的色值补进配色表(事件回调中调用,只增不减):
+   *  run 级键 + line 卡的 (run, 指标) 组合键 + 各卡非 run colorBy 的解析值 */
   function syncColors() {
-    const keys: string[] = [...selectedRuns];
-    for (const w of widgets) {
-      const cb =
-        w.type === 'line' || w.type === 'scatter' || w.type === 'scatter-pair' || w.type === 'parallel'
-          ? w.colorBy
-          : undefined;
-      if (!cb || cb.kind === 'run') continue;
-      for (const r of runs) keys.push(colorValueOf(r, cb));
-    }
-    colors = assignStableColors(colors, keys);
+    runColors = assignStableColors(runColors, [...selectedRuns, ...runScopeKeys(selectedRecords, widgets)]);
+    seriesColors = assignStableColors(seriesColors, lineSeriesKeys(selectedRecords, widgets, series));
   }
 
   async function refreshSeries() {

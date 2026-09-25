@@ -34,7 +34,8 @@ function makeCtx(overrides: Partial<ExploreCtx> = {}): ExploreCtx {
     runs,
     labelOf: (id) => (id === 'r1' ? 'alpha' : id === 'r2' ? 'beta' : id.slice(0, 12)),
     colorValueOf: (r) => r.run_id,
-    colorOfValue: (cv) => (cv === 'r1' ? PALETTE[0] : cv === 'r2' ? PALETTE[1] : PALETTE[2]),
+    // 键是 "<run>|<context>/<key>" 组合键;按 run 前缀给稳定色,其余落到第三色
+    colorOfValue: (k) => (k.startsWith('r1') ? PALETTE[0] : k.startsWith('r2') ? PALETTE[1] : PALETTE[2]),
     isRunning: () => false,
     series: new Map(),
     ...overrides,
@@ -109,6 +110,14 @@ describe('WidgetContent line — Boards path (no explore ctx)', () => {
     target.remove();
   });
 
+  it('keeps the default 1.5px lineWidth for Boards callers', async () => {
+    const { target, component } = await mountContent(lineWidget());
+    const spec = await lastSpec();
+    expect((spec!.style as { lineWidth?: number }).lineWidth).toBe(1.5);
+    unmount(component);
+    target.remove();
+  });
+
   it('keeps the legend off for Boards callers', async () => {
     const { target, component } = await mountContent(lineWidget());
     const spec = await lastSpec();
@@ -130,7 +139,8 @@ describe('WidgetContent line — no legend under explore ctx', () => {
     expect(spec!.legend).toBeFalsy();
     // 系列名仍是 "<run> | <metric>",tooltip 用它区分是哪条线
     const rows = spec!.data as Array<{ series: string }>;
-    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha | loss', 'beta | loss']);
+    // 系列名结构:<run>/<context>/<key>(context 为空时 <run>/<key>)
+    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha/loss', 'beta/loss']);
     unmount(component);
     target.remove();
   });
@@ -139,16 +149,57 @@ describe('WidgetContent line — no legend under explore ctx', () => {
 describe('WidgetContent line — explore (multi run)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('names one series per run and colours each run from the stable map', async () => {
+  it('names one series per run as <run>/<key> and colours by (run, metric) key', async () => {
+    const asked: string[] = [];
+    const { target, component } = await mountContent(lineWidget(), {
+      metrics: [...metricSeries('r1'), ...metricSeries('r2')],
+      explore: makeCtx({
+        colorOfValue: (k) => {
+          asked.push(k);
+          return k.startsWith('r1') ? PALETTE[0] : PALETTE[1];
+        },
+      }),
+    });
+    const spec = await lastSpec();
+    const rows = spec!.data as Array<{ series: string }>;
+    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha/loss', 'beta/loss']);
+    // 配色键是组合键:同 run 的不同指标不会挤到同一种颜色
+    expect([...new Set(asked)].sort()).toEqual(['r1|loss', 'r2|loss']);
+    const range = (spec!.scale as unknown as { color: { range: string[] } }).color.range;
+    expect(range.slice(0, 2)).toEqual([PALETTE[0], PALETTE[1]]);
+    unmount(component);
+    target.remove();
+  });
+
+  it('gives two metrics of the SAME run two colours (previously both took the run colour)', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: 'train' },
+      { key: 'acc', context: 'train' },
+    ] }), {
+      metrics: [
+        { key: 'loss', context: 'train', points: metricSeries()[0].points, run_id: 'r1' },
+        { key: 'acc', context: 'train', points: metricSeries()[0].points, run_id: 'r1' },
+      ],
+      // 色键含指标段:同 run 两条线拿到不同的键 → 不同色;若键退化成 run_id 就会同色而失败
+      explore: makeCtx({ colorOfValue: (k) => (k.includes('loss') ? PALETTE[0] : PALETTE[1]) }),
+    });
+    const spec = await lastSpec();
+    const rows = spec!.data as Array<{ series: string }>;
+    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha/train/acc', 'alpha/train/loss']);
+    // range 按 G2 domain(系列名字母序)对齐:acc 在前
+    const range = (spec!.scale as unknown as { color: { range: string[] } }).color.range;
+    expect(range).toEqual([PALETTE[1], PALETTE[0]]);
+    unmount(component);
+    target.remove();
+  });
+
+  it('draws explore lines thicker (2px) for overlap readability', async () => {
     const { target, component } = await mountContent(lineWidget(), {
       metrics: [...metricSeries('r1'), ...metricSeries('r2')],
       explore: makeCtx(),
     });
     const spec = await lastSpec();
-    const rows = spec!.data as Array<{ series: string }>;
-    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha | loss', 'beta | loss']);
-    const range = (spec!.scale as unknown as { color: { range: string[] } }).color.range;
-    expect(range.slice(0, 2)).toEqual([PALETTE[0], PALETTE[1]]);
+    expect((spec!.style as { lineWidth?: number }).lineWidth).toBe(2);
     unmount(component);
     target.remove();
   });
@@ -173,10 +224,10 @@ describe('WidgetContent line — explore (multi run)', () => {
     const spec = await lastSpec();
     const rows = spec!.data as Array<{ series: string }>;
     expect([...new Set(rows.map((r) => r.series))].sort()).toEqual([
-      'alpha | loss__raw',
-      'alpha | loss__smooth',
-      'beta | loss__raw',
-      'beta | loss__smooth',
+      'alpha/loss__raw',
+      'alpha/loss__smooth',
+      'beta/loss__raw',
+      'beta/loss__smooth',
     ]);
     const range = (spec!.scale as unknown as { color: { range: string[] } }).color.range;
     expect(range).toEqual([`${PALETTE[0]}40`, PALETTE[0], `${PALETTE[1]}40`, PALETTE[1]]);

@@ -206,6 +206,9 @@
       // crosshair 需配在 interaction.tooltip 而非 tooltip：crosshairsY(竖线)默认开，crosshairsX(水平线)需显式开启
       interaction: {
         tooltip: {
+          // shared:一次列出该 step 上全部系列的 <run>/<context>/<key> 与数值 ——
+          // 否则 hover 只显示最近的一条,多 run 对比时根本认不出是哪个 run
+          shared: true,
           crosshairsX: true,
           crosshairsY: true,
           crosshairsXStroke: '#94a3b8',
