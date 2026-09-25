@@ -3,11 +3,12 @@
   // 持有 title / 选中与隐藏 run / widgets / series 缓存 / run 状态 / 稳定配色,
   // 负责加载、保存与回调驱动的刷新;渲染全部交给 ExploreBoard(DashboardGrid 复用)。
   import { onMount } from 'svelte';
+  import { refreshInterval } from '$lib/refresh.svelte';
   import RunPicker from '$lib/components/RunPicker.svelte';
   import ExploreBoard from '$lib/components/ExploreBoard.svelte';
   import { api } from '$lib/utils/api';
   import type { MetricRef, RunRecord, SeriesData } from '$lib/utils/explore';
-  import { loadSeries, parseSummaryKey } from '$lib/utils/explore';
+  import { loadSeries, parseSummaryKey, refreshSeriesIncremental } from '$lib/utils/explore';
   import type { DashWidget } from '$lib/utils/dashboard';
   import { defaultSize, newWidgetId, serializeLayout } from '$lib/utils/dashboard';
   import { assignStableColors, colorValueOf } from '$lib/utils/exploreWidgets';
@@ -46,12 +47,25 @@
   let loading = $state(true);
   // svelte-ignore state_referenced_locally
   let title = $state(initialTitle);
+  /** Runs 显隐下拉(会话态,不入库) */
+  let runMenuOpen = $state(false);
+  let runFilter = $state('');
   let saving = $state(false);
   let saveMsg = $state<{ text: string; ok: boolean } | null>(null);
   let msgTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /** 选中 run(保持选中顺序,含被隐藏的 —— 下拉列表用) */
+  const selectedRecords = $derived(runs.filter((r) => selectedRuns.has(r.run_id)));
   /** 可见 run = 选中(保持选中顺序)且未被隐藏 */
-  const visibleRuns = $derived(runs.filter((r) => selectedRuns.has(r.run_id) && !hiddenRuns.has(r.run_id)));
+  const visibleRuns = $derived(selectedRecords.filter((r) => !hiddenRuns.has(r.run_id)));
+  /** 下拉里按名称过滤 */
+  const menuRuns = $derived(
+    runFilter.trim()
+      ? selectedRecords.filter((r) =>
+          `${r.name ?? ''} ${r.run_id}`.toLowerCase().includes(runFilter.trim().toLowerCase())
+        )
+      : selectedRecords
+  );
 
   /** 卡片需要的指标:line 的 metrics + scatter-pair 的 x/y */
   function collectNeededMetrics(ws: DashWidget[]): MetricRef[] {
@@ -125,17 +139,58 @@
 
   onMount(load);
 
+  // ─── 实时刷新:唯一的 $effect = 轮询定时器 ───
+  // 同步体只读 $refreshInterval(需随它重建定时器,这是用 effect 而非 onMount 的理由);
+  // poll() 内对 selectedRuns/hiddenRuns/widgets/runStates 的读写都在 interval 回调里
+  // ——回调不被追踪,不构成「effect 内更新状态」与依赖循环(同 run 页/compare 先例)。
+  $effect(() => {
+    const iv = $refreshInterval;
+    if (iv <= 0) return;
+    const t = setInterval(poll, iv * 1000);
+    return () => clearInterval(t);
+  });
+
+  async function poll() {
+    const ids = [...selectedRuns];
+    if (ids.length === 0) return;
+    // ① 轻量刷 run 状态(不轮询 /runs:payload 含全量 config 太重)
+    try {
+      const resp = await api(`/api/v1/runs/states?run_ids=${encodeURIComponent(ids.join(','))}`);
+      if (resp.ok) runStates = new Map(Object.entries(await resp.json()) as Array<[string, string]>);
+    } catch {
+      /* 单次失败保持旧状态,下轮再试 */
+    }
+    // ② 可见且运行中的 run 才增量补点(打开时/编辑指标的全量加载另有回调驱动)
+    const live = visibleRuns.filter((r) => runStates.get(r.run_id) === 'running');
+    if (live.length === 0) return;
+    await refreshSeriesIncremental(series, live, collectNeededMetrics(widgets), 500);
+    series = new Map(series);
+  }
+
   function toggleSelect(runId: string, checked: boolean) {
     const next = new Set(selectedRuns);
-    if (checked) next.add(runId);
-    else next.delete(runId);
+    if (checked) {
+      next.add(runId);
+    } else {
+      next.delete(runId);
+      series.delete(runId); // 卸选清缓存,避免重选时拿到陈旧点集
+    }
     selectedRuns = next;
     refreshSeries();
   }
 
   function clearSelection() {
     selectedRuns = new Set();
+    series = new Map();
     refreshSeries();
+  }
+
+  /** Runs 显隐下拉:会话态剔除 run(全卡同步),不入库 —— 隐藏后其余系列配色不变 */
+  function toggleHidden(runId: string) {
+    const next = new Set(hiddenRuns);
+    if (next.has(runId)) next.delete(runId);
+    else next.add(runId);
+    hiddenRuns = next;
   }
 
   function addWidget() {
@@ -209,6 +264,43 @@
       <span class="text-xs text-muted-foreground hidden sm:inline shrink-0">
         {selectedRuns.size} runs selected
       </span>
+    {/if}
+    <!-- Runs 显隐:全卡剔除 run(readOnly 也可用,会话态不入库) -->
+    {#if selectedRecords.length > 0}
+      <div class="relative" onfocusout={() => setTimeout(() => (runMenuOpen = false), 200)}>
+        <button
+          type="button"
+          class="px-2.5 py-1.5 text-xs border border-border rounded-md hover:bg-accent/50 transition-colors"
+          onclick={(e) => { e.stopPropagation(); runMenuOpen = !runMenuOpen; }}
+        >
+          Runs {visibleRuns.length}/{selectedRecords.length}
+        </button>
+        {#if runMenuOpen}
+          <div class="fixed inset-0 z-10" role="presentation" onclick={() => (runMenuOpen = false)} onkeydown={(e) => { if (e.key === 'Escape') runMenuOpen = false; }}></div>
+          <div class="absolute top-full left-0 mt-1 w-60 bg-card border border-border rounded-md shadow-lg z-20 py-1 max-h-72 flex flex-col">
+            <div class="px-2 py-1.5 border-b border-border">
+              <input
+                type="text"
+                placeholder="Filter runs..."
+                bind:value={runFilter}
+                class="w-full px-2 py-1 text-xs border border-border rounded bg-background"
+                onclick={(e) => e.stopPropagation()}
+              />
+            </div>
+            <div class="overflow-y-auto flex-1">
+              {#each menuRuns as r (r.run_id)}
+                <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent cursor-pointer">
+                  <input type="checkbox" checked={!hiddenRuns.has(r.run_id)} onchange={() => toggleHidden(r.run_id)} />
+                  <span class="font-mono truncate">{r.name || r.run_id.slice(0, 12)}</span>
+                </label>
+              {/each}
+            </div>
+            <div class="border-t border-border px-3 py-1.5 flex gap-2 text-[10px]">
+              <button type="button" class="underline text-muted-foreground" onclick={() => (hiddenRuns = new Set())}>Show all</button>
+            </div>
+          </div>
+        {/if}
+      </div>
     {/if}
     <div class="ml-auto flex items-center gap-1.5 shrink-0">
       {#if onShare && savedId && !readOnly}

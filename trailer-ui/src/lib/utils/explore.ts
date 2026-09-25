@@ -250,6 +250,8 @@ export interface BatchQuery {
   key: string;
   context: string;
   max_points: number;
+  /** 只取 step 之后的点(增量);后端对 system/% 指标忽略此参数全量回,合并侧需去重 */
+  after_step?: number;
 }
 
 export type BatchFetcher = (queries: BatchQuery[]) => Promise<MetricGroup[]>;
@@ -287,6 +289,49 @@ export async function loadSeries(
     const arr = cache.get(g.run_id) ?? [];
     arr.push(g);
     cache.set(g.run_id, arr);
+  }
+  return cache;
+}
+
+/**
+ * 增量刷新:只对**已在缓存里**的 (run, metric) 查 after_step 之后的新点
+ * (缺失的组仍归 loadSeries 全量拉取),按 step 去重后原地合并进 cache。
+ * system/% 指标后端忽略 after_step 全量回 → 去重是必须的。
+ * 返回同一 cache 实例;调用方 `series = new Map(series)` 触发响应式更新。
+ */
+export async function refreshSeriesIncremental(
+  cache: SeriesData,
+  runs: RunRecord[],
+  metrics: MetricRef[],
+  maxPoints = 1000,
+  fetcher: BatchFetcher = defaultFetcher,
+): Promise<SeriesData> {
+  const queries: BatchQuery[] = [];
+  for (const r of runs) {
+    const groups = cache.get(r.run_id);
+    if (!groups) continue;
+    for (const m of metrics) {
+      const g = groups.find((x) => x.key === m.key && x.context === m.context);
+      if (!g) continue;
+      const after = g.points.reduce((mx, p) => Math.max(mx, p.step), -1);
+      queries.push({ run_id: r.run_id, key: m.key, context: m.context, max_points: maxPoints, after_step: after });
+    }
+  }
+  if (queries.length === 0) return cache;
+  const results = await fetcher(queries);
+  for (const inc of results) {
+    const groups = cache.get(inc.run_id);
+    if (!groups) continue;
+    const idx = groups.findIndex((g) => g.key === inc.key && g.context === inc.context);
+    if (idx < 0) continue; // 未缓存的组不该由增量刷新创建(全量路径负责)
+    const existing = groups[idx];
+    const seen = new Set(existing.points.map((p) => p.step));
+    const fresh = inc.points.filter((p) => !seen.has(p.step));
+    if (fresh.length === 0) continue;
+    // 按 step 归并排序,保证连线连续与后续 after_step 取值正确
+    const merged = [...existing.points, ...fresh].sort((a, b) => a.step - b.step);
+    groups[idx] = { ...existing, points: merged };
+    cache.set(inc.run_id, groups);
   }
   return cache;
 }

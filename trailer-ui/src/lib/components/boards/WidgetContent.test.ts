@@ -108,6 +108,29 @@ describe('WidgetContent line — Boards path (no explore ctx)', () => {
     unmount(component);
     target.remove();
   });
+
+  it('keeps the legend off for Boards callers', async () => {
+    const { target, component } = await mountContent(lineWidget());
+    const spec = await lastSpec();
+    expect(spec!.legend).toBe(false);
+    unmount(component);
+    target.remove();
+  });
+});
+
+describe('WidgetContent line — explore legend', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('turns the legend on under explore ctx', async () => {
+    const { target, component } = await mountContent(lineWidget(), {
+      metrics: [...metricSeries('r1'), ...metricSeries('r2')],
+      explore: makeCtx(),
+    });
+    const spec = await lastSpec();
+    expect(spec!.legend).toMatchObject({ position: 'top' });
+    unmount(component);
+    target.remove();
+  });
 });
 
 describe('WidgetContent line — explore (multi run)', () => {
