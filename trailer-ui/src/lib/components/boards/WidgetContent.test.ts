@@ -51,6 +51,16 @@ function metricSeries(runId?: string): MetricSeries[] {
   return [{ key: 'loss', context: '', points, ...(runId ? { run_id: runId } : {}) }];
 }
 
+/** hover 系列按钮展开浮层(实现是 JS hover + fixed 定位) */
+async function openSeriesPanel(target: HTMLElement) {
+  const btn = target.querySelector('[data-series-toggle] button') as HTMLElement | null;
+  if (btn) {
+    btn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+    await tick();
+    await tick();
+  }
+}
+
 async function mountContent(
   widget: DashWidget,
   opts: { metrics?: MetricSeries[]; explore?: ExploreCtx; onSmoothChange?: (v: number) => void } = {}
@@ -214,6 +224,7 @@ describe('WidgetContent line — explore (multi run)', () => {
       ],
       explore: makeCtx(),
     });
+    await openSeriesPanel(target);
     // 层级树:层1 = run 分组标题,层2 = 缩进的 context/指标 行
     const groups = [...target.querySelectorAll('[data-series-group]')];
     const gtexts = groups.map((g) => (g.textContent ?? '').replace(/\s+/g, ' ').trim());
@@ -239,14 +250,22 @@ describe('WidgetContent line — explore (multi run)', () => {
     // 表头
     const table = target.querySelector('[data-series-table]') as HTMLElement;
     expect(table.getAttribute('data-has-head')).toBe('true');
-    // 不常驻:按钮触发 + hover 展开的浮层(纯 CSS 命名 group)
-    const wrap = table.closest('[data-series-panel]') as HTMLElement;
-    expect(wrap).toBeTruthy();
-    expect(wrap.className).toContain('hidden');
-    expect(wrap.className).toContain('group-hover/series');
     const btn = target.querySelector('[data-series-toggle]') as HTMLElement;
     expect(btn).toBeTruthy();
     expect(btn.textContent ?? '').toContain('2'); // 系列数
+    // 定位在**内容容器**内(容器 relative),top-6 让开 y 轴刻度,不压标题栏
+    expect(btn.className).toContain('top-6');
+    expect(btn.className).toContain('left-1');
+    const content = btn.closest('[data-series-anchor]') as HTMLElement;
+    expect(content).toBeTruthy();
+    expect(content.className).toContain('relative');
+    // fixed 定位:不被卡片 overflow-hidden 裁剪("点开看不到东西"的根因)。
+    // jsdom 不加载 Tailwind 层叠表 → 断言 class + 内联坐标,而非 computed style
+    const panel = target.querySelector('[data-series-panel]') as HTMLElement;
+    expect(panel).toBeTruthy();
+    expect(panel.className).toContain('fixed');
+    expect(panel.style.left).toBeTruthy();
+    expect(panel.style.top).toBeTruthy();
     unmount(component);
     target.remove();
   });
@@ -262,6 +281,7 @@ describe('WidgetContent line — explore (multi run)', () => {
       ],
       explore: makeCtx(),
     });
+    await openSeriesPanel(target);
     // 同一个 run 只有一个组头,两个缩进叶子 context/指标 —— 不再是一整行斜杠串
     const groups = [...target.querySelectorAll('[data-series-group]')];
     expect(groups.length).toBe(1);
@@ -306,6 +326,7 @@ describe('WidgetContent line — explore (multi run)', () => {
       ],
       explore: makeCtx(),
     });
+    await openSeriesPanel(target);
     const groups = [...target.querySelectorAll('[data-series-group]')];
     const leaves = [...target.querySelectorAll('[data-series-leaf]')].map((l) => (l.textContent ?? '').trim());
     expect(groups.length).toBe(1); // 只有 r1 组(r2 全是空组合)
@@ -324,6 +345,11 @@ describe('WidgetContent line — explore (multi run)', () => {
       ],
       explore: makeCtx(),
     });
+    // hover 打开浮层才能点到行
+    const toggle = target.querySelector('[data-series-toggle] button') as HTMLElement;
+    toggle.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+    await tick();
+    await tick();
     // 初始两条线
     let spec = await lastSpec();
     let rows = spec!.data as Array<{ series: string }>;
