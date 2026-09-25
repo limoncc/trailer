@@ -1,9 +1,17 @@
-import { parseSummaryKey, type MetricRef } from './explore';
+import {
+  parseSummaryKey,
+  scalarAxisName,
+  type MetricRef,
+  type ScalarAxis,
+  type ColorSpec,
+} from './explore';
 import { parseFilterState, type FilterPersistState } from '../charts/lineFilter';
 
-// ─── Run 看板(Boards)布局模型 ───
-// 持久化为 run_dashboards.layout 的 JSON 串;新增 widget 类型时:
-// 1) 在此扩展 DashWidget 联合  2) widgetTypes.ts 注册元信息
+// ─── 看板布局模型(Boards 单 run 看板 + Explore 多 run 对比看板共用) ───
+// 持久化为 run_dashboards.layout(Boards)/ explores.config.layout(Explore) 的 JSON 串;
+// 新增 widget 类型时:
+// 1) 在此扩展 DashWidget 联合 + parseWidget + defaultSize + defaultWidgetTitle
+// 2) widgetTypes.ts 注册元信息(hosts 决定在哪个宿主出现)
 // 3) WidgetContent.svelte 加渲染分支  4) WidgetPickerDialog.svelte 加选择分支
 // parseLayout 对未知 type 返回时直接丢弃(向前兼容旧前端读新数据)。
 
@@ -47,9 +55,52 @@ export interface LineWidget extends WidgetBase {
   xKind?: 'step' | 'wall_time';
   /** 平滑窗口(1..20,同 MetricCard 语义);0/缺省不平滑 */
   smooth?: number;
+  xLog?: boolean;
   yLog?: boolean;
+  /** 系列着色来源(Explore 多 run 对比);缺省 = 按指标序取色板(Boards 原行为) */
+  colorBy?: ColorSpec;
   /** Select/Exclude 过滤状态(brushMode/xWindow/excludes,随 layout 入库跨设备共享) */
   filter?: FilterPersistState;
+}
+
+// ─── Explore 对比看板专用卡(单 run 语义的 hist/figure/text/… 不进 Explore) ───
+
+/** 标量散点:每 run 一个点,x/y 取 config 点路径或 summary 聚合值 */
+export interface ScatterWidget extends WidgetBase {
+  type: 'scatter';
+  x: ScalarAxis;
+  y: ScalarAxis;
+  colorBy?: ColorSpec;
+  xLog?: boolean;
+  yLog?: boolean;
+  /** 拟合趋势线 */
+  regression?: boolean;
+}
+
+/** 成对时序散点:两条指标按 step 内连接(loss vs accuracy) */
+export interface ScatterPairWidget extends WidgetBase {
+  type: 'scatter-pair';
+  x: MetricRef;
+  y: MetricRef;
+  colorBy?: ColorSpec;
+}
+
+/** 平行坐标:每 run 一折,轴为标量(config / summary) */
+export interface ParallelWidget extends WidgetBase {
+  type: 'parallel';
+  dims: ScalarAxis[];
+  colorBy?: ColorSpec;
+}
+
+/** 超参消融对比表:无配置,按可见 run 自动算出差异键 */
+export interface DiffWidget extends WidgetBase {
+  type: 'diff';
+}
+
+/** 指标汇总表:Run × 每指标(Last/Best/Min/Max);缺省取 summary key 并集 */
+export interface SummaryWidget extends WidgetBase {
+  type: 'summary';
+  metrics?: MetricRef[];
 }
 
 export type LatestOrStep = 'latest' | number;
@@ -132,7 +183,12 @@ export type DashWidget =
   | TextWidget
   | TableWidget
   | MediaWidget
-  | InfoWidget;
+  | InfoWidget
+  | ScatterWidget
+  | ScatterPairWidget
+  | ParallelWidget
+  | DiffWidget
+  | SummaryWidget;
 
 /** 信息卡所需的 run 元信息(run 页 /api/v1/runs 已有,向下传递避免重复请求) */
 export interface RunInfo {
@@ -190,6 +246,14 @@ export function defaultSize(type: DashWidget['type']): { w: number; h: number } 
       return { w: 9, h: 3 };
     case 'info':
       return { w: 9, h: 6 };
+    case 'scatter':
+    case 'scatter-pair':
+    case 'parallel':
+      return { w: 12, h: 8 };
+    case 'diff':
+      return { w: 12, h: 6 };
+    case 'summary':
+      return { w: 18, h: 6 };
   }
 }
 
@@ -209,6 +273,30 @@ export function healMetric(m: unknown): MetricRef | null {
   const raw = m as { key?: unknown; context?: unknown };
   if (typeof raw.key !== 'string' || typeof raw.context !== 'string') return null;
   return raw.key.includes('/') ? parseSummaryKey(`${raw.key}/${raw.context}`) : { key: raw.key, context: raw.context };
+}
+
+/** 解析标量轴(config 点路径 / summary 聚合值);非法返回 null(整卡丢弃) */
+function parseScalarAxis(v: unknown): ScalarAxis | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const r = v as Record<string, unknown>;
+  if (r.kind === 'config') {
+    return typeof r.path === 'string' && r.path ? { kind: 'config', path: r.path } : null;
+  }
+  if (r.kind === 'summary') {
+    const f = r.field;
+    if (typeof r.summaryKey !== 'string' || !r.summaryKey) return null;
+    if (f !== 'last' && f !== 'best' && f !== 'best_step' && f !== 'min' && f !== 'max') return null;
+    return { kind: 'summary', summaryKey: r.summaryKey, field: f };
+  }
+  return null;
+}
+
+/** 解析着色来源(run / project / 标量);缺失或非法 → undefined(缺省着色) */
+function parseColorSpec(v: unknown): ColorSpec | undefined {
+  if (typeof v !== 'object' || v === null) return undefined;
+  const kind = (v as Record<string, unknown>).kind;
+  if (kind === 'run' || kind === 'project') return { kind };
+  return parseScalarAxis(v) ?? undefined;
 }
 
 function parseWidget(raw: unknown): DashWidget | null {
@@ -239,7 +327,9 @@ function parseWidget(raw: unknown): DashWidget | null {
         metrics,
         xKind: r.xKind === 'wall_time' ? 'wall_time' : 'step',
         smooth: smooth && smooth > 0 ? smooth : undefined,
+        xLog: r.xLog === true ? true : undefined,
         yLog: r.yLog === true,
+        colorBy: parseColorSpec(r.colorBy),
         // 该分支显式构造,未知字段必丢——filter 必须显式解析(非法/缺失 → undefined)
         filter: parseFilterState(r.filter) ?? undefined,
       };
@@ -306,6 +396,41 @@ function parseWidget(raw: unknown): DashWidget | null {
         hFixed: r.hFixed === true ? true : undefined,
         currency: r.currency === 'cny' || r.currency === 'usd' ? r.currency : undefined,
       };
+    }
+    case 'scatter': {
+      const x = parseScalarAxis(r.x);
+      const y = parseScalarAxis(r.y);
+      if (!x || !y) return null;
+      return {
+        ...base,
+        type: 'scatter',
+        x,
+        y,
+        colorBy: parseColorSpec(r.colorBy),
+        xLog: r.xLog === true ? true : undefined,
+        yLog: r.yLog === true ? true : undefined,
+        regression: r.regression === true ? true : undefined,
+      };
+    }
+    case 'scatter-pair': {
+      const x = healMetric(r.x);
+      const y = healMetric(r.y);
+      if (!x || !y) return null;
+      return { ...base, type: 'scatter-pair', x, y, colorBy: parseColorSpec(r.colorBy) };
+    }
+    case 'parallel': {
+      if (!Array.isArray(r.dims)) return null;
+      const dims = r.dims.map(parseScalarAxis).filter((d): d is ScalarAxis => d !== null);
+      if (dims.length === 0) return null;
+      return { ...base, type: 'parallel', dims, colorBy: parseColorSpec(r.colorBy) };
+    }
+    case 'diff':
+      return { ...base, type: 'diff' };
+    case 'summary': {
+      const metrics = Array.isArray(r.metrics)
+        ? r.metrics.map(healMetric).filter((m): m is MetricRef => m !== null)
+        : [];
+      return { ...base, type: 'summary', metrics: metrics.length > 0 ? metrics : undefined };
     }
     default:
       // 未知类型(更新版前端写入)——旧前端跳过渲染,不破坏整体布局
@@ -470,6 +595,18 @@ export function defaultWidgetTitle(w: DashWidget, display?: (m: MetricRef) => st
       return `Media #${w.mediaId}`;
     case 'info':
       return 'Training Info';
+    case 'scatter':
+      return `${scalarAxisName(w.x)} → ${scalarAxisName(w.y)}`;
+    case 'scatter-pair': {
+      const fmt = (m: MetricRef) => (display ? display(m) : m.context ? `${m.key} [${m.context}]` : m.key);
+      return `${fmt(w.x)} vs ${fmt(w.y)}`;
+    }
+    case 'parallel':
+      return `${w.dims.length} dims`;
+    case 'diff':
+      return 'Config Diff';
+    case 'summary':
+      return 'Summary';
   }
 }
 
