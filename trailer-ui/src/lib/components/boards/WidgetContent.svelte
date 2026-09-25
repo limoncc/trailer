@@ -410,6 +410,18 @@
 
   let tableVisibleRows = $state(50);
 
+  // ─── Explore 系列面板:JS hover 打开、fixed 定位(卡片 overflow-hidden 会裁掉
+  //     absolute 浮层 —— "点开看不到东西"的根因);坐标在打开时记录 ───
+  let seriesPanel = $state(false);
+  let seriesAnchor = $state<HTMLElement | null>(null);
+  let seriesPanelPos = $state({ x: 0, y: 0 });
+  function openSeriesPanel() {
+    if (!seriesAnchor) return;
+    const r = seriesAnchor.getBoundingClientRect();
+    seriesPanelPos = { x: r.left, y: r.bottom + 4 };
+    seriesPanel = true;
+  }
+
   // ─── Explore 系列筛选(会话态,不入库):点系列表格的行切换显隐 ───
   let hiddenSeries = $state<Set<string>>(new Set());
   function toggleSeries(name: string) {
@@ -446,20 +458,32 @@
        用 {#if} 卸载会销毁组件 → 框选窗口/排除状态全部丢失(用户反馈:回放后排除消失)。
        空数据由 G2 graceful 渲染,占位文案仅作 overlay 提示。
        过滤状态经 widget.filter 随 layout 入库(initialFilter 恢复 + onFilterChange 写回)。 -->
-  <div class="h-full flex flex-col">
+  <!-- relative:系列按钮的定位上下文必须是内容区 —— 否则相对卡片(含 32px 标题栏)定位会压住标题 -->
+  <div class="h-full flex flex-col relative" data-series-anchor>
     <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
     <!-- 系列按钮:不占图高;hover 展开层级表格浮层,点行筛选显隐(会话态) -->
     {#if seriesLegend.length > 0}
-      <div class="group/series absolute top-1 left-1 z-10" data-series-toggle>
+      <!-- top-6 让开 y 轴顶部刻度;相对内容区定位(见 data-series-anchor),不压标题栏 -->
+      <!-- mouseleave 在 wrapper(含浮层子树,移入浮层不关闭);enter/click 在 button -->
+      <div
+        class="absolute top-6 left-1 z-30"
+        data-series-toggle
+        bind:this={seriesAnchor}
+        role="group"
+        onmouseleave={() => (seriesPanel = false)}
+      >
         <button
           type="button"
           class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium border border-border/70 bg-background/95 rounded shadow-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
           title="Series — hover to view and filter"
+          onmouseenter={openSeriesPanel}
+          onclick={openSeriesPanel}
         >
           <span aria-hidden="true">▤</span>
           Series {seriesLegend.filter((l) => !l.hidden).length}/{seriesLegend.length}
         </button>
-        <div data-series-panel class="hidden group-hover/series:block absolute right-0 top-full pt-1">
+        {#if seriesPanel}
+        <div class="fixed z-50 pt-1" style="left: {seriesPanelPos.x}px; top: {seriesPanelPos.y}px" data-series-panel>
           <div
             class="w-[min(480px,84vw)] max-h-[55vh] overflow-auto bg-card border border-border rounded-md shadow-lg text-[11px]"
           >
@@ -512,6 +536,7 @@
             </div>
           </div>
         </div>
+        {/if}
       </div>
     {/if}
     <div class="relative flex-1 min-h-0">
