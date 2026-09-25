@@ -62,11 +62,13 @@
     onFilterChange?: (filter: FilterPersistState) => void;
     /** 全局回放步(Boards 回放);null = 非回放态 */
     replayStep?: number | null;
+    /** 图上 Smooth 快捷按钮 → 写回 widget.smooth(0=关,>0=窗口) */
+    onSmoothChange?: (smooth: number) => void;
     /** Explore 对比看板上下文;缺省 = Boards 单 run 原逻辑 */
     explore?: ExploreCtx;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, onFilterChange, replayStep = null, explore }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, onFilterChange, replayStep = null, onSmoothChange, explore }: Props = $props();
 
   // ─── 视口内懒挂载:G2/Three 实例创建贵(单卡 100ms+),新增卡/整板加载时
   // 只渲染视口附近的卡,滚到附近(300px 预载)才挂载真实内容;一次性闩,之后保持
@@ -448,7 +450,7 @@
     <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
     <!-- 系列按钮:不占图高;hover 展开层级表格浮层,点行筛选显隐(会话态) -->
     {#if seriesLegend.length > 0}
-      <div class="group/series absolute top-1 right-1 z-10" data-series-toggle>
+      <div class="group/series absolute top-1 left-1 z-10" data-series-toggle>
         <button
           type="button"
           class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium border border-border/70 bg-background/95 rounded shadow-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
@@ -522,6 +524,11 @@
       xIsTime={widget.xKind === 'wall_time'}
       logX={widget.xLog === true}
       logY={widget.yLog === true}
+      smoothOn={lineSmoothOn}
+      smoothLabel={lineSmoothOn ? String(widget.smooth ?? 0) : ''}
+      onSmoothToggle={onSmoothChange
+        ? () => onSmoothChange(lineSmoothOn ? 0 : 5)
+        : undefined}
       yFormat={lineYFormat}
       markers={lineMarkers}
       initialFilter={widget.filter}

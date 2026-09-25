@@ -51,7 +51,10 @@ function metricSeries(runId?: string): MetricSeries[] {
   return [{ key: 'loss', context: '', points, ...(runId ? { run_id: runId } : {}) }];
 }
 
-async function mountContent(widget: DashWidget, opts: { metrics?: MetricSeries[]; explore?: ExploreCtx } = {}) {
+async function mountContent(
+  widget: DashWidget,
+  opts: { metrics?: MetricSeries[]; explore?: ExploreCtx; onSmoothChange?: (v: number) => void } = {}
+) {
   const target = document.createElement('div');
   document.body.appendChild(target);
   const component = mount(WidgetContent, {
@@ -63,6 +66,7 @@ async function mountContent(widget: DashWidget, opts: { metrics?: MetricSeries[]
       data: EMPTY_BOARDS_DATA,
       heightPx: 200,
       ...(opts.explore ? { explore: opts.explore } : {}),
+      ...(opts.onSmoothChange ? { onSmoothChange: opts.onSmoothChange } : {}),
     },
   });
   await tick();
@@ -264,6 +268,28 @@ describe('WidgetContent line — explore (multi run)', () => {
     expect((groups[0].textContent ?? '').replace(/\s+/g, ' ').trim()).toContain('alpha');
     const leaves = [...target.querySelectorAll('[data-series-leaf]')].map((l) => (l.textContent ?? '').trim());
     expect(leaves).toEqual(['train/s1_seq32k/loss', 'train/s2_seq64k/loss']);
+    unmount(component);
+    target.remove();
+  });
+
+  it('wires the smooth quick-toggle: on → 5, off → 0 (persisted via widget.smooth)', async () => {
+    const onSmoothChange = vi.fn();
+    const { target, component } = await mountContent(lineWidget(), {
+      explore: makeCtx(),
+      onSmoothChange,
+    });
+    const btn = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Smooth'));
+    expect(btn).toBeTruthy();
+    btn!.click();
+    expect(onSmoothChange).toHaveBeenLastCalledWith(5); // off → 默认窗口 5
+    unmount(component);
+    target.remove();
+  });
+
+  it('shows no smooth button for Boards (no handler wired)', async () => {
+    const { target, component } = await mountContent(lineWidget());
+    const btn = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Smooth'));
+    expect(btn).toBeUndefined();
     unmount(component);
     target.remove();
   });
