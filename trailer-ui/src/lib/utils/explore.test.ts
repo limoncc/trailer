@@ -268,6 +268,40 @@ describe('chart data builders', () => {
   });
 });
 
+describe('loadSeries dedup', () => {
+  it('requests a duplicated (run, metric) pair only once', async () => {
+    const cache: SeriesData = new Map();
+    const fetcher = vi.fn(async (queries: BatchQuery[]) =>
+      queries.map((q) => ({
+        run_id: q.run_id,
+        key: q.key,
+        context: q.context,
+        points: [{ step: 0, wall_time: 1, value: 1, idx: 0 }],
+      })),
+    );
+    // 两张卡都带同一指标 → collectNeededMetrics 会给重复项(原 bug:每项都发一次请求)
+    await loadSeries(cache, runs, [
+      { key: 'loss', context: '' },
+      { key: 'loss', context: '' },
+    ], 500, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    // 两个 run 各一条(去重只针对重复的指标项):若不去重会发 4 条
+    expect(fetcher.mock.calls[0][0]).toHaveLength(2);
+    // 缓存里每 run 一组 —— 重复组会让 flatMetrics 产出两个同 cv 系列、颜色撞车
+    expect(cache.get('r1')!.filter((g) => g.key === 'loss')).toHaveLength(1);
+    expect(cache.get('r2')!.filter((g) => g.key === 'loss')).toHaveLength(1);
+  });
+
+  it('never appends a duplicate group into an already-populated cache', async () => {
+    const cache: SeriesData = new Map([
+      ['r1', [{ run_id: 'r1', key: 'loss', context: '', points: [{ step: 0, wall_time: 1, value: 1, idx: 0 }] }]],
+    ]);
+    const fetcher = vi.fn(async () => []);
+    await loadSeries(cache, runs, [{ key: 'loss', context: '' }], 500, fetcher);
+    expect(cache.get('r1')!.filter((g) => g.key === 'loss')).toHaveLength(1);
+  });
+});
+
 describe('refreshSeriesIncremental', () => {
   const metric = { key: 'loss', context: '' };
   const group = (points: Array<[number, number]>) => ({

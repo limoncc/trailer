@@ -2,6 +2,7 @@ import {
   parseSummaryKey,
   scalarAxisName,
   type MetricRef,
+  type MetricSel,
   type ScalarAxis,
   type ColorSpec,
 } from './explore';
@@ -51,7 +52,7 @@ export function normalizeColor(v: unknown): string | undefined {
 
 export interface LineWidget extends WidgetBase {
   type: 'line';
-  metrics: MetricRef[];
+  metrics: MetricSel[];
   xKind?: 'step' | 'wall_time';
   /** 平滑窗口(1..20,同 MetricCard 语义);0/缺省不平滑 */
   smooth?: number;
@@ -92,9 +93,11 @@ export interface ParallelWidget extends WidgetBase {
   colorBy?: ColorSpec;
 }
 
-/** 超参消融对比表:无配置,按可见 run 自动算出差异键 */
+/** 超参消融对比表:按可见 run 自动算差异键;paths 可选参与对比的 config 键 */
 export interface DiffWidget extends WidgetBase {
   type: 'diff';
+  /** 参与对比的 config 点路径;缺省/空 = 对比全部差异键 */
+  paths?: string[];
 }
 
 /** 指标汇总表:Run × 每指标(Last/Best/Min/Max);缺省取 summary key 并集 */
@@ -267,12 +270,21 @@ export function clampH(h: unknown, fallback = DEFAULT_H): number {
   return Math.min(MAX_H, Math.max(MIN_H, n));
 }
 
-/** 修复旧版按最后一个 / 拆分产生的坏 MetricRef(与 explore.healChartDefs 同规则) */
-export function healMetric(m: unknown): MetricRef | null {
+/** 修复旧版按最后一个 / 拆分产生的坏 MetricRef(与 explore.healChartDefs 同规则)。
+ *  run_ids(勾选细化到 run):数组 → 清洗(仅字符串/非空/去重),清洗后为空 = 选了但无有效 run → 整条丢弃;
+ *  类型错的字段忽略(= 缺省全部 run),metric 本身保留;缺失 → undefined。 */
+export function healMetric(m: unknown): MetricSel | null {
   if (typeof m !== 'object' || m === null) return null;
-  const raw = m as { key?: unknown; context?: unknown };
+  const raw = m as { key?: unknown; context?: unknown; run_ids?: unknown };
   if (typeof raw.key !== 'string' || typeof raw.context !== 'string') return null;
-  return raw.key.includes('/') ? parseSummaryKey(`${raw.key}/${raw.context}`) : { key: raw.key, context: raw.context };
+  const base: MetricRef = raw.key.includes('/')
+    ? parseSummaryKey(`${raw.key}/${raw.context}`)
+    : { key: raw.key, context: raw.context };
+  if (raw.run_ids === undefined) return base;
+  if (!Array.isArray(raw.run_ids)) return base;
+  const ids = [...new Set(raw.run_ids.filter((x): x is string => typeof x === 'string' && x.length > 0))];
+  if (ids.length === 0) return null;
+  return { ...base, run_ids: ids };
 }
 
 /** 解析标量轴(config 点路径 / summary 聚合值);非法返回 null(整卡丢弃) */
@@ -314,7 +326,7 @@ function parseWidget(raw: unknown): DashWidget | null {
   switch (r.type) {
     case 'line': {
       const metrics = Array.isArray(r.metrics)
-        ? r.metrics.map(healMetric).filter((m): m is MetricRef => m !== null)
+        ? r.metrics.map(healMetric).filter((m): m is MetricSel => m !== null)
         : [];
       if (metrics.length === 0) return null;
       const smooth =
@@ -424,8 +436,12 @@ function parseWidget(raw: unknown): DashWidget | null {
       if (dims.length === 0) return null;
       return { ...base, type: 'parallel', dims, colorBy: parseColorSpec(r.colorBy) };
     }
-    case 'diff':
-      return { ...base, type: 'diff' };
+    case 'diff': {
+      const paths = Array.isArray(r.paths)
+        ? r.paths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+        : [];
+      return { ...base, type: 'diff', paths: paths.length > 0 ? paths : undefined };
+    }
     case 'summary': {
       const metrics = Array.isArray(r.metrics)
         ? r.metrics.map(healMetric).filter((m): m is MetricRef => m !== null)

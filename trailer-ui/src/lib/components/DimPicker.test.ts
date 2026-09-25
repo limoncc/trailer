@@ -66,7 +66,7 @@ describe('DimPicker', () => {
     target.remove();
   });
 
-  it('groups multi-slash contexts by first segment (eval/train → eval group)', async () => {
+  it('nests multi-slash contexts into a dir chain (eval → train, no longer flattened)', async () => {
     const target = document.createElement('div');
     document.body.appendChild(target);
     const evalOptions = [
@@ -83,14 +83,51 @@ describe('DimPicker', () => {
     await tick();
     await tick();
 
-    // 分组头按钮形如 "eval (2)";context 含斜杠时取首段归组
-    const groupHeaders = [...document.body.querySelectorAll('button')].filter((b) =>
+    // 旧契约(首段压扁)已废除:train/test 现在是 eval 下的**子目录**
+    const dirs = [...document.body.querySelectorAll('[data-tree-dir]')];
+    const byPath = (p: string) => dirs.find((d) => d.getAttribute('data-tree-path') === p);
+    expect(byPath('eval')).toBeTruthy();
+    expect(byPath('eval/train')).toBeTruthy();
+    expect(byPath('eval/test')).toBeTruthy();
+    expect(Number(byPath('eval')!.getAttribute('data-tree-depth'))).toBe(0);
+    expect(Number(byPath('eval/train')!.getAttribute('data-tree-depth'))).toBe(1);
+    // 组头计数 = 子树叶子数
+    const headers = [...document.body.querySelectorAll('button')].filter((b) =>
       /^(.+) \(\d+\)$/.test(b.textContent?.trim() ?? ''),
     );
-    const labels = groupHeaders.map((b) => b.textContent?.trim());
+    const labels = headers.map((b) => b.textContent?.trim());
     expect(labels).toContain('eval (2)');
-    expect(labels).not.toContain('train (1)');
-    expect(labels).not.toContain('test (1)');
+
+    unmount(component);
+    target.remove();
+  });
+
+  it('nests dotted config paths into dirs (config → model → depth)', async () => {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const opts = [
+      { axis: { kind: 'config', path: 'model.depth' } as ScalarAxis, label: 'config.model.depth' },
+      { axis: { kind: 'config', path: 'params' } as ScalarAxis, label: 'config.params' },
+    ];
+    const component = mount(DimPicker, {
+      target,
+      props: { options: opts, value: [], onValueChange: vi.fn() },
+    });
+    await tick();
+    (target.querySelector('[data-slot="popover-trigger"]') as HTMLElement).click();
+    await tick();
+    await tick();
+    const dirs = [...document.body.querySelectorAll('[data-tree-dir]')];
+    const paths = dirs.map((d) => d.getAttribute('data-tree-path'));
+    expect(paths).toContain('config');
+    expect(paths).toContain('config/model');
+    // 叶子 = 最后一级键名(路径由目录表达)
+    const leaves = [...document.body.querySelectorAll('[data-tree-leaf]')].map((l) =>
+      (l.textContent ?? '').trim(),
+    );
+    expect(leaves).toContain('depth');
+    expect(leaves).toContain('params');
+    expect(leaves.join('|')).not.toContain('config.model.depth');
 
     unmount(component);
     target.remove();

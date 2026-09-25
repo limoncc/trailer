@@ -47,6 +47,49 @@ describe('ExploreWorkspace Edit Layout (view mode by default, like Boards)', () 
     target.remove();
   });
 
+  it('Add Widget opens Edit Chart first — no card until confirmed', async () => {
+    const { target, component } = await mountWs();
+    const add = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Add Widget'));
+    add!.click();
+    await tick();
+    await tick();
+    // 还没生成卡片,先弹编辑器
+    expect(target.querySelector('[title="Drag to move"]')).toBeNull();
+    const heading = [...target.querySelectorAll('h3')].find((h) => (h.textContent ?? '').includes('Edit Chart'));
+    expect(heading).toBeTruthy();
+    // 编辑器里确认 → 才生成卡片
+    const confirm = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Confirm');
+    confirm!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    await tick();
+    // 卡片已生成 + 自动进入 Edit Layout(把手出现),编辑器关闭
+    expect(target.querySelector('[title="Drag to move"]')).toBeTruthy();
+    expect([...target.querySelectorAll('h3')].find((h) => (h.textContent ?? '').includes('Edit Chart'))).toBeUndefined();
+    unmount(component);
+    target.remove();
+  });
+
+  it('Save exits Edit Layout mode (done editing → view mode)', async () => {
+    const { target, component } = await mountWs();
+    // 进编辑态
+    const layout = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Edit Layout'));
+    layout!.click();
+    await tick();
+    await tick();
+    expect(target.querySelector('[title="Drag to move"]')).toBeTruthy();
+    // 保存
+    const save = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').trim() === 'Save');
+    save!.click();
+    await new Promise((r) => setTimeout(r, 30));
+    await tick();
+    // 退出编辑态(把手消失),按钮回到 Edit Layout
+    expect(target.querySelector('[title="Drag to move"]')).toBeNull();
+    const again = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Edit Layout'));
+    expect(again).toBeTruthy();
+    unmount(component);
+    target.remove();
+  });
+
   it('hides Edit Layout in read-only share view', async () => {
     const { target, component } = await mountWs(true);
     const btn = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Edit Layout'));
