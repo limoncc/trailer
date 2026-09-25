@@ -580,10 +580,11 @@ describe('LineChart tooltip wrapping (long run|metric names)', () => {
   it('gives the tooltip an opaque card look (default translucent bg bleeds the curves through)', async () => {
     const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series' });
     const css = opts.interaction.tooltip.css;
-    // 收紧总宽 + 不透底 + 圆角边框阴影
+    // 收紧总宽 + 背景/边框走主题变量(暗夜模式下不能是硬编码白底)
     expect(css['.g2-tooltip']).toMatchObject({
       'max-width': '340px',
-      background: '#ffffff',
+      background: 'var(--card)',
+      color: 'var(--card-foreground)',
       opacity: '1',
     });
     expect(css['.g2-tooltip']['border-radius']).toBe('8px');
