@@ -110,6 +110,13 @@ describe('WidgetContent line — Boards path (no explore ctx)', () => {
     target.remove();
   });
 
+  it('renders no series table for Boards callers (single run, unchanged layout)', async () => {
+    const { target, component } = await mountContent(lineWidget());
+    expect(target.querySelector('[data-series-row]')).toBeNull();
+    unmount(component);
+    target.remove();
+  });
+
   it('keeps the default 1.5px lineWidth for Boards callers', async () => {
     const { target, component } = await mountContent(lineWidget());
     const spec = await lastSpec();
@@ -189,6 +196,32 @@ describe('WidgetContent line — explore (multi run)', () => {
     // range 按 G2 domain(系列名字母序)对齐:acc 在前
     const range = (spec!.scale as unknown as { color: { range: string[] } }).color.range;
     expect(range).toEqual([PALETTE[1], PALETTE[0]]);
+    unmount(component);
+    target.remove();
+  });
+
+  it('renders a table-style series list above the chart (colour dot + run/context/key, rule between rows)', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: 'train' },
+    ] }), {
+      metrics: [
+        { key: 'loss', context: 'train', points: metricSeries()[0].points, run_id: 'r1' },
+        { key: 'loss', context: 'train', points: metricSeries()[0].points, run_id: 'r2' },
+      ],
+      explore: makeCtx(),
+    });
+    const rows = [...target.querySelectorAll('[data-series-row]')];
+    expect(rows.map((r) => (r.textContent ?? '').trim())).toEqual([
+      'alpha/train/loss',
+      'beta/train/loss',
+    ]);
+    // 每行带色点(颜色与曲线同源)与分隔线
+    for (const row of rows) {
+      const dot = row.querySelector('[data-series-dot]') as HTMLElement;
+      expect(dot).toBeTruthy();
+      expect(dot.style.background).toMatch(/^rgb|^#/);
+      expect(row.classList.contains('border-b')).toBe(true);
+    }
     unmount(component);
     target.remove();
   });
