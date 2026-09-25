@@ -254,9 +254,14 @@ describe('WidgetContent line — explore (multi run)', () => {
     expect(btn).toBeTruthy();
     expect(btn.textContent ?? '').toContain('2'); // 系列数
     // 定位在**内容容器**内(容器 relative),top-6 让开 y 轴刻度,不压标题栏
-    expect(btn.className).toContain('top-6');
-    // 右移让开 y 轴刻度列(不压 1.8/1.7 标签,也少遮图)
-    expect(btn.className).toContain('left-8');
+    // 绘图区顶部空白行(1.8 刻度上方那条带),x 再右一截避开 y 轴刻度列
+    expect(btn.className).toContain('top-1');
+    expect(btn.className).toContain('left-16');
+    // 尺寸与右上角 Smooth/Select/Exclude 工具条按钮一致
+    const inner = btn.querySelector('button') as HTMLElement;
+    expect(inner.className).toContain('px-1.5');
+    expect(inner.className).toContain('py-0.5');
+    expect(inner.className).toContain('text-[10px]');
     const content = btn.closest('[data-series-anchor]') as HTMLElement;
     expect(content).toBeTruthy();
     expect(content.className).toContain('relative');

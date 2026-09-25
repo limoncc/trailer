@@ -463,10 +463,10 @@
     <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
     <!-- 系列按钮:不占图高;hover 展开层级表格浮层,点行筛选显隐(会话态) -->
     {#if seriesLegend.length > 0}
-      <!-- top-6 让开标题栏与首行刻度;left-8 让开 y 轴刻度列、少遮曲线;
+      <!-- 绘图区顶部空白行(header 下沿、1.8 首行刻度上方),x 靠右避开 y 轴刻度列;
            相对内容区定位(见 data-series-anchor);mouseleave 在 wrapper(移入浮层不关闭) -->
       <div
-        class="absolute top-6 left-8 z-30"
+        class="absolute top-1 left-16 z-30"
         data-series-toggle
         bind:this={seriesAnchor}
         role="group"
@@ -474,7 +474,7 @@
       >
         <button
           type="button"
-          class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium border border-border/70 bg-background/95 rounded shadow-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
+          class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border border-border rounded bg-background/90 text-muted-foreground hover:text-foreground transition-colors"
           title="Series — hover to view and filter"
           onmouseenter={openSeriesPanel}
           onclick={openSeriesPanel}
