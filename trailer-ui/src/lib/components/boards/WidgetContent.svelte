@@ -168,24 +168,30 @@
   });
   let lineSeriesNames = $derived(lineSeriesList.map((s) => s.name));
   let lineSmoothOn = $derived(widget.type === 'line' && (widget.smooth ?? 0) > 0);
+
+  // ─── Explore 系列清单(表格化图例):名 = <run>/<context>/<key>,色与曲线同源 ───
+  // 首现序 = lineData 排序后的序 = G2 color domain 序 → 表格行序与曲线颜色一一对齐
+  const seriesLegend = $derived.by((): Array<{ name: string; color: string }> => {
+    if (widget.type !== 'line' || !explore) return [];
+    const strip = (s: string) => (lineSmoothOn ? s.replace(/__(raw|smooth)$/, '') : s);
+    const cvByName = new Map<string, string>();
+    for (const row of lineData) {
+      const key = strip(row.series);
+      if (cvByName.has(key)) continue;
+      cvByName.set(key, lineSeriesList.find((s) => s.name === key)?.cv ?? '');
+    }
+    return [...cvByName.entries()].map(([name, cv]) => ({ name, color: explore.colorOfValue(cv) }));
+  });
+
   // smooth>0 时同一逻辑系列的两条线共用一个基色(色板索引按指标序而非 series 序)。
   // Explore:颜色是系列身份的函数(取稳定配色表),按 lineData 出现序展开 → 显隐不换色。
   let lineColors = $derived.by(() => {
     if (widget.type !== 'line') return PALETTE;
     const out: string[] = [];
     if (explore) {
-      // 逻辑系列在 lineData 中的首现序 = G2 color domain 序,颜色与系列一一对齐
-      const seen = new Map<string, string>();
-      const strip = (s: string) => (lineSmoothOn ? s.replace(/__(raw|smooth)$/, '') : s);
-      for (const row of lineData) {
-        const key = strip(row.series);
-        if (seen.has(key)) continue;
-        const base = explore.colorOfValue(lineSeriesList.find((s) => s.name === key)?.cv ?? '');
-        seen.set(key, base);
-      }
-      for (const base of seen.values()) {
-        if (lineSmoothOn) out.push(withAlpha(base, RAW_ALPHA), base);
-        else out.push(base);
+      for (const s of seriesLegend) {
+        if (lineSmoothOn) out.push(withAlpha(s.color, RAW_ALPHA), s.color);
+        else out.push(s.color);
       }
       return out;
     }
@@ -382,7 +388,26 @@
        用 {#if} 卸载会销毁组件 → 框选窗口/排除状态全部丢失(用户反馈:回放后排除消失)。
        空数据由 G2 graceful 渲染,占位文案仅作 overlay 提示。
        过滤状态经 widget.filter 随 layout 入库(initialFilter 恢复 + onFilterChange 写回)。 -->
-  <div class="relative h-full">
+  <div class="h-full flex flex-col">
+    <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
+    {#if seriesLegend.length > 0}
+      <div class="shrink-0 max-h-[45%] overflow-y-auto border border-border/50 border-b-0 rounded-t" data-series-table>
+        {#each seriesLegend as s (s.name)}
+          <div
+            class="flex items-center gap-1.5 px-2 py-[3px] text-[11px] leading-tight border-b border-border/40 last:border-b-0"
+            data-series-row
+          >
+            <span
+              data-series-dot
+              class="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10"
+              style="background: {s.color}"
+            ></span>
+            <span class="truncate font-mono" title={s.name}>{s.name}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    <div class="relative flex-1 min-h-0">
     <LineChart
       data={lineData}
       height={heightPx}
@@ -404,6 +429,7 @@
         Waiting for metric data…
       </div>
     {/if}
+    </div>
   </div>
 {:else if widget.type === 'hist'}
   {#if histFrames.length === 0}
