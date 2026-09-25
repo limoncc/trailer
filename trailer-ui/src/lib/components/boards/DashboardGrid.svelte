@@ -9,6 +9,7 @@
   import { infoRowsNeeded } from '$lib/utils/infoCard';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import type { BoardsData, MetricSeries } from './boardsData';
+  import type { ExploreCtx } from '$lib/utils/exploreWidgets';
   import type { FilterPersistState } from '$lib/charts/lineFilter';
   import WidgetContent from './WidgetContent.svelte';
 import { onMount } from 'svelte';
@@ -33,9 +34,11 @@ import { onMount } from 'svelte';
     onChange: (widgets: DashWidget[]) => void;
     /** 「编辑内容」按钮 → 父组件打开选择弹窗 */
     onEditContent: (widget: DashWidget) => void;
+    /** Explore 对比看板上下文,透传给 WidgetContent(Boards 不传) */
+    explore?: ExploreCtx;
   }
 
-  let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, compact = false, replayStep = null, onChange, onEditContent }: Props = $props();
+  let { widgets, editing, runId, metrics, boardsData, running = false, runState = '', runInfo, compact = false, replayStep = null, onChange, onEditContent, explore }: Props = $props();
 
   const ROW_PX = 44;
   const GAP_PX = 8;
@@ -417,7 +420,7 @@ import { onMount } from 'svelte';
         <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' ? 'pointer-events-none' : ''}">
           <!-- 单卡渲染失败只在卡内显示错误,不让异常冒泡拖垮整个看板 -->
           <svelte:boundary onerror={() => {}}>
-            <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} />
+            <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} {explore} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} />
             {#snippet failed(error: unknown)}
               <div class="h-full flex items-center justify-center text-xs text-destructive text-center px-2">
                 Widget failed to render: {(error as Error)?.message ?? String(error)}

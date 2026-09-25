@@ -3,15 +3,15 @@
   import { page } from '$app/state';
   import ExploreWorkspace from '$lib/components/ExploreWorkspace.svelte';
 import { api } from '$lib/utils/api';
-import type { ChartDef } from '$lib/utils/explore';
-import { healChartDefs } from '$lib/utils/explore';
+import type { DashWidget } from '$lib/utils/dashboard';
+import { parseLayout } from '$lib/utils/dashboard';
 
   const id = page.params.id;
   const shareToken = page.url.searchParams.get('token') ?? '';
   const readOnly = !!shareToken;
 
   let initialRunIds: string[] = $state([]);
-  let initialDefs: ChartDef[] = $state([]);
+  let initialWidgets: DashWidget[] = $state([]);
   let initialTitle = $state('');
   let loading = $state(true);
 
@@ -25,12 +25,8 @@ import { healChartDefs } from '$lib/utils/explore';
         } catch {
           initialRunIds = [];
         }
-        try {
-          // healChartDefs:修复旧版按最后一个 '/' 切分持久化的坏 MetricRef
-          initialDefs = healChartDefs(JSON.parse(e.chart_defs || '[]'));
-        } catch {
-          initialDefs = [];
-        }
+        // 看板布局存 config.layout;旧分析(只有 chart_defs)打开为空看板,不做迁移
+        initialWidgets = parseLayout(layoutOf(e.config)).widgets;
         initialTitle = e.title;
       }
     } catch (e) {
@@ -39,6 +35,16 @@ import { healChartDefs } from '$lib/utils/explore';
       loading = false;
     }
   });
+
+  /** config 是 schemaless JSON:取其中的 layout 串(非法/缺失 → null → 空看板) */
+  function layoutOf(config: unknown): string | null {
+    try {
+      const c = JSON.parse((config as string) || '{}') as { layout?: unknown };
+      return typeof c.layout === 'string' ? c.layout : null;
+    } catch {
+      return null;
+    }
+  }
 
   let shareModal = $state(false);
   let shareUrl = $state('');
@@ -74,7 +80,7 @@ import { healChartDefs } from '$lib/utils/explore';
   <div class="h-full">
     <ExploreWorkspace
       {initialRunIds}
-      {initialDefs}
+      {initialWidgets}
       {initialTitle}
       savedId={id}
       {readOnly}

@@ -203,7 +203,6 @@ impl PgStorage {
                 title       TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 run_ids     TEXT NOT NULL,
-                chart_defs  TEXT NOT NULL,
                 config      TEXT NOT NULL DEFAULT '{}',
                 created_at  DOUBLE PRECISION NOT NULL,
                 updated_at  DOUBLE PRECISION NOT NULL
@@ -211,6 +210,10 @@ impl PgStorage {
         )
         .execute(&self.pool)
         .await?;
+        // 迁移:chart_defs 已并入 explores.config(layout JSON),旧库删列(新库无该列,容错忽略)
+        sqlx::query("ALTER TABLE explores DROP COLUMN IF EXISTS chart_defs")
+            .execute(&self.pool)
+            .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS run_dashboards (
@@ -1074,11 +1077,11 @@ impl Storage for PgStorage {
     async fn insert_explore(&self, e: &ExploreRow) -> StorageResult<String> {
         let id = format!("explore_{:x}", rand::random::<u64>());
         sqlx::query(
-            "INSERT INTO explores (id, owner_id, project, title, description, run_ids, chart_defs, config, created_at, updated_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"
+            "INSERT INTO explores (id, owner_id, project, title, description, run_ids, config, created_at, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)"
         )
         .bind(&id).bind(e.owner_id).bind(&e.project).bind(&e.title).bind(&e.description)
-        .bind(&e.run_ids).bind(&e.chart_defs).bind(&e.config)
+        .bind(&e.run_ids).bind(&e.config)
         .bind(e.created_at).bind(e.updated_at)
         .execute(&self.pool).await?;
         Ok(id)
@@ -1090,7 +1093,6 @@ impl Storage for PgStorage {
         title: &str,
         description: &str,
         run_ids: &str,
-        chart_defs: &str,
         config: &str,
     ) -> StorageResult<()> {
         let now = std::time::SystemTime::now()
@@ -1098,9 +1100,9 @@ impl Storage for PgStorage {
             .unwrap()
             .as_secs_f64();
         sqlx::query(
-            "UPDATE explores SET title = $1, description = $2, run_ids = $3, chart_defs = $4, config = $5, updated_at = $6 WHERE id = $7"
+            "UPDATE explores SET title = $1, description = $2, run_ids = $3, config = $4, updated_at = $5 WHERE id = $6"
         )
-        .bind(title).bind(description).bind(run_ids).bind(chart_defs).bind(config).bind(now).bind(id)
+        .bind(title).bind(description).bind(run_ids).bind(config).bind(now).bind(id)
         .execute(&self.pool).await?;
         Ok(())
     }
@@ -1121,7 +1123,7 @@ impl Storage for PgStorage {
         offset: Option<i64>,
     ) -> StorageResult<Vec<ExploreRow>> {
         let rows = sqlx::query(
-            "SELECT id, owner_id, project, title, description, run_ids, chart_defs, config, created_at, updated_at
+            "SELECT id, owner_id, project, title, description, run_ids, config, created_at, updated_at
              FROM explores ORDER BY updated_at DESC"
         ).fetch_all(&self.pool).await?;
         let mut all: Vec<ExploreRow> = rows
@@ -1133,7 +1135,6 @@ impl Storage for PgStorage {
                 title: r.get("title"),
                 description: r.get("description"),
                 run_ids: r.get("run_ids"),
-                chart_defs: r.get("chart_defs"),
                 config: r.get("config"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),
@@ -1165,7 +1166,7 @@ impl Storage for PgStorage {
 
     async fn get_explore(&self, id: &str) -> StorageResult<Option<ExploreRow>> {
         let rows = sqlx::query(
-            "SELECT id, owner_id, project, title, description, run_ids, chart_defs, config, created_at, updated_at
+            "SELECT id, owner_id, project, title, description, run_ids, config, created_at, updated_at
              FROM explores WHERE id = $1"
         ).bind(id).fetch_all(&self.pool).await?;
         Ok(rows
@@ -1177,7 +1178,6 @@ impl Storage for PgStorage {
                 title: r.get("title"),
                 description: r.get("description"),
                 run_ids: r.get("run_ids"),
-                chart_defs: r.get("chart_defs"),
                 config: r.get("config"),
                 created_at: r.get("created_at"),
                 updated_at: r.get("updated_at"),

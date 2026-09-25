@@ -7,10 +7,34 @@ import {
   collectConfigPaths,
   collectSummaryOptions,
   getByPath,
+  colorValueFor,
+  type ColorSpec,
   type MetricRef,
   type RunRecord,
+  type SeriesData,
   type SummaryStats,
 } from './explore';
+
+// ─── Explore 运行时上下文:Boards 不传(explore prop 缺省走原逻辑) ───
+
+export interface ExploreCtx {
+  /** 可见(未隐藏)的选中 run,稳定顺序 */
+  runs: RunRecord[];
+  /** run 显示名:name ?? run_id 前 12 位 */
+  labelOf: (runId: string) => string;
+  /** run 在给定着色维度下的色值(缺省 colorBy = run_id) */
+  colorValueOf: (run: RunRecord, color?: ColorSpec) => string;
+  /** 色值 → 稳定色(查 Workspace 维护的配色表,显隐不换色) */
+  colorOfValue: (cv: string) => string;
+  isRunning: (runId: string) => boolean;
+  /** run_id → 指标组(scatter-pair 等直接取时序) */
+  series: SeriesData;
+}
+
+/** 缺省按 run 着色 */
+export function colorValueOf(run: RunRecord, color?: ColorSpec): string {
+  return colorValueFor(run, color ?? { kind: 'run' });
+}
 
 // ─── 配置消融 diff:找出可见 run 之间取值不同的超参 ───
 

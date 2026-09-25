@@ -827,7 +827,6 @@ impl Storage for FileStorage {
         title: &str,
         description: &str,
         run_ids: &str,
-        chart_defs: &str,
         config: &str,
     ) -> StorageResult<()> {
         let mut explores = self.load_json::<ExploreRow>("_explores.json").await?;
@@ -840,7 +839,6 @@ impl Storage for FileStorage {
                 x.title = title.into();
                 x.description = description.into();
                 x.run_ids = run_ids.into();
-                x.chart_defs = chart_defs.into();
                 x.config = config.into();
                 x.updated_at = now;
             }

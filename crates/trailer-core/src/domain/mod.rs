@@ -150,7 +150,7 @@ pub struct ReportRow {
     pub created_at: f64,
 }
 
-/// A saved Explore analysis workspace (selected runs + chart definitions).
+/// A saved Explore analysis workspace (selected runs + board layout).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExploreRow {
     pub id: Option<String>,
@@ -160,9 +160,7 @@ pub struct ExploreRow {
     pub description: String,
     /// JSON array of run_id strings
     pub run_ids: String,
-    /// JSON array of ChartDef
-    pub chart_defs: String,
-    /// JSON object (e.g. { "columns": 2 })
+    /// JSON object, e.g. { "layout": "{...}" } (schemaless)
     pub config: String,
     pub created_at: f64,
     pub updated_at: f64,

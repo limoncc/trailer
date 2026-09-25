@@ -2,7 +2,7 @@
  * Explore — 灵活探索图表的数据层。
  *
  * 纯函数集合(无副作用),把 config/summary/metrics 三种数据源 join 成图表行。
- * ChartDef 描述一张图:x/y/颜色来源、log 变换、图型。
+ * 图表定义已看板化为 dashboard.ts 的 DashWidget(layout 入库),此处只留数据构建。
  */
 
 import { displayMetricName } from './systemMetrics';
@@ -45,51 +45,6 @@ export type AxisSource = ScalarAxis | { kind: 'metric'; metric: MetricRef; reduc
 /** 颜色/系列分组:按 run、项目、或某标量维度 */
 export type ColorSpec = { kind: 'run' } | { kind: 'project' } | ScalarAxis;
 
-export type ChartDef =
-  | {
-      type: 'line';
-      x: { kind: 'step' } | { kind: 'wall_time' };
-      metrics: MetricRef[];
-      color: ColorSpec;
-      xLog?: boolean;
-      yLog?: boolean;
-      smooth?: boolean;
-      /** 移动平均窗口(>1 启用 SMA) */
-      smoothWindow?: number;
-      maxPoints?: number;
-    }
-  | { type: 'scatter'; x: ScalarAxis; y: ScalarAxis; color: ColorSpec; xLog?: boolean; yLog?: boolean; regression?: boolean }
-  | { type: 'scatter-pair'; x: { kind: 'metric'; metric: MetricRef }; y: { kind: 'metric'; metric: MetricRef }; color: ColorSpec; maxPoints?: number }
-  | { type: 'parallel'; dims: ScalarAxis[]; color?: ColorSpec };
-
-/** 把图表定义数组序列化到 URL query(base64),支持分享/回放 */
-export function serializeDefs(defs: ChartDef[]): string {
-  return btoa(encodeURIComponent(JSON.stringify(defs)));
-}
-
-/** 从 URL query 反序列化图表定义;无效输入返回 null */
-export function deserializeDefs(s: string): ChartDef[] | null {
-  try {
-    const json = decodeURIComponent(atob(s));
-    const parsed: unknown = JSON.parse(json);
-    if (!Array.isArray(parsed)) return null;
-    const defs = parsed as ChartDef[];
-    // 兼容旧数据:line 的单 metric 自动转 metrics 数组
-    for (const d of defs) {
-      if (d.type === 'line' && !('metrics' in d) && (d as { metric?: MetricRef }).metric) {
-        (d as { metrics: MetricRef[]; metric?: MetricRef }).metrics = [
-          (d as { metric: MetricRef }).metric,
-        ];
-        delete (d as { metric?: MetricRef }).metric;
-      }
-    }
-    // 兼容旧数据:修复按最后一个 '/' 切分持久化的坏 MetricRef
-    return healChartDefs(defs);
-  } catch {
-    return null;
-  }
-}
-
 /** summary key 格式是 "{key}/{context}"(后端 format)。写入侧 parse_key_context
  * 按最后一个 '/' 拆分,存储层 key 永不含 '/' → 拼接串的第一个 '/' 即 key/context
  * 边界,对任意层数斜杠的 context(eval/train、system/nvidia/gpu0)精确可逆 */
@@ -97,25 +52,6 @@ export function parseSummaryKey(summaryKey: string): MetricRef {
   const i = summaryKey.indexOf('/');
   if (i < 0) return { key: summaryKey, context: '' };
   return { key: summaryKey.slice(0, i), context: summaryKey.slice(i + 1) };
-}
-
-/** 修复旧版 parseSummaryKey(按最后一个 '/' 切分)持久化的坏 MetricRef:
- * 那时 context 含斜杠的指标被存成 {key:"sr_d2/eval", context:"train"}。
- * 合法 key 永不含 '/',凡 key 含 '/' 的对拼接串按首斜杠重切即可还原;
- * summary 轴/颜色的 summaryKey 本就是无损拼接串,无需处理 */
-export function healChartDefs(defs: ChartDef[]): ChartDef[] {
-  const healMetric = (m: MetricRef): MetricRef =>
-    m.key.includes('/') ? parseSummaryKey(`${m.key}/${m.context}`) : m;
-  return defs.map((d): ChartDef => {
-    if (d.type === 'line') return { ...d, metrics: d.metrics.map(healMetric) };
-    if (d.type === 'scatter-pair')
-      return {
-        ...d,
-        x: { kind: 'metric', metric: healMetric(d.x.metric) },
-        y: { kind: 'metric', metric: healMetric(d.y.metric) },
-      };
-    return d;
-  });
 }
 
 /** 收集所有 run config 的叶节点点路径(数值/字符串/布尔),嵌套用点号 */
@@ -227,39 +163,6 @@ export function colorValueFor(run: RunRecord, color: ColorSpec): string {
       return v === undefined ? '(none)' : String(v);
     }
   }
-}
-
-/** Line 图:每 run 的指标时序展开为行,注入颜色字段值 */
-export function buildLineRows(
-  runs: RunRecord[],
-  metrics: MetricRef[],
-  color: ColorSpec,
-  series: SeriesData,
-): { rows: Array<Record<string, unknown>>; colorField: string } {
-  // 合成 series 字段:每条 (run, metric) 组合一条线(run 色值 + 指标名)
-  const colorField = '_series';
-  const rows: Array<Record<string, unknown>> = [];
-  for (const metric of metrics) {
-    const label =
-      displayMetricName(metric.key, metric.context) ??
-      (metric.context ? `${metric.context}/${metric.key}` : metric.key);
-    for (const r of runs) {
-      const group = (series.get(r.run_id) ?? []).find((g) => g.key === metric.key && g.context === metric.context);
-      if (!group) continue;
-      const colorValue = colorValueFor(r, color);
-      for (const p of group.points) {
-        rows.push({
-          run_id: r.run_id,
-          step: p.step,
-          wall_time: p.wall_time,
-          value: p.value,
-          _metric: label,
-          _series: `${colorValue} | ${label}`,
-        });
-      }
-    }
-  }
-  return { rows, colorField };
 }
 
 /** 标量散点:每 run 一个点,x/y 来自 config/summary(scaling law 主用) */
