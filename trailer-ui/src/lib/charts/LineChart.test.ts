@@ -515,27 +515,80 @@ function optsRows(opts: any): any[] {
   return Array.isArray(opts?.data) ? opts.data : [];
 }
 
-describe('LineChart legend', () => {
+describe('LineChart tooltip series naming (no legend — tooltip carries run + metric)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
   });
 
-  it('defaults to false (MetricCard / compare / run pages / Boards unchanged)', async () => {
-    const { opts, unmount } = await mountLine({ data: chartData });
-    expect(opts.legend).toBe(false);
+  it('omits a fixed item name when a series field is present (G2 falls back to the series name)', async () => {
+    const { opts, unmount } = await mountLine({
+      data: [
+        { step: 0, value: 1, series: 'alpha | loss' },
+        { step: 1, value: 0.5, series: 'beta | loss' },
+      ],
+      seriesField: 'series',
+      metricLabel: 'loss',
+    });
+    expect(opts.tooltip.items[0]).not.toHaveProperty('name');
+    expect(opts.tooltip.items[0]).toHaveProperty('valueFormatter');
     unmount();
   });
 
-  it('renders a top legend when enabled', async () => {
-    const { opts, unmount } = await mountLine({ data: chartData, legend: true });
-    expect(opts.legend).toMatchObject({ position: 'top', flipPage: false });
+  it('keeps metricLabel as the item name for single-series charts (MetricCard / compare)', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, metricLabel: 'train/loss' });
+    expect(opts.tooltip.items[0].name).toBe('train/loss');
     unmount();
   });
 
-  it('keeps legend out of the tooltip items (series shown by the legend itself)', async () => {
-    const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series', legend: true });
-    expect(typeof opts.tooltip.items).toBe('object');
+  it('never renders a legend (Explore carries run names in the tooltip instead)', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series' });
+    expect(opts.legend).toBeFalsy();
+    unmount();
+  });
+});
+
+describe('LineChart tooltip wrapping (long run|metric names)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('lets the series label wrap instead of truncating with an ellipsis', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series' });
+    const css = opts.interaction.tooltip.css;
+    expect(css['.g2-tooltip-list-item-name-label']).toMatchObject({
+      'white-space': 'normal',
+      'word-break': 'break-word',
+      'text-overflow': 'clip',
+    });
+    unmount();
+  });
+
+  it('lays each item out as grid (name 1fr, value tight on the right) so no gap opens up', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series' });
+    const css = opts.interaction.tooltip.css;
+    expect(css['.g2-tooltip-list-item']).toMatchObject({
+      display: 'grid',
+      'grid-template-columns': '1fr auto',
+      'align-items': 'start',
+    });
+    expect(css['.g2-tooltip-list-item-value']).toMatchObject({ 'white-space': 'nowrap' });
+    unmount();
+  });
+
+  it('gives the tooltip an opaque card look (default translucent bg bleeds the curves through)', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series' });
+    const css = opts.interaction.tooltip.css;
+    // 收紧总宽 + 不透底 + 圆角边框阴影
+    expect(css['.g2-tooltip']).toMatchObject({
+      'max-width': '340px',
+      background: '#ffffff',
+      opacity: '1',
+    });
+    expect(css['.g2-tooltip']['border-radius']).toBe('8px');
+    // 数值等宽对齐
+    expect(css['.g2-tooltip-list-item-value']).toMatchObject({ 'font-variant-numeric': 'tabular-nums' });
     unmount();
   });
 });
