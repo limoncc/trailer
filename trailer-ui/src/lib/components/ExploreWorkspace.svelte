@@ -3,6 +3,7 @@
   // 持有 title / 选中与隐藏 run / widgets / series 缓存 / run 状态 / 稳定配色,
   // 负责加载、保存与回调驱动的刷新;渲染全部交给 ExploreBoard(DashboardGrid 复用)。
   import { onMount } from 'svelte';
+  import { LayoutDashboard, Check } from 'lucide-svelte';
   import { refreshInterval } from '$lib/refresh.svelte';
   import RunPicker from '$lib/components/RunPicker.svelte';
   import ExploreBoard from '$lib/components/ExploreBoard.svelte';
@@ -52,6 +53,8 @@
   let loading = $state(true);
   // svelte-ignore state_referenced_locally
   let title = $state(initialTitle);
+  /** 布局编辑模式:默认视图态(同 Boards),点 Edit Layout 才能拖拽/缩放/删卡 */
+  let layoutEditing = $state(false);
   /** Runs 显隐下拉(会话态,不入库) */
   let runMenuOpen = $state(false);
   let runFilter = $state('');
@@ -314,6 +317,20 @@
       {#if !readOnly}
         <button
           type="button"
+          class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md {layoutEditing
+            ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+            : 'border border-border hover:bg-accent'} transition-colors"
+          title={layoutEditing ? 'Finish editing the layout' : 'Drag, resize and edit cards'}
+          onclick={() => (layoutEditing = !layoutEditing)}
+        >
+          {#if layoutEditing}
+            <Check size={12} /> Done
+          {:else}
+            <LayoutDashboard size={12} /> Edit Layout
+          {/if}
+        </button>
+        <button
+          type="button"
           onclick={addWidget}
           class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border border-border rounded-md hover:bg-accent/50 transition-colors"
         >
@@ -348,7 +365,7 @@
         {series}
         {runStates}
         {colors}
-        editing={!readOnly}
+        editing={!readOnly && layoutEditing}
         onChange={updateWidgets}
       />
     {/if}
