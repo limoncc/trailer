@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeConfigDiff, buildSummaryRows, formatStat, assignStableColors, PALETTE } from './exploreWidgets';
+import { computeConfigDiff, buildSummaryRows, formatStat, assignStableColors, colorValueOf, PALETTE } from './exploreWidgets';
 import type { RunRecord } from './explore';
 
 function run(partial: Partial<RunRecord> & { run_id: string }): RunRecord {
@@ -155,5 +155,32 @@ describe('assignStableColors', () => {
     const next = assignStableColors(prev, ['custom', 'r1']);
     expect(next.get('custom')).toBe('#123456');
     expect(next.get('r1')).toBe(PALETTE[1]);
+  });
+});
+
+describe('stable colours end-to-end (run + value channels)', () => {
+  const rs = [run({ run_id: 'r1', config: { lr: 0.1 } }), run({ run_id: 'r2', config: { lr: 0.2 } })];
+
+  it('keeps both run and value assignments while the visible set shrinks', () => {
+    // Workspace.syncColors 语义:先补选中 run,再为各卡 colorBy 预填 value 色
+    const valueKeys = rs.map((r) => colorValueOf(r, { kind: 'config', path: 'lr' }));
+    const all = assignStableColors(new Map(), [...rs.map((r) => r.run_id), ...valueKeys]);
+    expect(all.size).toBe(4);
+    expect(all.get('r1')).toBe(PALETTE[0]);
+    expect(all.get('0.1')).toBe(PALETTE[2]);
+
+    // 隐藏 r2 后再 sync:既有键一个都不改色,也不回收槽位
+    const again = assignStableColors(all, ['r1', ...valueKeys]);
+    expect(again.get('r1')).toBe(PALETTE[0]);
+    expect(all.get('r2')).toBe(PALETTE[1]); // 原映射不受影响
+    expect(again.get('0.1')).toBe(PALETTE[2]);
+    expect(again.get('0.2')).toBe(PALETTE[3]);
+  });
+
+  it('re-selecting a removed run gets its old colour back', () => {
+    let map = assignStableColors(new Map(), ['r1', 'r2']);
+    map = assignStableColors(map, ['r1']); // 卸选 r2(色不回收)
+    map = assignStableColors(map, ['r1', 'r2']);
+    expect(map.get('r2')).toBe(PALETTE[1]);
   });
 });

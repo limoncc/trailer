@@ -9,6 +9,7 @@ import {
   buildParallelData,
   scalarAxisName,
   loadSeries,
+  refreshSeriesIncremental,
 } from './explore';
 import type { RunRecord, SeriesData, BatchQuery } from './explore';
 
@@ -264,5 +265,66 @@ describe('chart data builders', () => {
     // 第二次调用,数据已缓存,不再请求
     await loadSeries(cache, runs, [{ key: 'loss', context: '' }], 500, fetcher);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('refreshSeriesIncremental', () => {
+  const metric = { key: 'loss', context: '' };
+  const group = (points: Array<[number, number]>) => ({
+    run_id: 'r1',
+    key: 'loss',
+    context: '',
+    points: points.map(([step, value], i) => ({ step, wall_time: step, value, idx: i })),
+  });
+
+  it('queries cached groups only, with after_step = their max step', async () => {
+    const cache: SeriesData = new Map([['r1', [group([[0, 1], [10, 0.5]])]]]);
+    const fetcher = vi.fn(async (qs: BatchQuery[]) =>
+      qs.map((q) => ({ run_id: q.run_id, key: q.key, context: q.context, points: [] })),
+    );
+    await refreshSeriesIncremental(cache, runs, [metric], 500, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const qs = fetcher.mock.calls[0][0];
+    expect(qs).toHaveLength(1);
+    expect(qs[0]).toMatchObject({ run_id: 'r1', key: 'loss', context: '' });
+    expect(qs[0].after_step).toBe(10);
+  });
+
+  it('skips groups the cache does not hold yet (full load owns them)', async () => {
+    const cache: SeriesData = new Map([['r1', [group([[0, 1]])]]]);
+    const fetcher = vi.fn(async (_qs: BatchQuery[]) => []);
+    await refreshSeriesIncremental(cache, runs, [metric, { key: 'acc', context: '' }], 500, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toHaveLength(1);
+    expect(fetcher.mock.calls[0][0][0].key).toBe('loss');
+  });
+
+  it('merges by step, deduping the full re-send of system metrics', async () => {
+    const cache: SeriesData = new Map([['r1', [group([[0, 1], [10, 0.5]])]]]);
+    // system 指标后端忽略 after_step 全量回 → 去重后只并入新 step
+    const fetcher = vi.fn(async (qs: BatchQuery[]) =>
+      qs.map((q) => ({
+        run_id: q.run_id,
+        key: q.key,
+        context: q.context,
+        points: [
+          { step: 0, wall_time: 0, value: 1, idx: 0 },
+          { step: 10, wall_time: 10, value: 0.5, idx: 1 },
+          { step: 20, wall_time: 20, value: 0.25, idx: 2 },
+        ],
+      })),
+    );
+    await refreshSeriesIncremental(cache, runs, [metric], 500, fetcher);
+    const points = cache.get('r1')![0].points;
+    expect(points.map((p) => p.step)).toEqual([0, 10, 20]);
+    expect(points[2].value).toBe(0.25);
+  });
+
+  it('does nothing when there is nothing cached to refresh', async () => {
+    const cache: SeriesData = new Map();
+    const fetcher = vi.fn(async (_qs: BatchQuery[]) => []);
+    await refreshSeriesIncremental(cache, runs, [metric], 500, fetcher);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(cache.size).toBe(0);
   });
 });

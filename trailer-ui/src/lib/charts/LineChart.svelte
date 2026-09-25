@@ -28,6 +28,9 @@
     logX?: boolean;
     /// Log scale on y axis
     logY?: boolean;
+    /// 顶部图例(点击显隐系列,G2 legendFilter 默认开启);缺省关闭 ——
+    /// MetricCard/compare/run 页/Boards 维持现状,只有 Explore 对比卡打开
+    legend?: boolean;
     /// Metric name shown in tooltip (e.g. "train/loss")
     metricLabel?: string;
     /// Y 值格式化(轴刻度与 tooltip),如系统指标的 GB/百分比
@@ -60,6 +63,7 @@
     title = '',
     logX = false,
     logY = false,
+    legend = false,
     metricLabel = '',
     yFormat,
     smoothWindow = 0,
@@ -95,7 +99,7 @@
 
   /// 结构性选项(log 轴/平滑等)变化需销毁重建,确保 G2 scale 干净切换;纯数据变化走热更新
   function structKey(): string {
-    return JSON.stringify([seriesField ?? null, xIsTime, logX, logY, smooth, smoothWindow]);
+    return JSON.stringify([seriesField ?? null, xIsTime, logX, logY, smooth, smoothWindow, legend]);
   }
   let prevStructKey = '';
 
@@ -182,7 +186,7 @@
         x: xIsTime ? { title: false, labelFormatter: (d: any) => { const dt = d instanceof Date ? d : new Date(d); return dt.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }, labelAutoHide: true, labelAutoRotate: false } : { title: false, labelAutoHide: true, labelAutoRotate: false },
         y: yFormat ? { title: false, labelAutoHide: true, labelAutoRotate: false, labelFormatter: yFormat } : { title: false, labelAutoHide: true, labelAutoRotate: false },
       },
-      legend: false,
+      legend: legend ? { position: 'top', maxSpan: 2, flipPage: false } : false,
       tooltip: {
         // x 轴信息显示在 title(多 series 时只显示一次)；items 只列 y(各 series 值)
         title: (d: any) => {
@@ -568,7 +572,7 @@
 
   /// props 变化 → 图表更新的命令式通道:use: action 的 update 在参数表达式
   /// 变化时被模板调用,不经过 $effect。悬停监听也挂在这里(action 挂载即注册)。
-  function chartSync(node: HTMLDivElement, _params: { data: DataPoint[]; markers: Props['markers'] }) {
+  function chartSync(node: HTMLDivElement, _params: { data: DataPoint[]; markers: Props['markers']; legend?: boolean }) {
     const onEnter = () => { hoverPause = true; };
     node.addEventListener('pointerenter', onEnter);
     node.addEventListener('pointerleave', flushPendingHotUpdate);
@@ -632,7 +636,7 @@
       bind:this={container}
       class="w-full {brushMode !== 'none' ? 'cursor-crosshair' : ''}"
       style="height: {height}px;"
-      use:chartSync={{ data, markers }}
+      use:chartSync={{ data, markers, legend }}
     ></div>
     <!-- 图内工具条(卡片右上):Select/Exclude 模式按钮(互斥,需先点按钮再操作)、
          恢复排除、显示窗口提示。仅图会话状态,文案英文。 -->
