@@ -514,3 +514,28 @@ function optsYDomain(instance: any, callIndex: number) {
 function optsRows(opts: any): any[] {
   return Array.isArray(opts?.data) ? opts.data : [];
 }
+
+describe('LineChart legend', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('defaults to false (MetricCard / compare / run pages / Boards unchanged)', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData });
+    expect(opts.legend).toBe(false);
+    unmount();
+  });
+
+  it('renders a top legend when enabled', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, legend: true });
+    expect(opts.legend).toMatchObject({ position: 'top', flipPage: false });
+    unmount();
+  });
+
+  it('keeps legend out of the tooltip items (series shown by the legend itself)', async () => {
+    const { opts, unmount } = await mountLine({ data: chartData, seriesField: 'series', legend: true });
+    expect(typeof opts.tooltip.items).toBe('object');
+    unmount();
+  });
+});
