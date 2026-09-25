@@ -28,6 +28,11 @@
     logX?: boolean;
     /// Log scale on y axis
     logY?: boolean;
+    /// 平滑快捷开关的激活态与窗口标签(图上按钮显示 "Smooth 10")
+    smoothOn?: boolean;
+    smoothLabel?: string;
+    /// 有该回调才渲染图上 Smooth 按钮(Boards 不传 → 按钮不出现,UI 不变)
+    onSmoothToggle?: () => void;
     /// Metric name shown in tooltip (e.g. "train/loss")
     metricLabel?: string;
     /// Y 值格式化(轴刻度与 tooltip),如系统指标的 GB/百分比
@@ -60,6 +65,9 @@
     title = '',
     logX = false,
     logY = false,
+    smoothOn = false,
+    smoothLabel = '',
+    onSmoothToggle,
     metricLabel = '',
     yFormat,
     smoothWindow = 0,
@@ -704,6 +712,21 @@
           onclick={restoreExcluded}
         >
           Restore ({excludeCount})
+        </button>
+      {/if}
+      {#if onSmoothToggle}
+        <button
+          type="button"
+          class="flex items-center px-1.5 py-0.5 text-[10px] leading-none border rounded transition-colors {smoothOn
+            ? 'border-primary/60 bg-primary/15 text-primary'
+            : 'border-border bg-background/90 text-muted-foreground hover:text-foreground'}"
+          title={smoothOn
+            ? `Moving average on${smoothLabel ? ` (window ${smoothLabel})` : ''} — click to turn off`
+            : 'Smooth: apply moving average to the lines'}
+          aria-pressed={smoothOn}
+          onclick={onSmoothToggle}
+        >
+          Smooth{smoothOn && smoothLabel ? ` ${smoothLabel}` : ''}
         </button>
       {/if}
       <button

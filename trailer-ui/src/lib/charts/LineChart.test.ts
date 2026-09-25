@@ -605,3 +605,35 @@ describe('LineChart shared tooltip (every run visible at one x)', () => {
     unmount();
   });
 });
+
+describe('LineChart smooth quick-toggle button', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('shows no Smooth button when no handler is wired (Boards unchanged)', async () => {
+    const { target, unmount } = await mountLine({ data: chartData });
+    const btn = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Smooth'));
+    expect(btn).toBeUndefined();
+    unmount();
+  });
+
+  it('renders an active Smooth button with the window size when wired', async () => {
+    const { target, unmount } = await mountLine({ data: chartData, smoothOn: true, smoothLabel: '10', onSmoothToggle: () => {} });
+    const btn = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Smooth'));
+    expect(btn).toBeTruthy();
+    expect(btn!.textContent).toContain('10');
+    expect(btn!.getAttribute('aria-pressed')).toBe('true');
+    unmount();
+  });
+
+  it('fires the toggle handler on click', async () => {
+    const onToggle = vi.fn();
+    const { target, unmount } = await mountLine({ data: chartData, smoothOn: false, onSmoothToggle: onToggle });
+    const btn = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Smooth'))!;
+    btn.click();
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+});
