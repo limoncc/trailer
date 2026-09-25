@@ -210,20 +210,20 @@ describe('WidgetContent line — explore (multi run)', () => {
       ],
       explore: makeCtx(),
     });
+    // 层级树:层1 = run 分组标题,层2 = 缩进的 context/指标 行
+    const groups = [...target.querySelectorAll('[data-series-group]')];
+    const gtexts = groups.map((g) => (g.textContent ?? '').replace(/\s+/g, ' ').trim());
+    expect(gtexts).toHaveLength(2);
+    // 组头 = run 名 + 该组可见/总数
+    expect(gtexts[0]).toContain('alpha');
+    expect(gtexts[1]).toContain('beta');
+    expect(gtexts[0]).toContain('1/1');
     const rows = [...target.querySelectorAll('[data-series-row]')];
     expect(rows.length).toBe(2);
-    // 层级分列:run | context | 指标(而不是拼成一整行)
-    expect(rows.map((r) => (r.querySelector('[data-series-run]')?.textContent ?? '').trim())).toEqual([
-      'alpha',
-      'beta',
-    ]);
-    expect(rows.map((r) => (r.querySelector('[data-series-context]')?.textContent ?? '').trim())).toEqual([
-      'train',
-      'train',
-    ]);
-    expect(rows.map((r) => (r.querySelector('[data-series-metric]')?.textContent ?? '').trim())).toEqual([
-      'loss',
-      'loss',
+    // 层2 显示 context/指标(带层级)
+    expect(rows.map((r) => (r.querySelector('[data-series-leaf]')?.textContent ?? '').trim())).toEqual([
+      'train/loss',
+      'train/loss',
     ]);
     // 每行带色点(颜色与曲线同源)与分隔线
     for (const row of rows) {
@@ -235,6 +235,91 @@ describe('WidgetContent line — explore (multi run)', () => {
     // 表头
     const table = target.querySelector('[data-series-table]') as HTMLElement;
     expect(table.getAttribute('data-has-head')).toBe('true');
+    // 不常驻:按钮触发 + hover 展开的浮层(纯 CSS 命名 group)
+    const wrap = table.closest('[data-series-panel]') as HTMLElement;
+    expect(wrap).toBeTruthy();
+    expect(wrap.className).toContain('hidden');
+    expect(wrap.className).toContain('group-hover/series');
+    const btn = target.querySelector('[data-series-toggle]') as HTMLElement;
+    expect(btn).toBeTruthy();
+    expect(btn.textContent ?? '').toContain('2'); // 系列数
+    unmount(component);
+    target.remove();
+  });
+
+  it('groups leaves under a run header as context/metric (true hierarchy)', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: 'train/s1_seq32k' },
+      { key: 'loss', context: 'train/s2_seq64k' },
+    ] }), {
+      metrics: [
+        { key: 'loss', context: 'train/s1_seq32k', points: metricSeries()[0].points, run_id: 'r1' },
+        { key: 'loss', context: 'train/s2_seq64k', points: metricSeries()[0].points, run_id: 'r1' },
+      ],
+      explore: makeCtx(),
+    });
+    // 同一个 run 只有一个组头,两个缩进叶子 context/指标 —— 不再是一整行斜杠串
+    const groups = [...target.querySelectorAll('[data-series-group]')];
+    expect(groups.length).toBe(1);
+    expect((groups[0].textContent ?? '').replace(/\s+/g, ' ').trim()).toContain('alpha');
+    const leaves = [...target.querySelectorAll('[data-series-leaf]')].map((l) => (l.textContent ?? '').trim());
+    expect(leaves).toEqual(['train/s1_seq32k/loss', 'train/s2_seq64k/loss']);
+    unmount(component);
+    target.remove();
+  });
+
+  it('lists only series the chart actually draws (skips empty (run, metric) combos)', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: 'train' },
+      { key: 'acc', context: 'train' },
+    ] }), {
+      metrics: [
+        // 只有 r1 有 loss;r2 的 acc 是空组合(无点)
+        { key: 'loss', context: 'train', points: metricSeries()[0].points, run_id: 'r1' },
+        { key: 'acc', context: 'train', points: [], run_id: 'r2' },
+      ],
+      explore: makeCtx(),
+    });
+    const groups = [...target.querySelectorAll('[data-series-group]')];
+    const leaves = [...target.querySelectorAll('[data-series-leaf]')].map((l) => (l.textContent ?? '').trim());
+    expect(groups.length).toBe(1); // 只有 r1 组(r2 全是空组合)
+    expect(leaves).toEqual(['train/loss']);
+    unmount(component);
+    target.remove();
+  });
+
+  it('clicking a row filters that series out of the chart, clicking back restores it', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: 'train' },
+    ] }), {
+      metrics: [
+        { key: 'loss', context: 'train', points: metricSeries()[0].points, run_id: 'r1' },
+        { key: 'loss', context: 'train', points: metricSeries()[0].points, run_id: 'r2' },
+      ],
+      explore: makeCtx(),
+    });
+    // 初始两条线
+    let spec = await lastSpec();
+    let rows = spec!.data as Array<{ series: string }>;
+    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha/train/loss', 'beta/train/loss']);
+    // 点掉 alpha 行
+    const row0 = target.querySelectorAll('[data-series-row]')[0];
+    row0.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    await tick();
+    spec = await lastSpec();
+    rows = spec!.data as Array<{ series: string }>;
+    expect([...new Set(rows.map((r) => r.series))]).toEqual(['beta/train/loss']);
+    // 行保留但标记 hidden(否则没法点回来)
+    const row0Again = target.querySelectorAll('[data-series-row]')[0];
+    expect(row0Again.getAttribute('data-series-hidden')).toBe('true');
+    // 再点恢复
+    row0Again.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    await tick();
+    spec = await lastSpec();
+    rows = spec!.data as Array<{ series: string }>;
+    expect([...new Set(rows.map((r) => r.series))].sort()).toEqual(['alpha/train/loss', 'beta/train/loss']);
     unmount(component);
     target.remove();
   });
