@@ -291,6 +291,11 @@ import { onMount } from 'svelte';
     onChange(widgets.map((w) => (w.id === widget.id ? { ...w, modelLabel: l || undefined } : w)));
   }
 
+  /** 图上 Smooth 快捷按钮 → 写回该卡 smooth(0=关,>0=SMA 窗口)并入库 */
+  function handleLineSmoothChange(widget: DashWidget, smooth: number) {
+    onChange(widgets.map((w) => (w.id === widget.id && w.type === 'line' ? { ...w, smooth } : w)));
+  }
+
   /** line 卡过滤状态变更 → 更新该卡 filter 字段(其余字段原样保留) → onChange 入库 */
   function handleLineFilterChange(widget: DashWidget, filter: FilterPersistState) {
     onChange(widgets.map((w) => (w.id === widget.id && w.type === 'line' ? { ...w, filter } : w)));
@@ -423,7 +428,7 @@ import { onMount } from 'svelte';
         <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' && !explore ? 'pointer-events-none' : ''}">
           <!-- 单卡渲染失败只在卡内显示错误,不让异常冒泡拖垮整个看板 -->
           <svelte:boundary onerror={() => {}}>
-            <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} {explore} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} />
+            <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} {explore} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} onSmoothChange={explore && widget.type === 'line' ? (v) => handleLineSmoothChange(widget, v) : undefined} />
             {#snippet failed(error: unknown)}
               <div class="h-full flex items-center justify-center text-xs text-destructive text-center px-2">
                 Widget failed to render: {(error as Error)?.message ?? String(error)}
