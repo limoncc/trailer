@@ -417,7 +417,10 @@ import { onMount } from 'svelte';
 
       <!-- Content(折叠时隐藏) -->
       {#if !isCollapsed}
-        <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' ? 'pointer-events-none' : ''}">
+        <!-- 编辑态禁内容指针事件(Boards:防误触过滤/媒体控件,拖拽只从把手开始)。
+             Explore 例外:图例点击显隐、框选过滤都发生在编辑态,禁了图例就永远点不了;
+             拖拽/缩放仍在 header 把手与右下角手柄上,与内容交互不冲突。 -->
+        <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' && !explore ? 'pointer-events-none' : ''}">
           <!-- 单卡渲染失败只在卡内显示错误,不让异常冒泡拖垮整个看板 -->
           <svelte:boundary onerror={() => {}}>
             <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} {explore} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} />

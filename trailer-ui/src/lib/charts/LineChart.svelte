@@ -28,9 +28,6 @@
     logX?: boolean;
     /// Log scale on y axis
     logY?: boolean;
-    /// 顶部图例(点击显隐系列,G2 legendFilter 默认开启);缺省关闭 ——
-    /// MetricCard/compare/run 页/Boards 维持现状,只有 Explore 对比卡打开
-    legend?: boolean;
     /// Metric name shown in tooltip (e.g. "train/loss")
     metricLabel?: string;
     /// Y 值格式化(轴刻度与 tooltip),如系统指标的 GB/百分比
@@ -63,7 +60,6 @@
     title = '',
     logX = false,
     logY = false,
-    legend = false,
     metricLabel = '',
     yFormat,
     smoothWindow = 0,
@@ -99,7 +95,7 @@
 
   /// 结构性选项(log 轴/平滑等)变化需销毁重建,确保 G2 scale 干净切换;纯数据变化走热更新
   function structKey(): string {
-    return JSON.stringify([seriesField ?? null, xIsTime, logX, logY, smooth, smoothWindow, legend]);
+    return JSON.stringify([seriesField ?? null, xIsTime, logX, logY, smooth, smoothWindow]);
   }
   let prevStructKey = '';
 
@@ -186,7 +182,8 @@
         x: xIsTime ? { title: false, labelFormatter: (d: any) => { const dt = d instanceof Date ? d : new Date(d); return dt.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }, labelAutoHide: true, labelAutoRotate: false } : { title: false, labelAutoHide: true, labelAutoRotate: false },
         y: yFormat ? { title: false, labelAutoHide: true, labelAutoRotate: false, labelFormatter: yFormat } : { title: false, labelAutoHide: true, labelAutoRotate: false },
       },
-      legend: legend ? { position: 'top', maxSpan: 2, flipPage: false } : false,
+      // 不用图例(多系列卡片里图例会挤成一团):run 名 + 指标改由 tooltip 呈现
+      legend: false,
       tooltip: {
         // x 轴信息显示在 title(多 series 时只显示一次)；items 只列 y(各 series 值)
         title: (d: any) => {
@@ -196,7 +193,15 @@
           }
           return `${xField}: ${d[xField]}`;
         },
-        items: [{ channel: 'y', name: metricLabel || yField, valueFormatter: yFormat ?? ((v: number) => { const s = String(v); const i = s.indexOf('.'); return i < 0 || s.length - i - 1 <= 6 ? s : v.toFixed(6); }) }],
+        // 多系列时不给固定 name → G2 回退用系列名("<run> | <指标>"),tooltip 才分得清是哪条线;
+        // 单系列(MetricCard/compare/Boards)维持指标名
+        items: [
+          {
+            channel: 'y',
+            ...(seriesField ? {} : { name: metricLabel || yField }),
+            valueFormatter: yFormat ?? ((v: number) => { const s = String(v); const i = s.indexOf('.'); return i < 0 || s.length - i - 1 <= 6 ? s : v.toFixed(6); }),
+          },
+        ],
       },
       // crosshair 需配在 interaction.tooltip 而非 tooltip：crosshairsY(竖线)默认开，crosshairsX(水平线)需显式开启
       interaction: {
@@ -205,6 +210,42 @@
           crosshairsY: true,
           crosshairsXStroke: '#94a3b8',
           crosshairsYStroke: '#94a3b8',
+          // 系列名 "<run> | <指标>" 很长:默认 nowrap+ellipsis 会截成 "run | l…",
+          // 且 name 被推到两端中间留大空。改法:总宽收紧到 340px,item 用 grid
+          // (name 占 1fr 换行完整显示,数值紧贴其右上角对齐)。
+          css: {
+            // 紧凑不透底的卡片(G2 默认背景半透明,曲线会透出来显脏)
+            '.g2-tooltip': {
+              'max-width': '340px',
+              background: '#ffffff',
+              opacity: '1',
+              border: '1px solid rgba(148,163,184,0.45)',
+              'border-radius': '8px',
+              'box-shadow': '0 8px 20px rgba(15,23,42,0.16)',
+              padding: '8px 10px',
+            },
+            '.g2-tooltip-title': { 'font-weight': '600', color: '#0f172a', 'padding-bottom': '4px' },
+            '.g2-tooltip-list': { 'row-gap': '5px' },
+            '.g2-tooltip-list-item': {
+              display: 'grid',
+              'grid-template-columns': '1fr auto',
+              'column-gap': '10px',
+              'align-items': 'start',
+            },
+            '.g2-tooltip-list-item-name': { 'white-space': 'normal', overflow: 'visible' },
+            '.g2-tooltip-list-item-name-label': {
+              'white-space': 'normal',
+              'word-break': 'break-word',
+              'text-overflow': 'clip',
+              overflow: 'visible',
+            },
+            '.g2-tooltip-list-item-value': {
+              'white-space': 'nowrap',
+              'text-align': 'right',
+              'font-variant-numeric': 'tabular-nums',
+              'font-weight': '500',
+            },
+          },
         },
         // TensorBoard 式 x 向框选手势:只借其 drag 手势与 brush:end(selection 已是数据域,
         // selectionOf 完成像素→invert→scale.invert,Date/log 均正确)。仅 Select/Exclude
@@ -572,7 +613,7 @@
 
   /// props 变化 → 图表更新的命令式通道:use: action 的 update 在参数表达式
   /// 变化时被模板调用,不经过 $effect。悬停监听也挂在这里(action 挂载即注册)。
-  function chartSync(node: HTMLDivElement, _params: { data: DataPoint[]; markers: Props['markers']; legend?: boolean }) {
+  function chartSync(node: HTMLDivElement, _params: { data: DataPoint[]; markers: Props['markers'] }) {
     const onEnter = () => { hoverPause = true; };
     node.addEventListener('pointerenter', onEnter);
     node.addEventListener('pointerleave', flushPendingHotUpdate);
@@ -636,7 +677,7 @@
       bind:this={container}
       class="w-full {brushMode !== 'none' ? 'cursor-crosshair' : ''}"
       style="height: {height}px;"
-      use:chartSync={{ data, markers, legend }}
+      use:chartSync={{ data, markers }}
     ></div>
     <!-- 图内工具条(卡片右上):Select/Exclude 模式按钮(互斥,需先点按钮再操作)、
          恢复排除、显示窗口提示。仅图会话状态,文案英文。 -->
