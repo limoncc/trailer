@@ -31,6 +31,7 @@
     safeFieldName,
   } from '$lib/utils/explore';
   import {
+    PALETTE,
     computeConfigDiff,
     buildSummaryRows,
     formatStat,
@@ -91,7 +92,6 @@
     return () => clearInterval(timer);
   });
 
-  const PALETTE = ['#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#f59e0b', '#6366f1'];
 
   function seriesName(key: string, context: string): string {
     return displayMetricName(key, context) ?? (context ? `${key} [${context}]` : key);
@@ -146,6 +146,8 @@
         for (const g of metrics) {
           if (g.key !== m.key || g.context !== m.context) continue;
           const runId = g.run_id ?? '';
+          // 勾选细化到 run:只画 run_ids 勾中的 run(undefined = 全部,与 lineSeriesKeys 同源)
+          if (m.run_ids && !m.run_ids.includes(runId)) continue;
           const run = explore.runs.find((r) => r.run_id === runId);
           const cv = byRun ? lineSeriesKey(runId, m) : run ? explore.colorValueOf(run, widget.colorBy) : runId;
           // 着色按 run → 显示 run 名;按其他维度 → 显示该维度的值(project 名/config 值)
@@ -327,7 +329,9 @@
     const s = widget.dims.find((d) => d.kind === 'summary');
     return s ? safeFieldName(scalarAxisName(s)) : undefined;
   });
-  let diffRows = $derived.by(() => (widget.type === 'diff' && explore ? computeConfigDiff(explore.runs) : []));
+  let diffRows = $derived.by(() =>
+    widget.type === 'diff' && explore ? computeConfigDiff(explore.runs, widget.paths) : []
+  );
   let summaryTable = $derived.by(() =>
     widget.type === 'summary' && explore ? buildSummaryRows(explore.runs, widget.metrics) : null
   );
@@ -463,10 +467,10 @@
     <!-- 表格化系列清单:色点 + run/context/key,行间横线区分(信息比曲线本身可靠辨认) -->
     <!-- 系列按钮:不占图高;hover 展开层级表格浮层,点行筛选显隐(会话态) -->
     {#if seriesLegend.length > 0}
-      <!-- top-6 让开 y 轴顶部刻度;相对内容区定位(见 data-series-anchor),不压标题栏 -->
-      <!-- mouseleave 在 wrapper(含浮层子树,移入浮层不关闭);enter/click 在 button -->
+      <!-- 绘图区顶部空白行(header 下沿、1.8 首行刻度上方),x 靠右避开 y 轴刻度列;
+           相对内容区定位(见 data-series-anchor);mouseleave 在 wrapper(移入浮层不关闭) -->
       <div
-        class="absolute top-6 left-1 z-30"
+        class="absolute top-1 left-16 z-30"
         data-series-toggle
         bind:this={seriesAnchor}
         role="group"
@@ -474,7 +478,7 @@
       >
         <button
           type="button"
-          class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium border border-border/70 bg-background/95 rounded shadow-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
+          class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none border border-border rounded bg-background/90 text-muted-foreground hover:text-foreground transition-colors"
           title="Series — hover to view and filter"
           onmouseenter={openSeriesPanel}
           onclick={openSeriesPanel}
@@ -485,7 +489,7 @@
         {#if seriesPanel}
         <div class="fixed z-50 pt-1" style="left: {seriesPanelPos.x}px; top: {seriesPanelPos.y}px" data-series-panel>
           <div
-            class="w-[min(480px,84vw)] max-h-[55vh] overflow-auto bg-card border border-border rounded-md shadow-lg text-[11px]"
+            class="w-[min(480px,84vw)] max-h-[55vh] overflow-auto bg-card/75 backdrop-blur-[4px] border border-border/50 rounded-md shadow-lg text-[11px]"
           >
             <div data-series-table data-has-head="true">
               <div
@@ -722,22 +726,23 @@
   {:else if diffRows.length === 0}
     <div class="h-full flex items-center justify-center text-xs text-muted-foreground">No config differences</div>
   {:else}
+    <!-- 转置:列 = config 键(指标),行 = run 名;首列 sticky 便于横向滚动对照 -->
     <div class="h-full overflow-auto border border-border rounded">
       <table class="w-full text-xs">
         <thead>
           <tr class="border-b border-border bg-muted/50">
-            <th class="px-2 py-1.5 text-left text-muted-foreground font-medium sticky left-0 bg-muted/50 z-10">Config key</th>
-            {#each explore.runs as r (r.run_id)}
-              <th class="px-2 py-1.5 text-left text-muted-foreground font-medium whitespace-nowrap">{explore.labelOf(r.run_id)}</th>
+            <th class="px-2 py-1.5 text-left text-muted-foreground font-medium sticky left-0 bg-muted/50 z-10">Run</th>
+            {#each diffRows as row (row.path)}
+              <th class="px-2 py-1.5 text-left text-muted-foreground font-medium whitespace-nowrap">{row.path}</th>
             {/each}
           </tr>
         </thead>
         <tbody>
-          {#each diffRows as row (row.path)}
+          {#each explore.runs as r (r.run_id)}
             <tr class="border-b border-border/50 hover:bg-accent/30 even:bg-muted/10">
-              <td class="px-2 py-1 font-mono sticky left-0 bg-card z-10">{row.path}</td>
-              {#each row.values as v, i (i)}
-                <td class="px-2 py-1 whitespace-nowrap">{v}</td>
+              <td class="px-2 py-1 font-mono font-semibold sticky left-0 bg-card z-10 whitespace-nowrap">{explore.labelOf(r.run_id)}</td>
+              {#each diffRows as row (row.path)}
+                <td class="px-2 py-1 whitespace-nowrap">{row.values[explore.runs.indexOf(r)]}</td>
               {/each}
             </tr>
           {/each}
@@ -766,7 +771,7 @@
               {#each ['Last', 'Best', 'Min', 'Max'] as col, j (j)}
                 <th
                   class="px-2 py-1 text-[10px] text-muted-foreground font-normal whitespace-nowrap {j === 0 ? 'border-l border-border' : ''}"
-                  title={col === 'Best' ? 'best_step 见 hover 提示' : undefined}
+                  title={col === 'Best' ? 'best step shown on hover' : undefined}
                 >{col}</th>
               {/each}
             {/each}

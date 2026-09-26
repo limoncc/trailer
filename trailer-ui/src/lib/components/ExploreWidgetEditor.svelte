@@ -42,6 +42,7 @@
   const pairW = $derived(draft.type === 'scatter-pair' ? draft : null);
   const parallelW = $derived(draft.type === 'parallel' ? draft : null);
   const summaryW = $derived(draft.type === 'summary' ? draft : null);
+  const diffW = $derived(draft.type === 'diff' ? draft : null);
 
   const configPaths = $derived(collectConfigPaths(runs));
   const summaryOptions = $derived(collectSummaryOptions(runs));
@@ -115,13 +116,37 @@
   }
 
   // 展示名:系统指标用友好名,选项 value 仍用 metricLabel 保证 round-trip。
-  // 部分 run 才有该指标时标注归属 run —— 否则选择器里看不出选了它会画哪几条线。
+  // 归属 run 由树的 run 层表达(先选指标,再选 run)—— 不再拼 " — runA" 尾巴。
   function metricDisplay(m: MetricRef): string {
-    const base = displayMetricName(m.key, m.context) ?? metricLabel(m);
+    return displayMetricName(m.key, m.context) ?? metricLabel(m);
+  }
+
+  /** 该指标有数据的 run(= 选中 runs 中 summary 含该 key 的);树的 run 层数据源 */
+  function ownersOf(m: { key: string; context: string }): string[] {
     const summaryKey = `${m.key}/${m.context}`;
-    const owners = runs.filter((r) => Object.keys(r.summary ?? {}).includes(summaryKey));
-    if (owners.length === 0 || owners.length === runs.length) return base;
-    return `${base} — ${owners.map((r) => r.name ?? r.run_id.slice(0, 12)).join(', ')}`;
+    return runs.filter((r) => Object.keys(r.summary ?? {}).includes(summaryKey)).map((r) => r.run_id);
+  }
+
+  function runLabelOf(runId: string): string {
+    const r = runs.find((x) => x.run_id === runId);
+    return r ? (r.name ?? runId.slice(0, 12)) : runId;
+  }
+
+  /** Confirm 前归一化 line 卡的 run_ids:剔除已不在 owners 的 run;
+   *  收敛到全部 → 缺省(= 全部),删空 → 丢该 metric */
+  function confirm() {
+    if (draft.type === 'line') {
+      const metrics = draft.metrics.flatMap((m) => {
+        if (!m.run_ids) return [m];
+        const owners = ownersOf(m);
+        const cleaned = m.run_ids.filter((id) => owners.includes(id));
+        if (cleaned.length === 0) return [];
+        if (cleaned.length === owners.length) return [{ key: m.key, context: m.context }];
+        return [{ key: m.key, context: m.context, run_ids: cleaned }];
+      });
+      draft = { ...draft, metrics };
+    }
+    onConfirm(draft);
   }
 
   function colorLabel(c: ColorSpec): string {
@@ -158,6 +183,14 @@
     }
     return { kind: 'run' };
   }
+
+/** Diff 可选的 config 键(仅 config 维度;summary 指标不参与超参对比) */
+  const diffDims = $derived(
+    configPaths.map((p) => ({ axis: { kind: 'config' as const, path: p }, label: `config.${p}` }))
+  );
+  const diffValue = $derived(
+    diffW?.paths?.map((p) => ({ kind: 'config' as const, path: p })) ?? []
+  );
 
   // 可用标量维度(parallel/散点)列表
   const availableDims = $derived.by(() => {
@@ -202,12 +235,21 @@
 
   <div class="flex-1 overflow-auto px-4 py-3">
     {#if lineW}
-      <div class="flex flex-wrap items-center gap-2 text-xs">
+      <!-- 行1:数据源(Metrics + x 轴);行2:外观(color/log/平滑)—— 用户要求的分组 -->
+      <div class="flex flex-wrap items-center gap-2 text-xs" data-editor-row="source">
         <MetricPicker
-          options={summaryOptions.map((o) => ({ key: o.key, context: o.context }))}
+          options={summaryOptions.map((o) => {
+            const owners = ownersOf(o);
+            // owners = 树的 run 层(勾选细化到 run);没有任何 run 有数据时退回纯指标叶
+            return owners.length > 0
+              ? { key: o.key, context: o.context, owners }
+              : { key: o.key, context: o.context };
+          })}
           value={lineW.metrics}
           onValueChange={(next) => (draft = { ...lineW, metrics: next })}
           formatLabel={metricDisplay}
+          formatLeaf={(m) => displayMetricName(m.key, m.context) ?? m.key}
+          {runLabelOf}
         />
         <select
           value={lineW.xKind}
@@ -217,10 +259,12 @@
           <option value="step">x: step</option>
           <option value="wall_time">x: wall_time</option>
         </select>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-xs" data-editor-row="style">
         <select
           value={colorLabel(lineW.colorBy ?? { kind: 'run' })}
           onchange={(e) => (draft = { ...lineW, colorBy: colorFromValue((e.target as HTMLSelectElement).value) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
+          class="px-1 py-0.5 border border-border rounded bg-background max-w-[240px]"
         >
           <option value="run_id">color: run</option>
           <option value="project">color: project</option>
@@ -245,28 +289,36 @@
           <input type="checkbox" checked={lineW.yLog === true} onchange={(e) => (draft = { ...lineW, yLog: (e.target as HTMLInputElement).checked })} />
           logY
         </label>
-        <label class="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={(lineW.smooth ?? 0) > 0}
-            onchange={(e) => (draft = { ...lineW, smooth: (e.target as HTMLInputElement).checked ? (lineW.smooth || 5) : 0 })}
-          />
-          Smooth
+        <!-- Smooth 单行 stepper(0 = 关,1..20 = SMA 窗口):checkbox + 换行输入框太占行 -->
+        <label
+          class="inline-flex items-center gap-1 px-1.5 py-0.5 border border-border rounded bg-background select-none"
+          title="Moving average window — 0 turns smoothing off"
+        >
+          <span class="text-muted-foreground">Smooth</span>
+          <button
+            type="button"
+            class="w-5 h-5 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground disabled:opacity-40"
+            disabled={(lineW.smooth ?? 0) <= 0}
+            aria-label="Decrease smooth window"
+            onclick={() => (draft = { ...lineW, smooth: Math.max(0, (lineW.smooth ?? 0) - 1) })}
+          >
+            −
+          </button>
+          <span
+            class="w-6 text-center font-mono tabular-nums {(lineW.smooth ?? 0) > 0 ? 'text-primary font-semibold' : 'text-foreground'}"
+          >
+            {lineW.smooth ?? 0}
+          </span>
+          <button
+            type="button"
+            class="w-5 h-5 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground disabled:opacity-40"
+            disabled={(lineW.smooth ?? 0) >= 20}
+            aria-label="Increase smooth window"
+            onclick={() => (draft = { ...lineW, smooth: Math.min(20, (lineW.smooth ?? 0) + 1) })}
+          >
+            +
+          </button>
         </label>
-        {#if (lineW.smooth ?? 0) > 0}
-          <label class="flex items-center gap-1">
-            <input
-              type="number"
-              min="2"
-              max="20"
-              value={lineW.smooth ?? 5}
-              onchange={(e) =>
-                (draft = { ...lineW, smooth: Math.max(2, Math.min(20, Number((e.target as HTMLInputElement).value) || 5)) })}
-              class="w-16 px-1 py-0.5 border border-border rounded bg-background text-right"
-            />
-            window
-          </label>
-        {/if}
       </div>
     {:else if scatterW}
       <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -413,12 +465,23 @@
           onValueChange={(next) => (draft = { ...summaryW, metrics: next.length > 0 ? next : undefined })}
           formatLabel={metricDisplay}
         />
-        <span class="text-muted-foreground">未选 = 全部 summary 指标</span>
+        <span class="text-muted-foreground">Empty = all summary metrics</span>
+      </div>
+    {:else if diffW}
+      <div class="flex flex-wrap items-center gap-2 text-xs" data-editor-row="diff-paths">
+        <DimPicker
+          options={diffDims}
+          value={diffValue}
+          onValueChange={(dims) =>
+            (draft = {
+              ...diffW,
+              paths: dims.filter((d) => d.kind === 'config').map((d) => (d as { path: string }).path),
+            })}
+        />
+        <span class="text-muted-foreground">Pick config keys to diff; empty = all differing keys</span>
       </div>
     {:else}
-      <p class="text-xs text-muted-foreground">
-        这张卡按可见 run 自动计算差异,无需配置。
-      </p>
+      <p class="text-xs text-muted-foreground">—</p>
     {/if}
   </div>
 
@@ -430,7 +493,7 @@
       Cancel
     </button>
     <button
-      onclick={() => onConfirm(draft)}
+      onclick={confirm}
       class="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity"
     >
       Confirm

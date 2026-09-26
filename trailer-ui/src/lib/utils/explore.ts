@@ -32,6 +32,11 @@ export interface MetricRef {
   context: string;
 }
 
+/** 指标选择(勾选细化到 run):run_ids 缺省 = 全部选中 run;空数组非法(parse 时丢该 metric) */
+export interface MetricSel extends MetricRef {
+  run_ids?: string[];
+}
+
 export type SummaryField = 'last' | 'best' | 'best_step' | 'min' | 'max';
 
 /** 标量轴:来自 config 字段(点路径)或 summary 聚合值 */
@@ -267,7 +272,9 @@ const defaultFetcher: BatchFetcher = async (queries) => {
   return resp.json();
 };
 
-/** 加载缺失的指标时序到 cache(批量一次请求)。fetcher 可注入以便测试 */
+/** 加载缺失的指标时序到 cache(批量一次请求)。fetcher 可注入以便测试。
+ *  metrics 里的重复项(两张卡带同一指标)只请求一次 —— 否则 batch-query 会回两组、
+ *  缓存出现重复组,flatMetrics 展平后同一 (run, 指标) 变成两条同 cv 系列、颜色撞车。 */
 export async function loadSeries(
   cache: SeriesData,
   runs: RunRecord[],
@@ -276,17 +283,24 @@ export async function loadSeries(
   fetcher: BatchFetcher = defaultFetcher,
 ): Promise<SeriesData> {
   const missing: BatchQuery[] = [];
+  const requested = new Set<string>();
   for (const r of runs) {
     const groups = cache.get(r.run_id);
     for (const m of metrics) {
+      const key = `${m.key}\u0000${m.context}`;
+      const dup = requested.has(`${r.run_id}\u0000${key}`);
       const has = groups?.some((g) => g.key === m.key && g.context === m.context);
-      if (!has) missing.push({ run_id: r.run_id, key: m.key, context: m.context, max_points: maxPoints });
+      if (has || dup) continue;
+      requested.add(`${r.run_id}\u0000${key}`);
+      missing.push({ run_id: r.run_id, key: m.key, context: m.context, max_points: maxPoints });
     }
   }
   if (missing.length === 0) return cache;
   const results = await fetcher(missing);
   for (const g of results) {
     const arr = cache.get(g.run_id) ?? [];
+    // 合并去重:防御 batch-query 对同一组返回多份(或历史缓存已有重复)
+    if (arr.some((x) => x.key === g.key && x.context === g.context)) continue;
     arr.push(g);
     cache.set(g.run_id, arr);
   }
