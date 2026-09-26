@@ -132,6 +132,84 @@ export function summaryBars(
   return { rows, bestRunId, bestValue, mean, meanPct: pct(mean) };
 }
 
+// ─── Summary:多指标热力矩阵派生 ───
+
+export interface MatrixCell {
+  /** formatStat(当前口径) */
+  display: string;
+  num: number | null;
+  /** 方向感知的列内归一 0..1(1=最优);null = 无值 */
+  t: number | null;
+  /** 该列最优(并列同标) */
+  isBest: boolean;
+}
+
+export interface MatrixRow {
+  runId: string;
+  /** 与 metrics 平行 */
+  cells: MatrixCell[];
+  /** 各指标名次(1=最优,并列同名次;无值 = 有值数+1 垫底) */
+  ranks: number[];
+  /** ranks 平均,行按它升序(图:综合 avg rank) */
+  avgRank: number;
+}
+
+/**
+ * 多指标矩阵:每列(指标)独立按方向归一化着色,列内最优标白点,
+ * 行综合 = 各列名次平均并按它升序(参考"多指标矩阵对比"设计稿)。
+ * `lowers` 与 metrics 平行(每指标独立方向:箭头切换)。
+ */
+export function summaryMatrix(
+  table: SummaryTable,
+  opts: {
+    stats: SummaryStat[];
+    lowers: boolean[];
+    /** 行按该指标的名次升序(综合依据 = 用户最后操作的指标);缺省按 avg rank */
+    sortByIndex?: number;
+  }
+): { rows: MatrixRow[] } {
+  const { stats, lowers, sortByIndex } = opts;
+  const cols = table.metrics.map((_, ci) => {
+    const stat = stats[ci] ?? 'best';
+    const vals = table.rows.map((r) => {
+      const cell = r.cells[ci];
+      return cell ? cell[stat] : undefined;
+    });
+    const valid = vals.filter((v): v is number => v !== undefined);
+    const min = valid.length > 0 ? Math.min(...valid) : null;
+    const max = valid.length > 0 ? Math.max(...valid) : null;
+    const lower = lowers[ci] ?? true;
+    const ts = vals.map((v): number | null => {
+      if (v === undefined || min === null || max === null) return null;
+      if (max === min) return 1;
+      return lower ? (max - v) / (max - min) : (v - min) / (max - min);
+    });
+    const present = ts.filter((t): t is number => t !== null);
+    const sortedDesc = [...present].sort((a, b) => b - a);
+    const ranks = ts.map((t) => (t === null ? present.length + 1 : sortedDesc.indexOf(t) + 1));
+    const bestT = present.length > 0 ? Math.max(...present) : null;
+    return { vals, ts, ranks, bestT };
+  });
+
+  const rows: MatrixRow[] = table.rows.map((r, ri) => {
+    const cells: MatrixCell[] = cols.map((cd) => ({
+      display: formatStat(cd.vals[ri]),
+      num: cd.vals[ri] ?? null,
+      t: cd.ts[ri],
+      isBest: cd.bestT !== null && cd.ts[ri] !== null && cd.ts[ri] === cd.bestT,
+    }));
+    const ranks = cols.map((cd) => cd.ranks[ri]);
+    const avgRank = ranks.length > 0 ? ranks.reduce((a, b) => a + b, 0) / ranks.length : 0;
+    return { runId: r.runId, cells, ranks, avgRank };
+  });
+  if (sortByIndex != null && sortByIndex >= 0 && sortByIndex < (cols.length || 0)) {
+    rows.sort((a, b) => a.ranks[sortByIndex] - b.ranks[sortByIndex]); // 按依据指标名次升序
+  } else {
+    rows.sort((a, b) => a.avgRank - b.avgRank); // 兜底按综合;稳定 → 并列保持原 run 序
+  }
+  return { rows };
+}
+
 // ─── Config Diff:键行卡片流派生 ───
 
 export const NONE_VALUE = '(none)';
