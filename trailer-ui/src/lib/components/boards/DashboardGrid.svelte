@@ -337,9 +337,9 @@ import { onMount } from 'svelte';
     <div
       data-card-idx={idx}
       {...(editing ? { role: 'button', tabindex: 0 } : {})}
-      class="{widget.type === 'diff' && !editing ? '' : 'border'} rounded-md overflow-hidden flex flex-col bg-card relative group/card {editing
+      class="{(widget.type === 'diff' || widget.type === 'summary') && !editing ? '' : 'border'} rounded-md overflow-hidden flex flex-col bg-card relative group/card {editing
         ? 'border-dashed cursor-grab'
-        : widget.type === 'diff'
+        : widget.type === 'diff' || widget.type === 'summary'
           ? ''
           : 'border-border'} {dragId === widget.id ? 'opacity-40' : ''} {dragId !== null && overIndex === idx && dragId !== widget.id
         ? 'ring-2 ring-primary/60'
@@ -352,8 +352,8 @@ import { onMount } from 'svelte';
         if (editing && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
       }}
     >
-      <!-- Header(info 卡视图态隐藏,整卡即信息面板;编辑态保留以便拖拽/改名/删除) -->
-      {#if editing || (widget.type !== 'info' && widget.type !== 'diff')}
+      <!-- Header(info/diff/summary 卡视图态隐藏:整卡即内容面板;编辑态保留以便拖拽/改名/删除) -->
+      {#if editing || (widget.type !== 'info' && widget.type !== 'diff' && widget.type !== 'summary')}
       <div class="flex items-center gap-1.5 px-2.5 border-b border-border bg-muted/20 shrink-0" style="height: {HEADER_PX}px;">
         {#if editing}
           <span
@@ -446,10 +446,11 @@ import { onMount } from 'svelte';
         <!-- 编辑态禁内容指针事件(Boards:防误触过滤/媒体控件,拖拽只从把手开始)。
              Explore 例外:图例点击显隐、框选过滤都发生在编辑态,禁了图例就永远点不了;
              拖拽/缩放仍在 header 把手与右下角手柄上,与内容交互不冲突。 -->
-        <div class="flex-1 min-h-0 {(widget.type === 'info' || widget.type === 'diff') ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' && !explore ? 'pointer-events-none' : ''}">
+        <div class="flex-1 min-h-0 {(widget.type === 'info' || widget.type === 'diff' || widget.type === 'summary') ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' && !explore ? 'pointer-events-none' : ''}">
           <!-- 单卡渲染失败只在卡内显示错误,不让异常冒泡拖垮整个看板 -->
           <svelte:boundary onerror={() => {}}>
-            <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} {explore} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} onSmoothChange={explore && widget.type === 'line' ? (v) => handleLineSmoothChange(widget, v) : undefined} />
+            <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} {explore} editing={editing && (widget.type === 'info' || widget.type === 'summary')} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)}
+            onTitleChange={(t) => onChange(widgets.map((w) => (w.id === widget.id ? { ...w, title: t || undefined } : w)))} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} onSmoothChange={explore && widget.type === 'line' ? (v) => handleLineSmoothChange(widget, v) : undefined} />
             {#snippet failed(error: unknown)}
               <div class="h-full flex items-center justify-center text-xs text-destructive text-center px-2">
                 Widget failed to render: {(error as Error)?.message ?? String(error)}
