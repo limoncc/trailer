@@ -3,6 +3,7 @@ import {
   lowerIsBetter,
   summaryBars,
   summaryMatrix,
+  mergeSummaryContexts,
   diffKeyRows,
   diffRowsNeeded,
   SUMMARY_STATS,
@@ -315,5 +316,50 @@ describe('summaryMatrix', () => {
     expect(b.cells[0].t).toBeNull();
     expect(b.ranks[0]).toBe(2);
     expect(out.rows[1].runId).toBe('b'); // 垫底
+  });
+});
+
+// ─── Summary 同名指标跨 context 合并(一个指标一列) ───
+
+describe('mergeSummaryContexts', () => {
+  const m = (key: string, context: string): MetricRef => ({ key, context });
+  const stats = (v: number) => ({ last: v, best: v, min: v, max: v }) as never;
+
+  it('merges same-key columns; each run picks its latest context that has a value', () => {
+    const t: SummaryTable = {
+      metrics: [m('loss', 'train/s1_seq32k'), m('loss', 'train/s2_seq256k_20b'), m('acc', 'eval')],
+      rows: [
+        { runId: 'r1', cells: [stats(0.9), stats(0.5), stats(0.8)] }, // loss 两列都有 → 取 s2
+        { runId: 'r2', cells: [stats(0.7), undefined, undefined] }, // 只有 s1 → 取 s1
+        { runId: 'r3', cells: [undefined, undefined, stats(0.6)] }, // loss 全无值 → undefined
+      ],
+    };
+    const out = mergeSummaryContexts(t);
+    expect(out.metrics).toHaveLength(2);
+    // 代表 = 组内最靠后 context(列头/状态键与取值同源),列序按 key 首见
+    expect(out.metrics[0]).toEqual(m('loss', 'train/s2_seq256k_20b'));
+    expect(out.metrics[1]).toEqual(m('acc', 'eval'));
+    expect(out.rows[0].cells[0]).toEqual(stats(0.5));
+    expect(out.rows[1].cells[0]).toEqual(stats(0.7));
+    expect(out.rows[2].cells[0]).toBeUndefined();
+    expect(out.rows[0].cells[1]).toEqual(stats(0.8)); // 未合并的列原样
+  });
+
+  it('returns the same reference when no key repeats', () => {
+    const t: SummaryTable = {
+      metrics: [m('loss', 'train'), m('acc', 'train')],
+      rows: [{ runId: 'r1', cells: [stats(1), stats(2)] }],
+    };
+    expect(mergeSummaryContexts(t)).toBe(t);
+  });
+
+  it('merged column keeps the first-seen key position', () => {
+    const t: SummaryTable = {
+      metrics: [m('acc', 'eval'), m('loss', 'train/a'), m('loss', 'train/b')],
+      rows: [{ runId: 'r1', cells: [stats(1), stats(2), stats(3)] }],
+    };
+    const out = mergeSummaryContexts(t);
+    expect(out.metrics.map((x) => x.key)).toEqual(['acc', 'loss']);
+    expect(out.metrics[1]).toEqual(m('loss', 'train/b')); // b > a → 代表是 b
   });
 });
