@@ -133,3 +133,67 @@ describe('DimPicker', () => {
     target.remove();
   });
 });
+
+// ─── flat 变体:与 Metrics 同款(大写组头 + chevron + 原生 checkbox,组内平铺完整 label) ───
+
+describe('DimPicker flat variant', () => {
+  async function mountFlat(props: Record<string, unknown>) {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const component = mount(DimPicker, { target, props: { variant: 'flat', ...props } } as never);
+    await tick();
+    (target.querySelector('[data-slot="popover-trigger"]') as HTMLElement).click();
+    await tick();
+    await tick();
+    return { target, component };
+  }
+
+  it('groups under chevron headers with native checkbox rows and full labels', async () => {
+    const opts = [
+      { axis: { kind: 'config', path: 'model.depth' } as ScalarAxis, label: 'config.model.depth' },
+      { axis: { kind: 'config', path: 'params' } as ScalarAxis, label: 'config.params' },
+      { axis: { kind: 'summary', summaryKey: 'loss/train', field: 'last' } as ScalarAxis, label: 'loss/train[last]' },
+    ];
+    const { target, component } = await mountFlat({ options: opts, value: [], onValueChange: vi.fn() });
+    const groups = [...document.body.querySelectorAll('[data-dim-group]')] as HTMLElement[];
+    // 顶层组:config / train(首段)
+    expect(groups.length).toBeGreaterThanOrEqual(2);
+    const head = groups[0].querySelector(':scope > div') as HTMLElement;
+    expect(head.querySelector('.uppercase')).toBeTruthy();
+    expect(head.querySelector('button[aria-label$="group"]')).toBeTruthy();
+    // 平铺叶:完整 label + 原生 checkbox(不是折叠树的 command-item)
+    const rows = [...document.body.querySelectorAll('[data-dim-group] label')] as HTMLElement[];
+    const texts = rows.map((r) => (r.textContent ?? '').trim());
+    expect(texts).toContain('config.model.depth');
+    expect(texts).toContain('config.params');
+    expect(texts).toContain('loss/train[last]');
+    expect(document.body.querySelector('[data-tree-dir]')).toBeNull();
+    unmount(component);
+    target.remove();
+    document.querySelectorAll('[data-slot="popover-content"]').forEach((e) => e.remove());
+  });
+
+  it('Collapse hides rows; Expand brings them back; clicking a row toggles the dim', async () => {
+    const opts = [
+      { axis: { kind: 'config', path: 'params' } as ScalarAxis, label: 'config.params' },
+    ];
+    const onValueChange = vi.fn();
+    const { target, component } = await mountFlat({ options: opts, value: [], onValueChange });
+    const tool = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((b) => (b.textContent ?? '').trim() === label)!;
+    expect(document.body.querySelector('[data-dim-group] label')).toBeTruthy();
+    tool('Collapse').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(document.body.querySelector('[data-dim-group] label')).toBeNull();
+    tool('Expand').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    const row = document.body.querySelector('[data-dim-group] label input') as HTMLInputElement;
+    expect(row).toBeTruthy();
+    row.click();
+    await tick();
+    expect(onValueChange).toHaveBeenCalledWith([{ kind: 'config', path: 'params' }]);
+    unmount(component);
+    target.remove();
+    document.querySelectorAll('[data-slot="popover-content"]').forEach((e) => e.remove());
+  });
+});
