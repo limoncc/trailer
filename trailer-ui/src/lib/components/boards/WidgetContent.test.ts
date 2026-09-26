@@ -383,26 +383,25 @@ describe('WidgetContent line — explore (multi run)', () => {
     target.remove();
   });
 
-  it('diff table is transposed: header = config keys, rows = run names', async () => {
+  it('diff card lists one key per row with a run card each (键行卡流)', async () => {
     const { target, component } = await mountContent({ id: 'd9', type: 'diff', w: 12, h: 6 }, {
       explore: makeCtx(),
     });
-    const table = target.querySelector('table');
-    expect(table).toBeTruthy();
-    const head = [...table!.querySelectorAll('thead th')].map((th) => (th.textContent ?? '').trim());
-    // 首列表头 = Run,其后是差异的 config 键(列 = 指标/config)
-    expect(head[0]).toBe('Run');
-    expect(head).toContain('lr');
-    expect(head).not.toContain('alpha'); // run 名不在表头(在行首列)
-    // 行 = run 名
-    const rowLabels = [...table!.querySelectorAll('tbody tr')].map(
-      (tr) => (tr.querySelector('td')?.textContent ?? '').trim()
-    );
-    expect(rowLabels).toEqual(['alpha', 'beta']);
+    const card = target.querySelector('[data-diff-card]') as HTMLElement;
+    expect(card).toBeTruthy();
+    // 一个 config 键一行
+    const keyRows = [...card.querySelectorAll('[data-diff-key-row]')] as HTMLElement[];
+    expect(keyRows.map((r) => r.getAttribute('data-path'))).toContain('lr');
+    // 行内每 run 一张卡:run 名在卡头,值/序号在卡内;旧矩阵表头不存在
+    const cards = [...card.querySelectorAll('[data-diff-run-card]')] as HTMLElement[];
+    expect(cards.length).toBeGreaterThanOrEqual(2); // 2 runs × N keys
+    expect(card.textContent).toContain('alpha');
+    expect(card.textContent).toContain('beta');
+    expect(card.querySelector('[data-diff-corner]')).toBeNull();
+    expect(card.querySelector('[data-diff-col]')).toBeNull();
     unmount(component);
     target.remove();
   });
-
   it('lists only series the chart actually draws (skips empty (run, metric) combos)', async () => {
     const { target, component } = await mountContent(lineWidget({ metrics: [
       { key: 'loss', context: 'train' },
@@ -538,17 +537,202 @@ describe('WidgetContent diff / summary cards', () => {
     target.remove();
   });
 
-  it('summary card renders four stat columns per metric', async () => {
+  it('summary card: metric tabs, stat segmented control, value formatting', async () => {
     const summaryWidget: DashWidget = { id: 's1', type: 'summary', w: 18, h: 6 };
     const partial = run('r3', {});
     partial.summary = { 'loss/': { last: 0.25 } }; // 缺 best/min/max → 渲染为 —
     const { target, component } = await mountContent(summaryWidget, {
       explore: makeCtx({ runs: [runs[0], partial] }),
     });
-    const text = target.textContent ?? '';
-    for (const col of ['Last', 'Best', 'Min', 'Max']) expect(text).toContain(col);
-    expect(text).toContain('0.500'); // last=0.5 → toPrecision(4)
-    expect(text).toContain('—');
+    // 指标胶囊 tabs + 四口径分段
+    expect(target.querySelectorAll('[data-summary-metric-tab]').length).toBeGreaterThanOrEqual(1);
+    const statTabs = [...target.querySelectorAll('[data-summary-stat-tab]')].map((b) => (b.textContent ?? '').trim());
+    expect(statTabs).toEqual(['Last', 'Best', 'Min', 'Max']);
+    // 默认口径 Best:r1 best=0.4 → 0.4000;partial 无 best → —
+    const values = () => [...target.querySelectorAll('[data-summary-value]')].map((v) => (v.textContent ?? '').trim());
+    expect(values()).toContain('0.4000');
+    expect(values()).toContain('—');
+    // 切 Last → 0.500
+    const lastTab = target.querySelector('[data-summary-stat-tab="last"]') as HTMLElement;
+    lastTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(values()).toContain('0.5000');
+    unmount(component);
+    target.remove();
+  });
+});
+
+// ─── Diff/Summary 可视化重设计:条形对比 / 着色矩阵 ───
+
+describe('WidgetContent summary bars visualization', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const summaryW: DashWidget = { id: 'sv', type: 'summary', w: 18, h: 6 };
+
+  function statRun(id: string, loss: number | undefined, extra: Record<string, { best: number }> = {}) {
+    const r = run(id, {});
+    const summary: Record<string, { best: number }> = { ...extra };
+    if (loss !== undefined) summary['loss/'] = { best: loss };
+    r.summary = summary;
+    return r;
+  }
+
+  it('best row gets BEST badge, 100% bar; worst row 8%', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', 0.1)] }),
+    });
+    const rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
+    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r2', 'r1']); // loss: 优→劣
+    expect(rows[0].getAttribute('data-best')).toBe('true');
+    expect(rows[0].querySelector('[data-summary-badge]')?.textContent).toContain('BEST');
+    const bar0 = rows[0].querySelector('[data-summary-bar]') as HTMLElement;
+    const bar1 = rows[1].querySelector('[data-summary-bar]') as HTMLElement;
+    expect(bar0.style.width).toBe('100%');
+    expect(bar1.style.width).toBe('8%');
+    unmount(component);
+    target.remove();
+  });
+
+  it('flips sort and bar pcts when direction toggled', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', 0.1)] }),
+    });
+    const dir = target.querySelector('[data-summary-dir]') as HTMLElement;
+    const higherBtn = [...dir.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('higher'))!;
+    higherBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    const rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
+    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r1', 'r2']); // 方向翻转
+    expect(rows[0].getAttribute('data-best')).toBe('true');
+    expect((rows[0].querySelector('[data-summary-bar]') as HTMLElement).style.width).toBe('100%');
+    expect((rows[1].querySelector('[data-summary-bar]') as HTMLElement).style.width).toBe('8%');
+    unmount(component);
+    target.remove();
+  });
+
+  it('renders continuous mean line at 54% and footer summary', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', 0.1)] }),
+    });
+    const mean = target.querySelector('[data-summary-mean]') as HTMLElement;
+    expect(mean).toBeTruthy();
+    expect(mean.style.left).toBe('54%'); // 8 + 92 * 0.5
+    const footer = target.querySelector('[data-summary-footer]') as HTMLElement;
+    const text = footer.textContent ?? '';
+    expect(text).toContain('2 runs');
+    expect(text).toContain('best beta = 0.1000'); // labelOf(r2)=beta,lowerIsBetter → min
+    expect(text).toContain('mean 0.2500');
+    unmount(component);
+    target.remove();
+  });
+
+  it('switching metric pill re-applies the direction heuristic', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({
+        runs: [
+          statRun('r1', 0.5, { 'acc/': { best: 0.9 } }),
+          statRun('r2', 0.1, { 'acc/': { best: 0.7 } }),
+        ],
+      }),
+    });
+    // 并集序 acc/ 在前 → 默认 acc(maximize,越大越好)→ 最优 r1
+    let rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
+    expect(rows[0].getAttribute('data-run-id')).toBe('r1');
+    expect(rows[0].getAttribute('data-best')).toBe('true');
+    // 切到 loss(minimize)→ 最优变 r2
+    const lossTab = target.querySelector('[data-metric="loss/"]') as HTMLElement;
+    lossTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
+    expect(rows[0].getAttribute('data-run-id')).toBe('r2');
+    expect(rows[0].getAttribute('data-best')).toBe('true');
+    unmount(component);
+    target.remove();
+  });
+
+  it('runs without the selected metric sink to the bottom with an em dash', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', undefined)] }),
+    });
+    const rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
+    expect(rows[1].getAttribute('data-run-id')).toBe('r2');
+    expect((rows[1].querySelector('[data-summary-value]')?.textContent ?? '').trim()).toBe('—');
+    expect(rows[1].querySelector('[data-summary-bar]')).toBeNull();
+    unmount(component);
+    target.remove();
+  });
+
+  it('all-equal values still render full bars (no divide-by-zero)', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [statRun('r1', 0.7), statRun('r2', 0.7)] }),
+    });
+    const bars = [...target.querySelectorAll('[data-summary-bar]')] as HTMLElement[];
+    expect(bars.length).toBe(2);
+    expect(bars.every((b) => b.style.width === '100%')).toBe(true);
+    expect(bars.some((b) => (b.getAttribute('style') ?? '').includes('NaN'))).toBe(false);
+    unmount(component);
+    target.remove();
+  });
+
+  it('keeps empty hint when runs have no summary', async () => {
+    const bare = run('r1', {});
+    bare.summary = {}; // run() 默认带 loss/ → 显式清空
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [bare] }),
+    });
+    expect(target.textContent).toContain('Runs have no summary yet');
+    unmount(component);
+    target.remove();
+  });
+});
+
+describe('WidgetContent diff visualization', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('same-value key row gets a same flag; differing key gets diff', async () => {
+    const r1 = run('r1', { lr: 0.1, depth: 12 });
+    const r2 = run('r2', { lr: 0.1, depth: 24 });
+    const { target, component } = await mountContent(
+      { id: 'dv', type: 'diff', w: 12, h: 6, paths: ['lr', 'depth'] },
+      { explore: makeCtx({ runs: [r1, r2] }) }
+    );
+    const rows = [...target.querySelectorAll('[data-diff-key-row]')] as HTMLElement[];
+    const lrRow = rows.find((r) => r.getAttribute('data-path') === 'lr')!;
+    const depthRow = rows.find((r) => r.getAttribute('data-path') === 'depth')!;
+    expect(lrRow.getAttribute('data-same')).toBe('true');
+    expect(lrRow.querySelector('[data-diff-flag]')?.textContent).toContain('same');
+    expect(depthRow.getAttribute('data-same')).toBe('false');
+    expect(depthRow.querySelector('[data-diff-flag]')?.textContent).toContain('diff');
+    unmount(component);
+    target.remove();
+  });
+  it('run cards carry the run colour, (none) shows em-dash delta, click re-bases the row', async () => {
+    const rs = [run('r1', { depth: 12 }), run('r2', { depth: 24 }), run('r3', { depth: 12 }), run('r4', {})];
+    const { target, component } = await mountContent(
+      { id: 'dv2', type: 'diff', w: 12, h: 6 },
+      { explore: makeCtx({ runs: rs }) }
+    );
+    const row = target.querySelector('[data-diff-key-row][data-path="depth"]') as HTMLElement;
+    let cards = [...row.querySelectorAll('[data-diff-run-card]')] as HTMLElement[];
+    expect(cards.length).toBe(4);
+    // 色点 = 各自 run 色(非空),序号 1..4
+    for (const [i, c] of cards.entries()) {
+      expect((c.querySelector('[style*="background"]') as HTMLElement).style.background).toBeTruthy();
+      expect(c.textContent).toContain(String(i + 1));
+    }
+    // (none) 卡:值原样、Δ 无法计算
+    expect((cards[3].textContent ?? '')).toContain('(none)');
+    expect(cards[3].textContent).toContain('Δ —');
+    // 默认 base = r1(第一张):r2 相对 12 → +100.0%
+    expect(cards[0].getAttribute('data-base')).toBe('true');
+    expect(cards[1].textContent).toContain('Δ +100.0%');
+    // 点击 r2 卡 → 它成为 base,r1 变 Δ -50.0%
+    cards[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    cards = [...row.querySelectorAll('[data-diff-run-card]')] as HTMLElement[];
+    expect(cards[1].getAttribute('data-base')).toBe('true');
+    expect(cards[0].getAttribute('data-base')).toBe('false');
+    expect(cards[0].textContent).toContain('Δ -50.0%');
     unmount(component);
     target.remove();
   });

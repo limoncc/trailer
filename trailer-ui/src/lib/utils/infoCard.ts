@@ -241,12 +241,14 @@ export function infoRowsNeeded(
   widget: InfoWidget,
   cardWidthPx: number,
   rowPx = 44,
-  gapPx = 8
+  gapPx = 8,
+  /** 额外占用像素(编辑态 header 等):不计入会把内容裁掉 —— 详见 DashboardGrid.autoRows */
+  extraPx = 0
 ): number {
   const hasStatus = widget.items.some((i) => i.src === 'status');
   const cellCount = widget.items.filter((i) => i.src !== 'status').length;
   const tilesPerRow = Math.max(1, Math.floor((cardWidthPx - 20) / 110));
   const headerPx = hasStatus ? (cardWidthPx - 20 < 200 ? 124 : 62) : 0;
   const contentPx = headerPx + Math.ceil(cellCount / tilesPerRow) * 72;
-  return Math.max(2, Math.ceil((contentPx + 16) / (rowPx + gapPx)));
+  return Math.max(2, Math.ceil((contentPx + 16 + extraPx) / (rowPx + gapPx)));
 }

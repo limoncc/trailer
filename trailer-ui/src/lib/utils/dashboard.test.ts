@@ -165,6 +165,21 @@ describe('parseLayout', () => {
     expect(byId('w4').metrics[0].run_ids).toEqual(['r1']);
   });
 
+  it('round-trips diff widget hFixed (dragged height locks manual rows)', () => {
+    const s = JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'd1', type: 'diff', w: 12, h: 6, paths: ['lr'], hFixed: true },
+        { id: 'd2', type: 'diff', w: 12, h: 6 },
+      ],
+    });
+    const parsed = parseLayout(s);
+    expect((parsed.widgets[0] as { hFixed?: boolean }).hFixed).toBe(true);
+    expect((parsed.widgets[1] as { hFixed?: boolean }).hFixed).toBeUndefined();
+    const again = parseLayout(serializeLayout(parsed));
+    expect((again.widgets[0] as { hFixed?: boolean }).hFixed).toBe(true);
+  });
+
   it('drops line widgets without metrics', () => {
     const s = JSON.stringify({
       version: 1,

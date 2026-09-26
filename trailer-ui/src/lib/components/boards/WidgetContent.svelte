@@ -40,6 +40,19 @@
     fullMetricPath,
     type ExploreCtx,
   } from '$lib/utils/exploreWidgets';
+  import * as Tabs from '$lib/components/ui/tabs';
+  import * as ToggleGroup from '$lib/components/ui/toggle-group';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Separator } from '$lib/components/ui/separator';
+  import * as Table from '$lib/components/ui/table';
+  import {
+    diffKeyRows,
+    summaryBars,
+    lowerIsBetter,
+    SUMMARY_STATS,
+    type SummaryStat,
+  } from '$lib/utils/exploreViz';
+  import { Trophy } from 'lucide-svelte';
 
   interface Props {
     widget: DashWidget;
@@ -358,6 +371,60 @@
   let summaryTable = $derived.by(() =>
     widget.type === 'summary' && explore ? buildSummaryRows(explore.runs, widget.metrics) : null
   );
+
+  // ─── Summary 卡视图态:卡内切换(不进 widget/不入库),重开回默认 ───
+  let summaryMetricKey = $state('');
+  let summaryStat = $state<SummaryStat>('best');
+  /** 'auto' = 按指标名/后端规则推断;用户点方向后显式化并跨指标保持 */
+  let summaryDir = $state<'auto' | 'lower' | 'upper'>('auto');
+
+  let summaryMetricIndex = $derived.by(() => {
+    if (!summaryTable || summaryTable.metrics.length === 0) return -1;
+    if (!summaryMetricKey) return 0;
+    const i = summaryTable.metrics.findIndex((m) => `${m.key}/${m.context}` === summaryMetricKey);
+    return i >= 0 ? i : 0; // 指标集变化后钳制,不崩
+  });
+  let summaryMetric = $derived(
+    summaryMetricIndex >= 0 && summaryTable ? summaryTable.metrics[summaryMetricIndex] ?? null : null
+  );
+  let summaryLower = $derived.by(() => {
+    if (summaryDir === 'lower') return true;
+    if (summaryDir === 'upper') return false;
+    return summaryMetric ? lowerIsBetter(summaryMetric, explore?.runs) : true;
+  });
+  let summaryView = $derived.by(() =>
+    summaryMetricIndex >= 0 && summaryTable
+      ? summaryBars(summaryTable, {
+          metricIndex: summaryMetricIndex,
+          stat: summaryStat,
+          lowerIsBetter: summaryLower,
+        })
+      : null
+  );
+  let summaryLines = $derived.by(() => {
+    if (!summaryView || !explore) return [];
+    return summaryView.rows.map((r) => {
+      const run = explore.runs.find((x) => x.run_id === r.runId);
+      return {
+        ...r,
+        label: explore.labelOf(r.runId),
+        color: run ? explore.colorOfValue(explore.colorValueOf(run)) : PALETTE[0],
+      };
+    });
+  });
+  /** 每键独立的基准 run(点击卡切换,视图态不入库;缺省 runs[0]) */
+  let diffBases = $state<Record<string, string>>({});
+  function setDiffBase(path: string, runId: string) {
+    diffBases = { ...diffBases, [path]: runId };
+  }
+  let diffKeyList = $derived.by(() => {
+    if (!(widget.type === 'diff' && explore)) return [];
+    const e = explore;
+    return diffKeyRows(e.runs, diffRows, {
+      baseByPath: diffBases,
+      colorOf: (r) => e.colorOfValue(e.colorValueOf(r)),
+    });
+  });
 
   // ─── hist ───
   let histFrames = $derived.by(() => {
@@ -746,74 +813,169 @@
 {:else if widget.type === 'diff'}
   {#if !explore || explore.runs.length < 2}
     <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Select 2+ runs to diff</div>
-  {:else if diffRows.length === 0}
+  {:else if diffKeyList.length === 0}
     <div class="h-full flex items-center justify-center text-xs text-muted-foreground">No config differences</div>
   {:else}
-    <!-- 转置:列 = config 键(指标),行 = run 名;首列 sticky 便于横向滚动对照 -->
-    <div class="h-full overflow-auto border border-border rounded">
-      <table class="w-full text-xs">
-        <thead>
-          <tr class="border-b border-border bg-muted/50">
-            <th class="px-2 py-1.5 text-left text-muted-foreground font-medium sticky left-0 bg-muted/50 z-10">Run</th>
-            {#each diffRows as row (row.path)}
-              <th class="px-2 py-1.5 text-left text-muted-foreground font-medium whitespace-nowrap">{row.path}</th>
+    <!-- 一个 config 键一行卡片流;点任意 run 卡 → 该卡为基准(base)重算 Δ -->
+    <div class="h-full overflow-auto flex flex-col gap-1.5" data-diff-card>
+      {#each diffKeyList as kr (kr.path)}
+        <div data-diff-key-row data-path={kr.path} data-same={kr.same ? 'true' : 'false'}>
+          <div class="flex items-center gap-1.5 pb-0.5">
+            <span class="size-2 rounded-full shrink-0 {kr.same ? 'bg-muted-foreground/40' : 'bg-destructive'}"></span>
+            <span class="font-mono text-xs font-semibold truncate" title={kr.path}>{kr.path}</span>
+            <span class="text-[10px] text-muted-foreground font-mono shrink-0"># {kr.valueType}</span>
+            <Badge variant={kr.same ? 'secondary' : 'destructive'} class="ml-auto shrink-0" data-diff-flag>
+              {kr.same ? 'same' : 'diff'}
+            </Badge>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            {#each kr.cards as card (card.runId)}
+              {@const run = explore.runs.find((x) => x.run_id === card.runId)}
+              <!-- 同名 run 靠 id 前 6 位区分;labelOf 已是 name ?? rid12 的统一口径 -->
+              {@const runLabel = run?.name ? `${explore.labelOf(card.runId)} (${card.runId.slice(0, 6)})` : explore.labelOf(card.runId)}
+              <button
+                type="button"
+                data-diff-run-card
+                data-run-id={card.runId}
+                data-base={card.isBase ? 'true' : 'false'}
+                onclick={() => setDiffBase(kr.path, card.runId)}
+                class="flex-1 min-w-[128px] rounded-lg border p-1.5 text-left transition-colors {card.isBase
+                  ? 'border-primary ring-1 ring-primary'
+                  : 'border-border hover:bg-accent/40'}"
+              >
+                <div class="flex items-center gap-1.5">
+                  <span class="size-2 rounded-full shrink-0" style="background:{card.color}"></span>
+                  <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={runLabel}>{runLabel}</span>
+                  <span
+                    class="size-5 rounded-full grid place-items-center shrink-0 text-[10px] font-bold text-white"
+                    style="background:{card.color}"
+                  >{card.seq}</span>
+                  {#if card.isBase}
+                    <Trophy class="size-3.5 shrink-0 text-amber-500" />
+                  {/if}
+                </div>
+                <div class="mt-0.5 font-mono text-xl font-semibold leading-none" style="color:{card.color}">{card.value}</div>
+                <div class="mt-0.5 text-[10px] text-muted-foreground">
+                  {#if card.deltaPct != null}
+                    Δ {card.deltaPct >= 0 ? '+' : ''}{card.deltaPct.toFixed(1)}%
+                  {:else}
+                    Δ —
+                  {/if}
+                </div>
+              </button>
             {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each explore.runs as r (r.run_id)}
-            <tr class="border-b border-border/50 hover:bg-accent/30 even:bg-muted/10">
-              <td class="px-2 py-1 font-mono font-semibold sticky left-0 bg-card z-10 whitespace-nowrap">{explore.labelOf(r.run_id)}</td>
-              {#each diffRows as row (row.path)}
-                <td class="px-2 py-1 whitespace-nowrap">{row.values[explore.runs.indexOf(r)]}</td>
-              {/each}
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+          </div>
+        </div>
+      {/each}
     </div>
   {/if}
 {:else if widget.type === 'summary'}
   {#if !summaryTable || summaryTable.metrics.length === 0}
     <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Runs have no summary yet</div>
   {:else}
-    <div class="h-full overflow-auto border border-border rounded">
-      <table class="w-full text-xs border-collapse">
-        <thead>
-          <tr class="border-b border-border bg-muted/50">
-            <th class="px-2 py-1.5 text-left text-muted-foreground font-medium sticky left-0 bg-muted/50 z-10">Run</th>
-            {#each summaryTable.metrics as m, i (i)}
-              <th colspan="4" class="px-2 py-1.5 text-center text-muted-foreground font-medium whitespace-nowrap border-l border-border">
-                {m.context ? `${m.context}/${m.key}` : m.key}
-              </th>
+    <!-- 条形对比:指标 tabs + 口径/方向控制条(sticky top) + 每 run 一条 + 均值虚线 + 汇总(sticky bottom) -->
+    <div class="h-full overflow-auto border border-border rounded" data-summary-card>
+      <div class="sticky top-0 z-20 bg-card border-b border-border/60 px-1.5 py-1 flex flex-col gap-1">
+        <Tabs.Root bind:value={summaryMetricKey} class="gap-0">
+          <Tabs.List class="h-auto p-0.5 justify-start gap-1 bg-muted overflow-x-auto" data-summary-metrics>
+            {#each summaryTable.metrics as m (m.key + '/' + m.context)}
+              <Tabs.Trigger
+                value={`${m.key}/${m.context}`}
+                data-summary-metric-tab
+                data-metric={`${m.key}/${m.context}`}
+                class="px-2 py-0.5 text-[11px] whitespace-nowrap"
+              >
+                {shortMetricPath(m)}
+              </Tabs.Trigger>
             {/each}
-          </tr>
-          <tr class="border-b border-border bg-muted/30">
-            <th class="px-2 py-1 sticky left-0 bg-muted/30 z-10"></th>
-            {#each summaryTable.metrics as m, i (i)}
-              {#each ['Last', 'Best', 'Min', 'Max'] as col, j (j)}
-                <th
-                  class="px-2 py-1 text-[10px] text-muted-foreground font-normal whitespace-nowrap {j === 0 ? 'border-l border-border' : ''}"
-                  title={col === 'Best' ? 'best step shown on hover' : undefined}
-                >{col}</th>
-              {/each}
+          </Tabs.List>
+        </Tabs.Root>
+        <div class="flex items-center gap-1.5">
+          <ToggleGroup.Root
+            type="single"
+            value={summaryStat}
+            onValueChange={(v) => { if (v) summaryStat = v as SummaryStat; }}
+            variant="outline"
+            class="h-5"
+            data-summary-stat
+          >
+            {#each SUMMARY_STATS as s (s.id)}
+              <ToggleGroup.Item value={s.id} class="px-1.5 text-[10px]" data-summary-stat-tab={s.id}>{s.label}</ToggleGroup.Item>
             {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each summaryTable.rows as row, i (row.runId)}
-            <tr class="border-b border-border/50 hover:bg-accent/30 even:bg-muted/10">
-              <td class="px-2 py-1 font-medium sticky left-0 bg-card z-10 whitespace-nowrap">{explore?.labelOf(row.runId)}</td>
-              {#each row.cells as cell, ci (ci)}
-                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap {ci === 0 ? 'border-l border-border' : ''}">{formatStat(cell?.last)}</td>
-                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap" title={cell?.best_step != null ? `best @ step ${cell.best_step}` : undefined}>{formatStat(cell?.best)}</td>
-                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap">{formatStat(cell?.min)}</td>
-                <td class="px-2 py-1 text-right tabular-nums whitespace-nowrap">{formatStat(cell?.max)}</td>
-              {/each}
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+          </ToggleGroup.Root>
+          <ToggleGroup.Root
+            type="single"
+            value={summaryLower ? 'lower' : 'higher'}
+            onValueChange={(v) => {
+              if (v) summaryDir = v === 'lower' ? 'lower' : 'upper';
+            }}
+            variant="outline"
+            class="h-5 ml-auto"
+            data-summary-dir
+          >
+            <ToggleGroup.Item value="lower" class="px-1.5 text-[10px]">↓ lower better</ToggleGroup.Item>
+            <ToggleGroup.Item value="higher" class="px-1.5 text-[10px]">↑ higher better</ToggleGroup.Item>
+          </ToggleGroup.Root>
+        </div>
+      </div>
+
+      <div class="relative" data-summary-rows>
+        {#each summaryLines as row (row.runId)}
+          <!-- 固定三段(与均值线偏移成组,改一处必同步):px-1.5(6) + 身份 w-28(112) + gap-1.5(6) = 124;右 = gap 6 + 数值 w-14(56) + px-1.5(6) = 68 -->
+          <div
+            class="flex items-center gap-1.5 px-1.5 py-[3px] border-b border-border/30 last:border-b-0 hover:bg-accent/30"
+            data-summary-row
+            data-run-id={row.runId}
+            data-best={row.isBest ? 'true' : 'false'}
+          >
+            <div class="w-28 shrink-0 min-w-0 flex items-center gap-1.5">
+              <span data-summary-dot class="size-2 rounded-full border border-black/10 shrink-0" style="background:{row.color}"></span>
+              <span class="min-w-0 truncate text-[11px] {row.isBest ? 'font-semibold' : ''}" title={row.label}>{row.label}</span>
+              {#if row.isBest}
+                <Badge data-summary-badge class="px-1 text-[8px]">BEST</Badge>
+              {/if}
+            </div>
+            <div class="flex-1 min-w-0 relative h-2 rounded-full bg-muted">
+              {#if row.pct != null}
+                <div
+                  data-summary-bar
+                  class="absolute inset-y-0 left-0 rounded-full {row.isBest ? '' : 'opacity-55'}"
+                  style="width:{row.pct}%; background:{row.color}"
+                ></div>
+              {/if}
+            </div>
+            <span
+              data-summary-value
+              class="w-14 shrink-0 text-right text-[10px] font-mono tabular-nums {row.isBest ? 'font-semibold' : 'text-muted-foreground'}"
+              title={summaryStat === 'best' && row.step != null ? `best @ step ${row.step}` : undefined}
+            >{row.display}</span>
+          </div>
+        {/each}
+        {#if summaryView?.meanPct != null}
+          <div class="pointer-events-none absolute inset-y-0 left-[124px] right-[68px] z-10" aria-hidden="true">
+            <div data-summary-mean class="absolute inset-y-0 border-l border-dashed border-foreground/45" style="left:{summaryView.meanPct}%"></div>
+          </div>
+        {/if}
+      </div>
+
+      <Separator />
+      <div
+        data-summary-footer
+        class="sticky bottom-0 px-2 py-1 bg-card text-[10px] text-muted-foreground flex flex-wrap gap-x-2"
+      >
+        {#if summaryMetric}
+          <span>metric {shortMetricPath(summaryMetric)}</span>
+        {/if}
+        <span>· {summaryLines.length} runs</span>
+        {#if summaryView?.bestRunId}
+          <span>· best {explore?.labelOf(summaryView.bestRunId)} = {formatStat(summaryView.bestValue)}</span>
+        {/if}
+        {#if summaryView?.mean != null}
+          <span>· mean {formatStat(summaryView.mean)}</span>
+        {:else}
+          <span>· no data</span>
+        {/if}
+      </div>
     </div>
   {/if}
 {:else if widget.type === 'info'}
