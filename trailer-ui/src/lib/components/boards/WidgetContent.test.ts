@@ -63,7 +63,12 @@ async function openSeriesPanel(target: HTMLElement) {
 
 async function mountContent(
   widget: DashWidget,
-  opts: { metrics?: MetricSeries[]; explore?: ExploreCtx; onSmoothChange?: (v: number) => void } = {}
+  opts: {
+    metrics?: MetricSeries[];
+    explore?: ExploreCtx;
+    onSmoothChange?: (v: number) => void;
+    onTitleChange?: (t: string) => void;
+  } = {}
 ) {
   const target = document.createElement('div');
   document.body.appendChild(target);
@@ -77,6 +82,7 @@ async function mountContent(
       heightPx: 200,
       ...(opts.explore ? { explore: opts.explore } : {}),
       ...(opts.onSmoothChange ? { onSmoothChange: opts.onSmoothChange } : {}),
+      ...(opts.onTitleChange ? { onTitleChange: opts.onTitleChange } : {}),
     },
   });
   await tick();
@@ -537,26 +543,29 @@ describe('WidgetContent diff / summary cards', () => {
     target.remove();
   });
 
-  it('summary card: metric tabs, stat segmented control, value formatting', async () => {
+  it('summary card: stat segmented control, matrix columns, value formatting', async () => {
     const summaryWidget: DashWidget = { id: 's1', type: 'summary', w: 18, h: 6 };
     const partial = run('r3', {});
     partial.summary = { 'loss/': { last: 0.25 } }; // 缺 best/min/max → 渲染为 —
     const { target, component } = await mountContent(summaryWidget, {
       explore: makeCtx({ runs: [runs[0], partial] }),
     });
-    // 指标胶囊 tabs + 四口径分段
-    expect(target.querySelectorAll('[data-summary-metric-tab]').length).toBeGreaterThanOrEqual(1);
-    const statTabs = [...target.querySelectorAll('[data-summary-stat-tab]')].map((b) => (b.textContent ?? '').trim());
-    expect(statTabs).toEqual(['Last', 'Best', 'Min', 'Max']);
-    // 默认口径 Best:r1 best=0.4 → 0.4000;partial 无 best → —
-    const values = () => [...target.querySelectorAll('[data-summary-value]')].map((v) => (v.textContent ?? '').trim());
-    expect(values()).toContain('0.4000');
-    expect(values()).toContain('—');
-    // 切 Last → 0.500
-    const lastTab = target.querySelector('[data-summary-stat-tab="last"]') as HTMLElement;
-    lastTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // 矩阵:列 = 指标(列头带方向箭头),行 = run;无指标胶囊 tabs
+    expect(target.querySelectorAll('[data-summary-metric-tab]').length).toBe(0);
+    expect(target.querySelectorAll('[data-matrix-row]').length).toBe(2);
+    expect(target.querySelector('[data-matrix-btn="loss/"]')).toBeTruthy();
+    // 单按钮双职责:每指标列头一个(stat 图标 + 方向字符)
+    const btns = [...target.querySelectorAll('[data-matrix-btn]')];
+    expect(btns.length).toBeGreaterThanOrEqual(1);
+    // 默认口径 last:r1 last=0.5 → 0.5000;partial last=0.25 → 0.2500
+    const cellTexts = () => [...target.querySelectorAll('[data-matrix-cell]')].map((c) => (c.textContent ?? '').trim());
+    expect(cellTexts()).toContain('0.5000');
+    expect(cellTexts()).toContain('0.2500');
+    // 单击(延迟 220ms)循环:last → min → r1 min=0.3000
+    btns[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
-    expect(values()).toContain('0.5000');
+    await new Promise((r) => setTimeout(r, 250));
+    expect(cellTexts()).toContain('0.3000');
     unmount(component);
     target.remove();
   });
@@ -564,7 +573,7 @@ describe('WidgetContent diff / summary cards', () => {
 
 // ─── Diff/Summary 可视化重设计:条形对比 / 着色矩阵 ───
 
-describe('WidgetContent summary bars visualization', () => {
+describe('WidgetContent summary matrix visualization', () => {
   beforeEach(() => vi.clearAllMocks());
 
   const summaryW: DashWidget = { id: 'sv', type: 'summary', w: 18, h: 6 };
@@ -572,61 +581,70 @@ describe('WidgetContent summary bars visualization', () => {
   function statRun(id: string, loss: number | undefined, extra: Record<string, { best: number }> = {}) {
     const r = run(id, {});
     const summary: Record<string, { best: number }> = { ...extra };
-    if (loss !== undefined) summary['loss/'] = { best: loss };
+    // 全口径同值 → rank/热力行为与口径无关(默认 last 也能测)
+    if (loss !== undefined) summary['loss/'] = { best: loss, last: loss, min: loss, max: loss } as never;
     r.summary = summary;
     return r;
   }
 
-  it('best row gets BEST badge, 100% bar; worst row 8%', async () => {
+  function rowsOf(target: HTMLElement): HTMLElement[] {
+    return [...target.querySelectorAll('[data-matrix-row]')] as HTMLElement[];
+  }
+
+  it('best cell gets a white dot; rows sorted by avg rank ascending', async () => {
     const { target, component } = await mountContent(summaryW, {
       explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', 0.1)] }),
     });
-    const rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
-    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r2', 'r1']); // loss: 优→劣
-    expect(rows[0].getAttribute('data-best')).toBe('true');
-    expect(rows[0].querySelector('[data-summary-badge]')?.textContent).toContain('BEST');
-    const bar0 = rows[0].querySelector('[data-summary-bar]') as HTMLElement;
-    const bar1 = rows[1].querySelector('[data-summary-bar]') as HTMLElement;
-    expect(bar0.style.width).toBe('100%');
-    expect(bar1.style.width).toBe('8%');
+    // loss 列(lower):r2 最优 → 排第一,avg 1.0 ★;r1 第二 2.0
+    const rows = rowsOf(target);
+    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r2', 'r1']);
+    const bestCell = rows[0].querySelector('[data-matrix-cell]') as HTMLElement;
+    expect(bestCell.getAttribute('data-best')).toBe('true');
+    expect(bestCell.querySelector('[data-matrix-best]')).toBeTruthy();
+    // 综合 = 依据指标(初始=最后一个)的名次,非加总
+    expect((rows[0].querySelector('td:last-child')?.textContent ?? '')).toContain('1');
+    expect((rows[0].querySelector('td:last-child')?.textContent ?? '')).toContain('★');
+    expect((rows[1].querySelector('td:last-child')?.textContent ?? '')).not.toContain('★');
+    expect(rows[1].querySelector('[data-matrix-best]')).toBeNull();
     unmount(component);
     target.remove();
   });
 
-  it('flips sort and bar pcts when direction toggled', async () => {
+  it('cells tint with primary colour (deeper = better)', async () => {
     const { target, component } = await mountContent(summaryW, {
       explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', 0.1)] }),
     });
-    const dir = target.querySelector('[data-summary-dir]') as HTMLElement;
-    const higherBtn = [...dir.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('higher'))!;
-    higherBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const cells = [...target.querySelectorAll('[data-matrix-cell]')] as HTMLElement[];
+    expect(cells).toHaveLength(2);
+    expect(cells[0].style.background).toContain('color-mix');
+    expect(cells[1].style.background).toContain('color-mix');
+    // r2 最优(t=1)与 r1 最差(t=0)底色深浅不同
+    expect(cells[0].style.background).not.toBe(cells[1].style.background);
+    unmount(component);
+    target.remove();
+  });
+
+  it('flipping the column direction arrow re-ranks rows and moves the dot', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', 0.1)] }),
+    });
+    const dirBtn = target.querySelector('[data-matrix-btn="loss/"]') as HTMLElement;
+    expect(dirBtn.textContent).toContain('↓');
+    // 双击 = 翻转方向
+    dirBtn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     await tick();
-    const rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
-    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r1', 'r2']); // 方向翻转
-    expect(rows[0].getAttribute('data-best')).toBe('true');
-    expect((rows[0].querySelector('[data-summary-bar]') as HTMLElement).style.width).toBe('100%');
-    expect((rows[1].querySelector('[data-summary-bar]') as HTMLElement).style.width).toBe('8%');
+    const btn2 = target.querySelector('[data-matrix-btn="loss/"]') as HTMLElement;
+    expect(btn2.textContent).toContain('↑');
+    expect(btn2.getAttribute('data-lower')).toBe('false');
+    const rows = rowsOf(target);
+    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r1', 'r2']);
+    expect(rows[0].querySelector('[data-matrix-best]')).toBeTruthy();
+    expect(rows[1].querySelector('[data-matrix-best]')).toBeNull();
     unmount(component);
     target.remove();
   });
 
-  it('renders continuous mean line at 54% and footer summary', async () => {
-    const { target, component } = await mountContent(summaryW, {
-      explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', 0.1)] }),
-    });
-    const mean = target.querySelector('[data-summary-mean]') as HTMLElement;
-    expect(mean).toBeTruthy();
-    expect(mean.style.left).toBe('54%'); // 8 + 92 * 0.5
-    const footer = target.querySelector('[data-summary-footer]') as HTMLElement;
-    const text = footer.textContent ?? '';
-    expect(text).toContain('2 runs');
-    expect(text).toContain('best beta = 0.1000'); // labelOf(r2)=beta,lowerIsBetter → min
-    expect(text).toContain('mean 0.2500');
-    unmount(component);
-    target.remove();
-  });
-
-  it('switching metric pill re-applies the direction heuristic', async () => {
+  it('column arrows reflect the per-metric direction heuristic (loss↓ acc↑)', async () => {
     const { target, component } = await mountContent(summaryW, {
       explore: makeCtx({
         runs: [
@@ -635,41 +653,81 @@ describe('WidgetContent summary bars visualization', () => {
         ],
       }),
     });
-    // 并集序 acc/ 在前 → 默认 acc(maximize,越大越好)→ 最优 r1
-    let rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
-    expect(rows[0].getAttribute('data-run-id')).toBe('r1');
-    expect(rows[0].getAttribute('data-best')).toBe('true');
-    // 切到 loss(minimize)→ 最优变 r2
-    const lossTab = target.querySelector('[data-metric="loss/"]') as HTMLElement;
-    lossTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await tick();
-    rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
-    expect(rows[0].getAttribute('data-run-id')).toBe('r2');
-    expect(rows[0].getAttribute('data-best')).toBe('true');
+    expect((target.querySelector('[data-matrix-btn="loss/"]') as HTMLElement).textContent).toContain('↓');
+    expect((target.querySelector('[data-matrix-btn="acc/"]') as HTMLElement).textContent).toContain('↑');
     unmount(component);
     target.remove();
   });
 
-  it('runs without the selected metric sink to the bottom with an em dash', async () => {
+  it('Rank follows the last-touched metric (初始=最后指标,点谁听谁的)', async () => {
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({
+        runs: [
+          statRun('r1', 0.5, { 'acc/': { best: 0.9 } }),
+          statRun('r2', 0.1, { 'acc/': { best: 0.7 } }),
+        ],
+      }),
+    });
+    // metrics 并集序 [acc/, loss/];初始依据 = 最后一个(loss,lower)→ r2 最优排前
+    let rows = rowsOf(target);
+    expect(target.querySelector('[data-matrix-btn="loss/"]')?.getAttribute('data-ref')).toBe('true');
+    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r2', 'r1']);
+    // 单击 acc 列按钮 → acc 成为综合依据(upper:r1 0.9 最优)→ 行序翻转
+    const accBtn = target.querySelector('[data-matrix-btn="acc/"]') as HTMLElement;
+    accBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    await new Promise((r) => setTimeout(r, 250));
+    expect(target.querySelector('[data-matrix-btn="acc/"]')?.getAttribute('data-ref')).toBe('true');
+    expect(target.querySelector('[data-matrix-btn="loss/"]')?.getAttribute('data-ref')).toBe('false');
+    rows = rowsOf(target);
+    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r1', 'r2']);
+    unmount(component);
+    target.remove();
+  });
+
+  it('in-card title row renames the widget via onTitleChange (persisted)', async () => {
+    const onTitleChange = vi.fn();
+    const { target, component } = await mountContent(summaryW, {
+      explore: makeCtx({ runs: [statRun('r1', 0.4)] }),
+      onTitleChange,
+    });
+    const titleBtn = target.querySelector('[data-summary-title] button') as HTMLElement;
+    expect(titleBtn).toBeTruthy();
+    expect(titleBtn.textContent).toContain('Summary'); // defaultWidgetTitle
+    // 单击进入编辑 → 输入 → Enter 提交
+    titleBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    const input = target.querySelector('[data-summary-title-input]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    input.value = 'My KPI Board';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await tick();
+    expect(onTitleChange).toHaveBeenCalledWith('My KPI Board');
+    unmount(component);
+    target.remove();
+  });
+
+  it('missing value shows em dash and sinks to the bottom', async () => {
     const { target, component } = await mountContent(summaryW, {
       explore: makeCtx({ runs: [statRun('r1', 0.4), statRun('r2', undefined)] }),
     });
-    const rows = [...target.querySelectorAll('[data-summary-row]')] as HTMLElement[];
+    const rows = rowsOf(target);
     expect(rows[1].getAttribute('data-run-id')).toBe('r2');
-    expect((rows[1].querySelector('[data-summary-value]')?.textContent ?? '').trim()).toBe('—');
-    expect(rows[1].querySelector('[data-summary-bar]')).toBeNull();
+    const cells = [...rows[1].querySelectorAll('[data-matrix-cell]')] as HTMLElement[];
+    expect((cells[0].textContent ?? '').trim()).toBe('—');
+    expect(cells[0].style.background).toContain('muted'); // 无值 = 素底(不进热力色阶)
     unmount(component);
     target.remove();
   });
 
-  it('all-equal values still render full bars (no divide-by-zero)', async () => {
+  it('all-equal column marks every cell best (tied)', async () => {
     const { target, component } = await mountContent(summaryW, {
       explore: makeCtx({ runs: [statRun('r1', 0.7), statRun('r2', 0.7)] }),
     });
-    const bars = [...target.querySelectorAll('[data-summary-bar]')] as HTMLElement[];
-    expect(bars.length).toBe(2);
-    expect(bars.every((b) => b.style.width === '100%')).toBe(true);
-    expect(bars.some((b) => (b.getAttribute('style') ?? '').includes('NaN'))).toBe(false);
+    const cells = [...target.querySelectorAll('[data-matrix-cell]')] as HTMLElement[];
+    expect(cells.every((c) => c.getAttribute('data-best') === 'true')).toBe(true);
+    expect(cells.every((c) => c.querySelector('[data-matrix-best]'))).toBe(true);
     unmount(component);
     target.remove();
   });

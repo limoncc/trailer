@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   lowerIsBetter,
   summaryBars,
+  summaryMatrix,
   diffKeyRows,
   diffRowsNeeded,
   SUMMARY_STATS,
@@ -216,5 +217,103 @@ describe('diffRowsNeeded (自动高度贴合网格行)', () => {
 
   it('empty content falls back to the 2-row hint', () => {
     expect(diffRowsNeeded(0, 6, 600)).toBe(2);
+  });
+});
+
+// ─── Summary 矩阵热力(参考:多指标矩阵对比) ───
+
+describe('summaryMatrix', () => {
+  const table2 = (cells: Array<Record<string, number | undefined>>): SummaryTable => ({
+    metrics: [loss, acc],
+    rows: cells.map((c, i) => ({ runId: `r${i + 1}`, cells: [c as never, c as never] })),
+  });
+
+  it('normalizes each column independently (direction-aware) and marks column best', () => {
+    // loss: r1=0.4 r2=0.1(lower最优=r2) | acc: r1=0.9 r2=0.7(upper最优=r1)
+    const t = table2([
+      { best: 0.4 },
+      { best: 0.1 },
+    ]);
+    const out = summaryMatrix(t, { stats: ['best', 'best'], lowers: [true, false] });
+    expect(out.rows).toHaveLength(2);
+    const rowOf = (id: string) => out.rows.find((r) => r.runId === id)!;
+    // loss 列:r2 最优(t=1)、r1 最差(t=0);acc 列相反
+    expect(rowOf('r2').cells[0].isBest).toBe(true);
+    expect(rowOf('r1').cells[0].isBest).toBe(false);
+    expect(rowOf('r1').cells[1].isBest).toBe(true);
+    expect(rowOf('r2').cells[1].t).toBe(0);
+    expect(rowOf('r1').cells[0].t).toBe(0);
+  });
+
+  it('computes avg rank per run and sorts rows ascending', () => {
+    const t = table2([
+      { best: 0.4 }, // r1: loss第2 acc第1 → avg 1.5
+      { best: 0.1 }, // r2: loss第1 acc第2 → avg 1.5
+    ]);
+    const out = summaryMatrix(t, { stats: ['best', 'best'], lowers: [true, false] });
+    // 并列 → 稳定保持原序,avg 相同
+    expect(out.rows.map((r) => r.avgRank)).toEqual([1.5, 1.5]);
+    // 非并列:三 run
+    const t3: SummaryTable = {
+      metrics: [loss, acc],
+      rows: [
+        { runId: 'a', cells: [{ best: 0.4 } as never, { best: 0.7 } as never] },
+        { runId: 'b', cells: [{ best: 0.1 } as never, { best: 0.9 } as never] },
+        { runId: 'c', cells: [{ best: 0.9 } as never, { best: 0.5 } as never] },
+      ],
+    };
+    const out3 = summaryMatrix(t3, { stats: ['best', 'best'], lowers: [true, false] });
+    // loss(lower): b1 a2 c3;acc(upper): b1 a2 c3 → avg: b=1 a=2 c=3
+    expect(out3.rows.map((r) => r.runId)).toEqual(['b', 'a', 'c']);
+    expect(out3.rows.map((r) => r.avgRank)).toEqual([1, 2, 3]);
+  });
+
+  it('flipping one metric direction re-ranks that column and the avg', () => {
+    const t = table2([
+      { best: 0.4 },
+      { best: 0.1 },
+    ]);
+    // acc 方向翻回 lower(loss 也 lower):loss r2优,acc 0.9最优变 r1?lower 时 acc 0.7 r2优
+    const out = summaryMatrix(t, { stats: ['best', 'best'], lowers: [true, true] });
+    const rowOf = (id: string) => out.rows.find((r) => r.runId === id)!;
+    expect(rowOf('r2').cells[1].isBest).toBe(true); // acc lower → 0.7 最优
+    // r2: loss1 acc1 avg1;r1: 2/2 avg2 → r2 先
+    expect(out.rows[0].runId).toBe('r2');
+    expect(out.rows[0].avgRank).toBe(1);
+  });
+
+  it('sortByIndex orders rows by that metric rank only (综合 = 最后操作的指标)', () => {
+    const t3: SummaryTable = {
+      metrics: [loss, acc],
+      rows: [
+        { runId: 'a', cells: [{ best: 0.4 } as never, { best: 0.7 } as never] },
+        { runId: 'b', cells: [{ best: 0.1 } as never, { best: 0.9 } as never] },
+        { runId: 'c', cells: [{ best: 0.9 } as never, { best: 0.5 } as never] },
+      ],
+    };
+    // 依据 acc 列(upper):b(0.9)=1, a(0.7)=2, c(0.5)=3
+    const byAcc = summaryMatrix(t3, { stats: ['best', 'best'], lowers: [true, false], sortByIndex: 1 });
+    expect(byAcc.rows.map((r) => r.runId)).toEqual(['b', 'a', 'c']);
+    expect(byAcc.rows.map((r) => r.ranks[1])).toEqual([1, 2, 3]);
+    // 依据 loss 列(lower):b(0.1)=1, a(0.4)=2, c(0.9)=3 — 同序但按列语义独立计算
+    const byLoss = summaryMatrix(t3, { stats: ['best', 'best'], lowers: [true, false], sortByIndex: 0 });
+    expect(byLoss.rows.map((r) => r.ranks[0])).toEqual([1, 2, 3]);
+  });
+
+  it('missing values sink with rank = 有值数+1 and display —', () => {
+    const t: SummaryTable = {
+      metrics: [loss],
+      rows: [
+        { runId: 'a', cells: [{ best: 0.2 } as never] },
+        { runId: 'b', cells: [{}] },
+      ],
+    };
+    const out = summaryMatrix(t, { stats: ['best'], lowers: [true] });
+    const b = out.rows.find((r) => r.runId === 'b')!;
+    expect(b.cells[0].num).toBeNull();
+    expect(b.cells[0].display).toBe('—');
+    expect(b.cells[0].t).toBeNull();
+    expect(b.ranks[0]).toBe(2);
+    expect(out.rows[1].runId).toBe('b'); // 垫底
   });
 });

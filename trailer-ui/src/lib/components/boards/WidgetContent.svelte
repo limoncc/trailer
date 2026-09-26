@@ -16,6 +16,7 @@
   } from '$lib/utils/systemMetrics';
   import { metricId } from '$lib/utils/metricGroups';
   import type { DashWidget, RunInfo } from '$lib/utils/dashboard';
+  import { defaultWidgetTitle } from '$lib/utils/dashboard';
   import type { MetricRef } from '$lib/utils/explore';
   import type { BoardsData, MediaRow, MetricSeries } from './boardsData';
   import type { FilterPersistState } from '$lib/charts/lineFilter';
@@ -41,18 +42,16 @@
     type ExploreCtx,
   } from '$lib/utils/exploreWidgets';
   import * as Tabs from '$lib/components/ui/tabs';
-  import * as ToggleGroup from '$lib/components/ui/toggle-group';
   import { Badge } from '$lib/components/ui/badge';
   import { Separator } from '$lib/components/ui/separator';
   import * as Table from '$lib/components/ui/table';
   import {
     diffKeyRows,
-    summaryBars,
+    summaryMatrix,
     lowerIsBetter,
-    SUMMARY_STATS,
     type SummaryStat,
   } from '$lib/utils/exploreViz';
-  import { Trophy } from 'lucide-svelte';
+  import { Trophy, Clock, ArrowDown, ArrowUp } from 'lucide-svelte';
 
   interface Props {
     widget: DashWidget;
@@ -67,6 +66,8 @@
     runState?: string;
     /** 信息卡所需的 run 元信息 */
     runInfo?: RunInfo;
+    /** summary 卡视图态卡内标题改名(持久化 widget.title) */
+    onTitleChange?: (title: string) => void;
     /** info 卡编辑态:瓦片 label 双击改名 */
     editing?: boolean;
     onLabelEdit?: (itemIdx: number, label: string) => void;
@@ -82,7 +83,7 @@
     explore?: ExploreCtx;
   }
 
-  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, onFilterChange, replayStep = null, onSmoothChange, explore }: Props = $props();
+  let { widget, runId, metrics, data, heightPx, running = false, runState = '', runInfo, editing = false, onLabelEdit, onModelLabelEdit, onFilterChange, replayStep = null, onSmoothChange, onTitleChange, explore }: Props = $props();
 
   // ─── 视口内懒挂载:G2/Three 实例创建贵(单卡 100ms+),新增卡/整板加载时
   // 只渲染视口附近的卡,滚到附近(300px 预载)才挂载真实内容;一次性闩,之后保持
@@ -372,38 +373,66 @@
     widget.type === 'summary' && explore ? buildSummaryRows(explore.runs, widget.metrics) : null
   );
 
-  // ─── Summary 卡视图态:卡内切换(不进 widget/不入库),重开回默认 ───
-  let summaryMetricKey = $state('');
-  let summaryStat = $state<SummaryStat>('best');
-  /** 'auto' = 按指标名/后端规则推断;用户点方向后显式化并跨指标保持 */
-  let summaryDir = $state<'auto' | 'lower' | 'upper'>('auto');
+  // ─── Summary 卡视图态(矩阵热力):每指标独立口径(列头图标循环)+ 独立方向(列头箭头),均不入库 ───
+  /** 单按钮口径循环:last → min → max(best 由用户自行判定,不内置) */
+  type Stat3 = 'last' | 'min' | 'max';
+  const STAT_CYCLE: Stat3[] = ['last', 'min', 'max'];
+  const STAT_ICONS: Record<Stat3, typeof Clock> = { last: Clock, min: ArrowDown, max: ArrowUp };
+  const STAT_LABEL: Record<Stat3, string> = { last: 'last', min: 'min', max: 'max' };
+  /** 指标 key → 显式口径;缺省 last(原始最新值) */
+  let metricStats = $state<Record<string, Stat3>>({});
+  /** 综合依据 = 用户最后操作的指标;缺省(未操作)= 最后一个指标 */
+  let refMetricKey = $state<string | null>(null);
+  /** summary 卡内标题行(视图态):单击改名,onTitleChange 持久化 */
+  let titleEditing = $state(false);
+  let titleDraft = $state('');
+  const cardTitle = $derived(defaultWidgetTitle(widget));
+  function startTitleEdit() {
+    titleDraft = cardTitle;
+    titleEditing = true;
+  }
+  function commitTitle() {
+    if (!titleEditing) return;
+    titleEditing = false;
+    const t = titleDraft.trim();
+    if (t && t !== cardTitle) onTitleChange?.(t);
+  }
+  /** 改名输入框挂载即聚焦(避免 a11y autofocus 警告) */
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
+  }
+  /** 指标 key(`${key}/${context}`) → 显式方向;缺省按 lowerIsBetter 推断 */
+  let metricDirs = $state<Record<string, 'lower' | 'upper'>>({});
 
-  let summaryMetricIndex = $derived.by(() => {
+  let summaryLowers = $derived.by(() => {
+    if (!summaryTable) return [];
+    return summaryTable.metrics.map((m) => {
+      const d = metricDirs[`${m.key}/${m.context}`];
+      if (d) return d === 'lower';
+      return lowerIsBetter(m, explore?.runs); // 与后端 best 同源的初始方向
+    });
+  });
+  let summaryStats = $derived.by(() => {
+    if (!summaryTable) return [];
+    return summaryTable.metrics.map((m) => metricStats[`${m.key}/${m.context}`] ?? 'last');
+  });
+  /** 综合依据列(表头高亮):初始 = 最后一个指标 */
+  let refIndex = $derived.by(() => {
     if (!summaryTable || summaryTable.metrics.length === 0) return -1;
-    if (!summaryMetricKey) return 0;
-    const i = summaryTable.metrics.findIndex((m) => `${m.key}/${m.context}` === summaryMetricKey);
-    return i >= 0 ? i : 0; // 指标集变化后钳制,不崩
+    if (refMetricKey) {
+      const i = summaryTable.metrics.findIndex((m) => `${m.key}/${m.context}` === refMetricKey);
+      if (i >= 0) return i;
+    }
+    return summaryTable.metrics.length - 1;
   });
-  let summaryMetric = $derived(
-    summaryMetricIndex >= 0 && summaryTable ? summaryTable.metrics[summaryMetricIndex] ?? null : null
-  );
-  let summaryLower = $derived.by(() => {
-    if (summaryDir === 'lower') return true;
-    if (summaryDir === 'upper') return false;
-    return summaryMetric ? lowerIsBetter(summaryMetric, explore?.runs) : true;
-  });
-  let summaryView = $derived.by(() =>
-    summaryMetricIndex >= 0 && summaryTable
-      ? summaryBars(summaryTable, {
-          metricIndex: summaryMetricIndex,
-          stat: summaryStat,
-          lowerIsBetter: summaryLower,
-        })
+  let matrixView = $derived.by(() =>
+    summaryTable
+      ? summaryMatrix(summaryTable, { stats: summaryStats, lowers: summaryLowers, sortByIndex: refIndex })
       : null
   );
-  let summaryLines = $derived.by(() => {
-    if (!summaryView || !explore) return [];
-    return summaryView.rows.map((r) => {
+  let matrixRows = $derived.by(() => {
+    if (!matrixView || !explore) return [];
+    return matrixView.rows.map((r) => {
       const run = explore.runs.find((x) => x.run_id === r.runId);
       return {
         ...r,
@@ -412,6 +441,34 @@
       };
     });
   });
+  /** 单按钮:单击循环口径(延迟触发),双击切方向 —— 双击时取消未决的单击 */
+  let statBtnTimer: ReturnType<typeof setTimeout> | undefined;
+  function onStatBtnClick(key: string) {
+    if (statBtnTimer !== undefined) {
+      clearTimeout(statBtnTimer);
+      statBtnTimer = undefined;
+      return; // 第二次 click = 双击前半,交给 dblclick 切方向
+    }
+    statBtnTimer = setTimeout(() => {
+      statBtnTimer = undefined;
+      cycleStat(key);
+    }, 220);
+  }
+  function cycleStat(key: string) {
+    const cur = (metricStats[key] ?? 'last') as Stat3;
+    const i = STAT_CYCLE.indexOf(cur);
+    metricStats = { ...metricStats, [key]: STAT_CYCLE[(i + 1) % STAT_CYCLE.length] };
+    refMetricKey = key; // 最后操作的指标 = 综合依据
+  }
+  function flipDir(key: string, lower: boolean) {
+    if (statBtnTimer !== undefined) {
+      clearTimeout(statBtnTimer);
+      statBtnTimer = undefined;
+    }
+    metricDirs = { ...metricDirs, [key]: lower ? 'upper' : 'lower' };
+    refMetricKey = key;
+  }
+
   /** 每键独立的基准 run(点击卡切换,视图态不入库;缺省 runs[0]) */
   let diffBases = $state<Record<string, string>>({});
   function setDiffBase(path: string, runId: string) {
@@ -873,108 +930,110 @@
   {#if !summaryTable || summaryTable.metrics.length === 0}
     <div class="h-full flex items-center justify-center text-xs text-muted-foreground">Runs have no summary yet</div>
   {:else}
-    <!-- 条形对比:指标 tabs + 口径/方向控制条(sticky top) + 每 run 一条 + 均值虚线 + 汇总(sticky bottom) -->
-    <div class="h-full overflow-auto border border-border rounded" data-summary-card>
-      <div class="sticky top-0 z-20 bg-card border-b border-border/60 px-1.5 py-1 flex flex-col gap-1">
-        <Tabs.Root bind:value={summaryMetricKey} class="gap-0">
-          <Tabs.List class="h-auto p-0.5 justify-start gap-1 bg-muted overflow-x-auto" data-summary-metrics>
-            {#each summaryTable.metrics as m (m.key + '/' + m.context)}
-              <Tabs.Trigger
-                value={`${m.key}/${m.context}`}
-                data-summary-metric-tab
-                data-metric={`${m.key}/${m.context}`}
-                class="px-2 py-0.5 text-[11px] whitespace-nowrap"
-              >
-                {shortMetricPath(m)}
-              </Tabs.Trigger>
-            {/each}
-          </Tabs.List>
-        </Tabs.Root>
-        <div class="flex items-center gap-1.5">
-          <ToggleGroup.Root
-            type="single"
-            value={summaryStat}
-            onValueChange={(v) => { if (v) summaryStat = v as SummaryStat; }}
-            variant="outline"
-            class="h-5"
-            data-summary-stat
-          >
-            {#each SUMMARY_STATS as s (s.id)}
-              <ToggleGroup.Item value={s.id} class="px-1.5 text-[10px]" data-summary-stat-tab={s.id}>{s.label}</ToggleGroup.Item>
-            {/each}
-          </ToggleGroup.Root>
-          <ToggleGroup.Root
-            type="single"
-            value={summaryLower ? 'lower' : 'higher'}
-            onValueChange={(v) => {
-              if (v) summaryDir = v === 'lower' ? 'lower' : 'upper';
-            }}
-            variant="outline"
-            class="h-5 ml-auto"
-            data-summary-dir
-          >
-            <ToggleGroup.Item value="lower" class="px-1.5 text-[10px]">↓ lower better</ToggleGroup.Item>
-            <ToggleGroup.Item value="higher" class="px-1.5 text-[10px]">↑ higher better</ToggleGroup.Item>
-          </ToggleGroup.Root>
+    <!-- 多指标矩阵热力:圆角色块 + 宽间距;列内独立归一着色,白点=列最优;
+         单按钮双职责(单击循环口径 last/min/max,双击翻方向);Rank = 最后操作指标的名次 -->
+    <div class="h-full overflow-auto" data-summary-card>
+      {#if !editing}
+        <div class="px-3 pt-1.5 pb-0.5" data-summary-title>
+          {#if titleEditing}
+            <input
+              data-summary-title-input
+              class="w-full max-w-[240px] px-1.5 py-0.5 text-xs border border-border rounded bg-background"
+              bind:value={titleDraft}
+              use:focusOnMount
+              onkeydown={(e) => {
+                if (e.key === 'Enter') commitTitle();
+                if (e.key === 'Escape') { titleEditing = false; }
+              }}
+              onblur={commitTitle}
+            />
+          {:else}
+            <button
+              type="button"
+              class="text-xs font-semibold truncate max-w-full text-left hover:text-primary transition-colors"
+              title="Click to rename"
+              onclick={startTitleEdit}
+            >{cardTitle}</button>
+          {/if}
         </div>
-      </div>
+      {/if}
 
-      <div class="relative" data-summary-rows>
-        {#each summaryLines as row (row.runId)}
-          <!-- 固定三段(与均值线偏移成组,改一处必同步):px-1.5(6) + 身份 w-28(112) + gap-1.5(6) = 124;右 = gap 6 + 数值 w-14(56) + px-1.5(6) = 68 -->
-          <div
-            class="flex items-center gap-1.5 px-1.5 py-[3px] border-b border-border/30 last:border-b-0 hover:bg-accent/30"
-            data-summary-row
-            data-run-id={row.runId}
-            data-best={row.isBest ? 'true' : 'false'}
-          >
-            <div class="w-28 shrink-0 min-w-0 flex items-center gap-1.5">
-              <span data-summary-dot class="size-2 rounded-full border border-black/10 shrink-0" style="background:{row.color}"></span>
-              <span class="min-w-0 truncate text-[11px] {row.isBest ? 'font-semibold' : ''}" title={row.label}>{row.label}</span>
-              {#if row.isBest}
-                <Badge data-summary-badge class="px-1 text-[8px]">BEST</Badge>
-              {/if}
-            </div>
-            <div class="flex-1 min-w-0 relative h-2 rounded-full bg-muted">
-              {#if row.pct != null}
-                <div
-                  data-summary-bar
-                  class="absolute inset-y-0 left-0 rounded-full {row.isBest ? '' : 'opacity-55'}"
-                  style="width:{row.pct}%; background:{row.color}"
-                ></div>
-              {/if}
-            </div>
-            <span
-              data-summary-value
-              class="w-14 shrink-0 text-right text-[10px] font-mono tabular-nums {row.isBest ? 'font-semibold' : 'text-muted-foreground'}"
-              title={summaryStat === 'best' && row.step != null ? `best @ step ${row.step}` : undefined}
-            >{row.display}</span>
-          </div>
-        {/each}
-        {#if summaryView?.meanPct != null}
-          <div class="pointer-events-none absolute inset-y-0 left-[124px] right-[68px] z-10" aria-hidden="true">
-            <div data-summary-mean class="absolute inset-y-0 border-l border-dashed border-foreground/45" style="left:{summaryView.meanPct}%"></div>
-          </div>
-        {/if}
-      </div>
+      <Table.Root class="w-full text-xs border-separate border-spacing-1">
+        <Table.Header>
+          <Table.Row class="hover:bg-transparent">
+            <Table.Head class="sticky top-0 left-0 z-20 h-auto pl-3 pr-3 py-1 bg-card text-muted-foreground text-[11px]">Run</Table.Head>
+            {#each summaryTable.metrics as m (m.key + '/' + m.context)}
+              {@const mkey = `${m.key}/${m.context}`}
+              {@const lower = summaryLowers[summaryTable.metrics.indexOf(m)] ?? true}
+              <Table.Head class="sticky top-0 z-10 h-auto px-2 py-1 bg-card whitespace-nowrap text-xs">
+                {@const stat = summaryStats[summaryTable.metrics.indexOf(m)] ?? 'last'}
+                {@const StatIcon = STAT_ICONS[stat]}
+                <span class="inline-flex items-center gap-1.5 {summaryTable.metrics.indexOf(m) === refIndex ? 'font-semibold text-foreground' : 'text-foreground/80'}">
+                  {shortMetricPath(m)}
+                  <!-- 单按钮双职责:单击循环口径(last/min/max),双击翻转方向 -->
+                  <button
+                    type="button"
+                    data-matrix-btn={mkey}
+                    data-lower={lower ? 'true' : 'false'}
+                    data-ref={summaryTable.metrics.indexOf(m) === refIndex ? 'true' : 'false'}
+                    title="stat: {stat} · direction: {lower ? 'lower is better' : 'higher is better'} (click: cycle stat, double-click: flip)"
+                    aria-label="stat-direction"
+                    class="inline-flex items-center justify-center gap-0.5 h-4 px-1 rounded border text-[9px] leading-none transition-colors {lower
+                      ? 'border-red-500/40 bg-red-500/15 text-red-500'
+                      : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600'}"
+                    onclick={() => onStatBtnClick(mkey)}
+                    ondblclick={() => flipDir(mkey, lower)}
+                  >
+                    <StatIcon class="size-3" />
+                    <span>{lower ? '↓' : '↑'}</span>
+                  </button>
+                </span>
+              </Table.Head>
+            {/each}
+            <Table.Head class="sticky top-0 z-10 h-auto px-2 py-1 bg-card text-right text-xs font-medium">Rank</Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {#each matrixRows as row (row.runId)}
+            <Table.Row data-matrix-row data-run-id={row.runId} class="hover:bg-transparent">
+              <Table.Cell class="sticky left-0 z-10 bg-card pl-3 pr-3 py-1 whitespace-nowrap">
+                <span class="flex items-center gap-2">
+                  <span data-matrix-dot class="size-2 rounded-full border border-black/10 shrink-0" style="background:{row.color}"></span>
+                  <span class="text-xs font-semibold">{row.label}</span>
+                </span>
+              </Table.Cell>
+              {#each row.cells as cell, ci (ci)}
+                <Table.Cell
+                  data-matrix-cell
+                  data-best={cell.isBest ? 'true' : 'false'}
+                  data-metric={summaryTable.metrics[ci].key + '/' + summaryTable.metrics[ci].context}
+                  class="relative rounded-lg px-3 py-1.5 text-center font-mono tabular-nums"
+                  style={cell.t != null ? `background: color-mix(in srgb, var(--primary) ${Math.round(5 + cell.t * 95)}%, var(--card))` : 'background: var(--muted)'}
+                >
+                  <span class="text-sm font-semibold {cell.t != null && cell.t > 0.5 ? 'text-primary-foreground' : ''}">{cell.display}</span>
+                  {#if cell.isBest}
+                    <span data-matrix-best class="absolute top-1.5 right-1.5 size-2 rounded-full bg-white shadow-sm border border-black/10"></span>
+                  {/if}
+                </Table.Cell>
+              {/each}
+              {@const rank = refIndex >= 0 ? row.ranks[refIndex] : Math.round(row.avgRank)}
+              <Table.Cell class="px-2 py-1 text-center whitespace-nowrap">
+                <div class="text-sm font-semibold leading-none {rank === 1 ? 'text-primary' : 'text-foreground'}">{rank}{rank === 1 ? ' ★' : ''}</div>
+                <div class="text-[8px] text-muted-foreground leading-none mt-0.5">
+                  {refIndex >= 0 ? shortMetricPath(summaryTable.metrics[refIndex]) : ''}
+                </div>
+              </Table.Cell>
+            </Table.Row>
+          {/each}
+        </Table.Body>
+      </Table.Root>
 
-      <Separator />
-      <div
-        data-summary-footer
-        class="sticky bottom-0 px-2 py-1 bg-card text-[10px] text-muted-foreground flex flex-wrap gap-x-2"
-      >
-        {#if summaryMetric}
-          <span>metric {shortMetricPath(summaryMetric)}</span>
-        {/if}
-        <span>· {summaryLines.length} runs</span>
-        {#if summaryView?.bestRunId}
-          <span>· best {explore?.labelOf(summaryView.bestRunId)} = {formatStat(summaryView.bestValue)}</span>
-        {/if}
-        {#if summaryView?.mean != null}
-          <span>· mean {formatStat(summaryView.mean)}</span>
-        {:else}
-          <span>· no data</span>
-        {/if}
+      <div data-matrix-legend class="sticky bottom-0 bg-card px-3 py-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+        <span>worse</span>
+        <span class="h-1.5 w-20 rounded-full border border-border/60" style="background: linear-gradient(to right, var(--card), var(--primary))"></span>
+        <span>better</span>
+        <span class="flex items-center gap-1"><span class="size-2 rounded-full bg-white shadow-sm border border-black/10 inline-block"></span> = column best</span>
+        <span class="ml-auto">click: cycle stat (last/min/max) · double-click: flip</span>
       </div>
     </div>
   {/if}
