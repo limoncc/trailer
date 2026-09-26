@@ -7,6 +7,8 @@
   import type { DashWidget, RunInfo, SnapDir } from '$lib/utils/dashboard';
   import { clampH, clampW, computeSnapSeams, defaultWidgetTitle, minSize } from '$lib/utils/dashboard';
   import { infoRowsNeeded } from '$lib/utils/infoCard';
+  import { computeConfigDiff } from '$lib/utils/exploreWidgets';
+  import { diffRowsNeeded } from '$lib/utils/exploreViz';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import type { BoardsData, MetricSeries } from './boardsData';
   import type { ExploreCtx } from '$lib/utils/exploreWidgets';
@@ -141,14 +143,31 @@ import { onMount } from 'svelte';
   function effectiveW(widget: DashWidget): number {
     return resizing?.id === widget.id ? resizing.w : widget.w;
   }
-  function effectiveH(widget: DashWidget): number {
-    // info 卡默认高度贴合内容(头部条 + 瓦片换行),不留空白也不出滚动条;
-    // 用户拖拽过(hFixed)或正在拖拽时取手动值,下限仍为自适应高度(拖不出滚动条)
+  /** 内容自动高度(info/diff):返回该卡贴合内容需要的网格行数;其余类型 null(按 widget.h)。
+   *  编辑态把 header 高度计入(extraPx),否则内容区被 header 挤压裁切(实测 InfoCard 79px 内容塞进 63px)。 */
+  function autoRows(widget: DashWidget, cardW: number, extraPx = 0): number | null {
+    // info:头部条 + 瓦片换行
     if (widget.type === 'info') {
-      const cardW = gridW > 0 ? (gridW * widget.w) / COLS : 0;
-      const auto = cardW > 0 ? infoRowsNeeded(widget, cardW, ROW_PX, GAP_PX) : widget.h;
+      return cardW > 0 ? infoRowsNeeded(widget, cardW, ROW_PX, GAP_PX, extraPx) : widget.h;
+    }
+    // diff:键行卡片流(行数 = 键数 × 卡片行,窄卡 wrap 加高),空态 2 行
+    if (widget.type === 'diff') {
+      if (cardW <= 0) return widget.h;
+      const keys = explore ? computeConfigDiff(explore.runs, widget.paths).length : 0;
+      return diffRowsNeeded(keys, explore?.runs.length ?? 0, cardW, ROW_PX, GAP_PX, extraPx);
+    }
+    return null;
+  }
+
+  function effectiveH(widget: DashWidget): number {
+    // 内容自动高度的卡(info/diff):默认贴合内容不留白也不出滚动条;
+    // 用户拖拽过(hFixed)或正在拖拽时取手动值,下限仍为自适应高度(拖不出滚动条)
+    const cardW = gridW > 0 ? (gridW * widget.w) / COLS : 0;
+    const auto = autoRows(widget, cardW, editing ? HEADER_PX : 0);
+    if (auto !== null) {
       const manual = resizing?.id === widget.id ? resizing.h : widget.h;
-      if (resizing?.id === widget.id || widget.hFixed) return Math.max(auto, manual);
+      const fixed = (widget.type === 'info' || widget.type === 'diff') && widget.hFixed === true;
+      if (resizing?.id === widget.id || fixed) return Math.max(auto, manual);
       return auto;
     }
     // 其余类型:拖拽中实时预览高度(#46 起丢失导致拖高度无反馈,#51 恢复)
@@ -183,7 +202,7 @@ import { onMount } from 'svelte';
         onChange(
           widgets.map((w) =>
             w.id === resizing!.id
-              ? { ...w, w: resizing!.w, h: resizing!.h, ...(w.type === 'info' ? { hFixed: true } : {}) }
+              ? { ...w, w: resizing!.w, h: resizing!.h, ...((w.type === 'info' || w.type === 'diff') ? { hFixed: true } : {}) }
               : w
           )
         );
@@ -318,9 +337,11 @@ import { onMount } from 'svelte';
     <div
       data-card-idx={idx}
       {...(editing ? { role: 'button', tabindex: 0 } : {})}
-      class="border rounded-md overflow-hidden flex flex-col bg-card relative group/card {editing
+      class="{widget.type === 'diff' && !editing ? '' : 'border'} rounded-md overflow-hidden flex flex-col bg-card relative group/card {editing
         ? 'border-dashed cursor-grab'
-        : 'border-border'} {dragId === widget.id ? 'opacity-40' : ''} {dragId !== null && overIndex === idx && dragId !== widget.id
+        : widget.type === 'diff'
+          ? ''
+          : 'border-border'} {dragId === widget.id ? 'opacity-40' : ''} {dragId !== null && overIndex === idx && dragId !== widget.id
         ? 'ring-2 ring-primary/60'
         : ''}"
       style="grid-column: span {effectiveW(widget)}; grid-row: span {isCollapsed ? 1 : effectiveH(widget)}; {widget.color
@@ -332,7 +353,7 @@ import { onMount } from 'svelte';
       }}
     >
       <!-- Header(info 卡视图态隐藏,整卡即信息面板;编辑态保留以便拖拽/改名/删除) -->
-      {#if editing || widget.type !== 'info'}
+      {#if editing || (widget.type !== 'info' && widget.type !== 'diff')}
       <div class="flex items-center gap-1.5 px-2.5 border-b border-border bg-muted/20 shrink-0" style="height: {HEADER_PX}px;">
         {#if editing}
           <span
@@ -425,7 +446,7 @@ import { onMount } from 'svelte';
         <!-- 编辑态禁内容指针事件(Boards:防误触过滤/媒体控件,拖拽只从把手开始)。
              Explore 例外:图例点击显隐、框选过滤都发生在编辑态,禁了图例就永远点不了;
              拖拽/缩放仍在 header 把手与右下角手柄上,与内容交互不冲突。 -->
-        <div class="flex-1 min-h-0 {widget.type === 'info' && !editing ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' && !explore ? 'pointer-events-none' : ''}">
+        <div class="flex-1 min-h-0 {(widget.type === 'info' || widget.type === 'diff') ? 'p-0' : 'p-2'} {editing && widget.type !== 'info' && !explore ? 'pointer-events-none' : ''}">
           <!-- 单卡渲染失败只在卡内显示错误,不让异常冒泡拖垮整个看板 -->
           <svelte:boundary onerror={() => {}}>
             <WidgetContent {widget} {runId} {metrics} data={boardsData} heightPx={contentHeight(effectiveH(widget))} {running} {runState} {runInfo} {replayStep} {explore} editing={editing && widget.type === 'info'} onLabelEdit={(itemIdx, label) => handleInfoLabelEdit(widget, itemIdx, label)} onModelLabelEdit={(label) => handleInfoModelLabelEdit(widget, label)} onFilterChange={(filter) => handleLineFilterChange(widget, filter)} onSmoothChange={explore && widget.type === 'line' ? (v) => handleLineSmoothChange(widget, v) : undefined} />

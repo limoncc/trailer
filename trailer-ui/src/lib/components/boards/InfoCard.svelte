@@ -128,7 +128,7 @@
   <!-- 头部条:状态点 + 模型名 + 状态 | step + elapsed/started(勾选 status 项才显示;
        窄卡右列整体换行,不再挤占模型名宽度) -->
   {#if hasStatus}
-    <div class="flex flex-wrap items-start gap-x-3 gap-y-1 px-3 py-2 {cellDefs.length > 0 ? 'border-b border-border' : ''}">
+    <div class="flex flex-wrap items-start gap-x-3 gap-y-1 px-3 py-1 {cellDefs.length > 0 ? 'border-b border-border' : ''}">
       <div class="min-w-0 flex-1 min-w-[60px]">
         <div class="flex items-center gap-2 min-w-0">
           <span class="relative flex w-2 h-2 shrink-0">
@@ -186,7 +186,7 @@
   {:else}
     <div class="flex-1 min-h-0 overflow-auto grid gap-px bg-border" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 110px), 1fr));">
       {#each cellDefs as d, i (i)}
-        <div class="bg-card p-2.5 flex flex-col justify-center min-h-[64px]">
+        <div class="bg-card p-2 flex flex-col justify-center min-h-[56px]">
           <div class="text-[11px] text-muted-foreground truncate" title={d.cell.label}>
             {#if editing && editIdx === d.idx && (d.item.src === 'config' || d.item.src === 'metric' || d.item.src === 'cost')}
               <input
