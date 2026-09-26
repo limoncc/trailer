@@ -192,6 +192,24 @@ describe('WidgetContent line — explore (multi run)', () => {
     target.remove();
   });
 
+  it('draws NOTHING for a metric with zero checked runs (默认不勾)', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: '', run_ids: [] },
+    ] }), {
+      metrics: [...metricSeries('r1'), ...metricSeries('r2')],
+      explore: makeCtx(),
+    });
+    const spec = await lastSpec();
+    const rows = (spec!.data ?? []) as Array<{ series: string }>;
+    // 勾了指标但一个 run 都没挑 → 全过滤,无线
+    expect([...new Set(rows.map((r) => r.series))]).toEqual([]);
+    // 系列清单也没有(没有真实画出的系列)
+    await openSeriesPanel(target);
+    expect(target.querySelectorAll('[data-series-row]').length).toBe(0);
+    unmount(component);
+    target.remove();
+  });
+
   it('draws only runs the metric run_ids checked (勾选细化到 run)', async () => {
     const { target, component } = await mountContent(lineWidget({ metrics: [
       { key: 'loss', context: '', run_ids: ['r1'] },
@@ -316,6 +334,29 @@ describe('WidgetContent line — explore (multi run)', () => {
     expect((groups[0].textContent ?? '').replace(/\s+/g, ' ').trim()).toContain('alpha');
     const leaves = [...target.querySelectorAll('[data-series-leaf]')].map((l) => (l.textContent ?? '').trim());
     expect(leaves).toEqual(['train/s1_seq32k/loss', 'train/s2_seq64k/loss']);
+    unmount(component);
+    target.remove();
+  });
+
+  it('two runs sharing one display name render distinct series (each_key_duplicate regression)', async () => {
+    // run.name 相同、run_id 不同(如 minirl_grpo_cell_b2_seed0 起了两次):
+    // 旧代码 label/系列名完全相同 → seriesGroups 合并成一组、组内 (s.name) 撞 key → Widget failed to render
+    const { target, component } = await mountContent(lineWidget(), {
+      metrics: [...metricSeries('r1'), ...metricSeries('r2')],
+      explore: makeCtx({ labelOf: () => 'same-name' }),
+    });
+    await openSeriesPanel(target);
+    // 组头按 run 拆开(label 消歧),各带 run_id 短码
+    const groups = [...target.querySelectorAll('[data-series-group]')];
+    expect(groups.length).toBe(2);
+    const heads = groups.map((g) => g.getAttribute('title') ?? (g.textContent ?? ''));
+    expect(heads[0]).not.toBe(heads[1]);
+    // 系列名唯一(G2 domain 与 each key 都依赖它)
+    const spec = await lastSpec();
+    const series = [...new Set((spec!.data as Array<{ series: string }>).map((d) => d.series))];
+    expect(series.length).toBe(2);
+    // 两组各一条叶子
+    expect(target.querySelectorAll('[data-series-row]').length).toBe(2);
     unmount(component);
     target.remove();
   });

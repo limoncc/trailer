@@ -141,6 +141,22 @@
       // 着色按 run(缺省)时每 (run, 指标) 一个色键 —— 同 run 的多指标不再挤同一种颜色;
       // 选了 config/project 等维度时仍按该维度的值着色(用户主动要按值分组)
       const byRun = !widget.colorBy || widget.colorBy.kind === 'run';
+      // 同名 run(run.name 相同、run_id 不同,如同一脚本起两次)→ label 加 run_id 前 6 位消歧:
+      // 否则按 run 分组的组头撞名 → 组内两条 (s.name) 相同 → each_key_duplicate,整卡 "Widget failed to render"
+      const idsByLabel = new Map<string, Set<string>>();
+      if (byRun) {
+        for (const g of metrics) {
+          const lb = explore.labelOf(g.run_id ?? '');
+          const set = idsByLabel.get(lb) ?? new Set<string>();
+          set.add(g.run_id ?? '');
+          idsByLabel.set(lb, set);
+        }
+      }
+      const runLabel = (runId: string): string => {
+        const lb = explore.labelOf(runId);
+        const ids = idsByLabel.get(lb);
+        return ids && ids.size > 1 ? `${lb} (${runId.slice(0, 6)})` : lb;
+      };
       const raw: Array<{ label: string; m: (typeof widget.metrics)[number]; cv: string; groups: MetricSeries[] }> = [];
       for (const m of widget.metrics) {
         for (const g of metrics) {
@@ -151,18 +167,25 @@
           const run = explore.runs.find((r) => r.run_id === runId);
           const cv = byRun ? lineSeriesKey(runId, m) : run ? explore.colorValueOf(run, widget.colorBy) : runId;
           // 着色按 run → 显示 run 名;按其他维度 → 显示该维度的值(project 名/config 值)
-          const label = byRun ? (runId ? explore.labelOf(runId) : '') : cv;
+          const label = byRun ? (runId ? runLabel(runId) : '') : cv;
           raw.push({ label, m, cv, groups: [g] });
         }
       }
       // 显示名:<run>/<context 首段>/<key>(如 midtrain-x/train/loss);
-      // 同卡内短名撞车(同 run 的 train/s1 与 train/s2 两级 context)才补全完整 context 消歧
+      // 同卡内短名撞车(同 run 的 train/s1 与 train/s2 两级 context)才补全完整 context 消歧;
+      // full 后仍撞(按值着色时不同 run 同 cv 同指标)→ 再追加 run_id 短码兜底,保证 each key / G2 domain 唯一
       const short = (x: (typeof raw)[number]) => `${x.label}/${shortMetricPath(x.m)}`;
       const full = (x: (typeof raw)[number]) => `${x.label}/${fullMetricPath(x.m)}`;
       const hits = new Map<string, number>();
       for (const x of raw) hits.set(short(x), (hits.get(short(x)) ?? 0) + 1);
-      return raw.map((x) => ({
-        name: (hits.get(short(x)) ?? 0) > 1 ? full(x) : short(x),
+      const names = raw.map((x) => ((hits.get(short(x)) ?? 0) > 1 ? full(x) : short(x)));
+      const nameHits = new Map<string, number>();
+      for (const n of names) nameHits.set(n, (nameHits.get(n) ?? 0) + 1);
+      return raw.map((x, i) => ({
+        name:
+          (nameHits.get(names[i]) ?? 0) > 1
+            ? `${names[i]} (${(x.groups[0]?.run_id ?? '').slice(0, 6)})`
+            : names[i],
         label: x.label,
         m: x.m,
         cv: x.cv,

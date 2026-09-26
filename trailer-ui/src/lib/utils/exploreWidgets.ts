@@ -63,7 +63,9 @@ export function computeConfigDiff(runs: RunRecord[], paths?: string[]): ConfigDi
   for (const path of collectConfigPaths(runs)) {
     if (wanted && !wanted.has(path)) continue;
     const values = runs.map((r) => stringifyLeaf(getByPath(r.config ?? {}, path)));
-    if (values.every((v) => v === values[0])) continue;
+    // 只有"空 paths = 全部差异键"才筛掉无差异的列;点名选中的键即使各 run 相同也照显
+    // (否则单独选 train.lr 这类同值键会整列消失、全选也只剩有差异的几列)
+    if (!wanted && values.every((v) => v === values[0])) continue;
     rows.push({ path, values });
   }
   return rows;

@@ -76,8 +76,9 @@ describe('computeConfigDiff', () => {
     expect(diff.map((d) => d.path)).toEqual(['name', 'params']);
     // 未选中的 model.depth 被排除
     expect(diff.find((d) => d.path === 'model.depth')).toBeUndefined();
-    // 选中但无差异的键不出现
-    expect(computeConfigDiff(runs.slice(0, 2), ['model.depth'])).toEqual([]);
+    // 选中但无差异的键也要出现(用户点名要看这一列;只有"空 paths=全部差异键"才筛差异)
+    expect(computeConfigDiff(runs.slice(0, 2), ['model.depth']).map((d) => d.path)).toEqual(['model.depth']);
+    expect(computeConfigDiff(runs.slice(0, 2), ['model.depth'])[0].values).toEqual(['12', '12']);
     // 空 paths = 对比全部差异键(缺省语义)
     expect(computeConfigDiff(runs.slice(0, 2), [])).toEqual(computeConfigDiff(runs.slice(0, 2)));
   });

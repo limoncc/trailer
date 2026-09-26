@@ -143,12 +143,13 @@ describe('parseLayout', () => {
     expect((again.widgets[0] as any).metrics[0].run_ids).toEqual(['r1', 'r2']);
   });
 
-  it('drops metrics whose run_ids sanitize to empty, ignores non-array run_ids', () => {
+  it('keeps empty run_ids (指标已选、零 run 手动挑), cleans invalid items, ignores bad types', () => {
     const s = JSON.stringify({
       version: 3,
       widgets: [
-        // 空数组 / 全非法项 = 选了但没有有效 run → 整条 metric 丢弃
+        // 空数组 = 勾了指标但一个 run 都没挑 → 保留(不画线,等手动勾)
         { id: 'w1', type: 'line', metrics: [{ key: 'loss', context: '', run_ids: [] }], w: 6, h: 4 },
+        // 全非法项清洗后同样保留为空数组
         { id: 'w2', type: 'line', metrics: [{ key: 'acc', context: '', run_ids: [42, null] }], w: 6, h: 4 },
         // 类型错的字段忽略(= 缺省全部),metric 本身保留
         { id: 'w3', type: 'line', metrics: [{ key: 'loss', context: '', run_ids: 'r1' }], w: 6, h: 4 },
@@ -158,8 +159,8 @@ describe('parseLayout', () => {
     });
     const parsed = parseLayout(s);
     const byId = (id: string) => parsed.widgets.find((w) => w.id === id) as any;
-    expect(byId('w1')).toBeUndefined();
-    expect(byId('w2')).toBeUndefined();
+    expect(byId('w1').metrics[0].run_ids).toEqual([]);
+    expect(byId('w2').metrics[0].run_ids).toEqual([]);
     expect(byId('w3').metrics[0].run_ids).toBeUndefined();
     expect(byId('w4').metrics[0].run_ids).toEqual(['r1']);
   });

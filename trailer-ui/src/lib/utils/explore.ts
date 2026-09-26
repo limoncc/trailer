@@ -32,7 +32,10 @@ export interface MetricRef {
   context: string;
 }
 
-/** 指标选择(勾选细化到 run):run_ids 缺省 = 全部选中 run;空数组非法(parse 时丢该 metric) */
+/** 指标选择(勾选细化到 run):
+ *  run_ids 缺省(undefined) = 全部选中 run(旧 layout 兼容);
+ *  空数组 = 勾了指标但一个 run 都没挑(画线侧全过滤,手动勾哪个画哪个);
+ *  非空 = 仅这些 run。 */
 export interface MetricSel extends MetricRef {
   run_ids?: string[];
 }

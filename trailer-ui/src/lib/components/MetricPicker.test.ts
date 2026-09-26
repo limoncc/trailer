@@ -228,7 +228,7 @@ describe('MetricPicker run layer (先选指标,再选 run)', () => {
     target.remove();
   });
 
-  it('checking one run writes run_ids; checking the metric dir selects all (run_ids undefined)', async () => {
+  it('checking one run writes run_ids; checking the metric dir adds it with ZERO runs (默认不勾)', async () => {
     const onValueChange = vi.fn();
     const { target, component } = await mountPicker({
       options: runOptions, value: [], onValueChange, runLabelOf,
@@ -237,29 +237,29 @@ describe('MetricPicker run layer (先选指标,再选 run)', () => {
     runLeaf('r1').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
     expect(onValueChange).toHaveBeenCalledWith([{ key: 'loss', context: 'train', run_ids: ['r1'] }]);
-    // 勾指标目录 → 全选(不带 run_ids = 全部)
+    // 勾指标目录 → 加入但**一个 run 都不勾**(手动挑,不默认全选)
     onValueChange.mockClear();
     metricDir().querySelector('button.flex-1')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
-    expect(onValueChange).toHaveBeenCalledWith([{ key: 'loss', context: 'train' }]);
+    expect(onValueChange).toHaveBeenCalledWith([{ key: 'loss', context: 'train', run_ids: [] }]);
     unmount(component);
     target.remove();
   });
 
-  it('unchecking the last checked run removes the metric entirely', async () => {
+  it('unchecking the last run keeps the metric with zero runs; dir click removes it', async () => {
     const onValueChange = vi.fn();
     const { target, component } = await mountPicker({
       options: runOptions, value: [{ key: 'loss', context: 'train', run_ids: ['r1'] }], onValueChange, runLabelOf,
     });
-    // 再点已勾的 run → 删空 → 指标整个移除
+    // 取消最后一个已勾 run → run_ids 清空但指标保留(等手动重挑)
     runLeaf('r1').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
-    expect(onValueChange).toHaveBeenCalledWith([]);
-    // 点指标目录(部分选中)→ 补全为全选
+    expect(onValueChange).toHaveBeenCalledWith([{ key: 'loss', context: 'train', run_ids: [] }]);
+    // 点指标目录(指标已在卡中)→ 移除整个指标
     onValueChange.mockClear();
     metricDir().querySelector('button.flex-1')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
-    expect(onValueChange).toHaveBeenCalledWith([{ key: 'loss', context: 'train' }]);
+    expect(onValueChange).toHaveBeenCalledWith([]);
     unmount(component);
     target.remove();
   });
@@ -278,6 +278,205 @@ describe('MetricPicker run layer (先选指标,再选 run)', () => {
     metricDir().querySelector('button.flex-1')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
     expect(onValueChange).toHaveBeenCalledWith([]);
+    unmount(component);
+    target.remove();
+  });
+});
+
+// ─── flat 变体:Boards(Add Chart)同款布局 —— 大写组头 + 原生 checkbox,勾选后展开 run 行 ───
+
+describe('MetricPicker flat variant (Boards Add Chart 样式)', () => {
+  async function mountFlat(props: Record<string, unknown>) {
+    const { target, component } = await mountPicker({ variant: 'flat', ...props });
+    return { target, component };
+  }
+
+  function groupHeads(): HTMLElement[] {
+    return [...document.body.querySelectorAll('[data-metric-group]')] as HTMLElement[];
+  }
+
+  function metricRow(id: string): HTMLElement {
+    const row = [...document.body.querySelectorAll<HTMLElement>('[data-metric-id]')].find(
+      (e) => e.getAttribute('data-metric-id') === id
+    );
+    expect(row, `metric row ${id}`).toBeTruthy();
+    return row!;
+  }
+
+  it('renders uppercase group heads with native checkboxes, no chevron buttons', async () => {
+    const { target, component } = await mountFlat({
+      options: runOptions, value: [], onValueChange: vi.fn(), runLabelOf,
+    });
+    const heads = groupHeads();
+    expect(heads.length).toBeGreaterThan(0);
+    // 组头行 = boards 同款大写小标:只有展收 chevron + 文本(无三态 checkbox、无 (N) 计数按钮)
+    const headRow = heads[0].querySelector(':scope > div') as HTMLElement;
+    const headText = headRow.querySelector('.uppercase') as HTMLElement;
+    expect(headText).toBeTruthy();
+    expect(headText.className).toContain('font-mono');
+    expect(headRow.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(headRow.querySelector('button[aria-label$="group"]')).toBeTruthy(); // 展收入口
+    expect(/\(\d+\)/.test(headRow.textContent ?? '')).toBe(false);
+    // 指标行:原生 checkbox + 文本
+    const loss = metricRow('loss[train]');
+    const box = loss.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(box).toBeTruthy();
+    expect(box.checked).toBe(false);
+    // 未勾选 → 不展开 run 行(boards 勾选才出现下级的同构交互)
+    expect(loss.querySelectorAll('[data-tree-run]').length).toBe(0);
+    unmount(component);
+    target.remove();
+  });
+
+  it('checking the metric reveals run rows labeled "<name> (run_xx)" and writes run_ids', async () => {
+    const onValueChange = vi.fn();
+    const { target, component } = await mountFlat({
+      options: runOptions,
+      value: [{ key: 'loss', context: 'train' }],
+      onValueChange,
+      runLabelOf,
+    });
+    const loss = metricRow('loss[train]');
+    // 勾选后展开两个 run 行(文本 = runLabelOf 结果,data 锚点为 run_id)
+    const runRows = [...loss.querySelectorAll('[data-tree-run]')] as HTMLElement[];
+    expect(runRows.map((r) => r.getAttribute('data-tree-run'))).toEqual(['r1', 'r2']);
+    expect(runRows[0].textContent).toContain('alpha');
+    // 指标行 = 全选态;acc 未勾 → 不展开
+    const box = loss.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(metricRow('acc[train]').querySelectorAll('[data-tree-run]').length).toBe(0);
+    // 取消一个 run → 写回 run_ids,指标行转半选
+    const r1Box = runRows[0].querySelector('input[type="checkbox"]') as HTMLInputElement;
+    r1Box.click();
+    await tick();
+    expect(onValueChange).toHaveBeenCalledWith([
+      { key: 'loss', context: 'train', run_ids: ['r2'] },
+    ]);
+    unmount(component);
+    target.remove();
+  });
+
+  it('shows an indeterminate metric box when only some runs are checked', async () => {
+    const { target, component } = await mountFlat({
+      options: runOptions,
+      value: [{ key: 'loss', context: 'train', run_ids: ['r1'] }],
+      onValueChange: vi.fn(),
+      runLabelOf,
+    });
+    const box = metricRow('loss[train]').querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(box.indeterminate).toBe(true);
+    expect(box.checked).toBe(false);
+    unmount(component);
+    target.remove();
+  });
+});
+
+// ─── flat 展收:Expand / Collapse / Expand 1 level + 组头/指标行折叠 ───
+
+describe('MetricPicker flat collapse controls', () => {
+  function toolbarBtn(label: string): HTMLElement {
+    const btn = [...document.body.querySelectorAll('button')].find(
+      (b) => (b.textContent ?? '').trim() === label
+    );
+    expect(btn, `toolbar ${label}`).toBeTruthy();
+    return btn!;
+  }
+
+  function metricRow(id: string): HTMLElement {
+    const row = [...document.body.querySelectorAll<HTMLElement>('[data-metric-id]')].find(
+      (e) => e.getAttribute('data-metric-id') === id
+    );
+    expect(row, `metric row ${id}`).toBeTruthy();
+    return row!;
+  }
+
+  it('offers Expand / Collapse / Expand 1 level in the toolbar', async () => {
+    const { target, component } = await mountPicker({
+      variant: 'flat', options: runOptions, value: [{ key: 'loss', context: 'train', run_ids: ['r1'] }],
+      onValueChange: vi.fn(), runLabelOf,
+    });
+    toolbarBtn('Expand');
+    toolbarBtn('Collapse');
+    toolbarBtn('Expand 1 level');
+    unmount(component);
+    target.remove();
+  });
+
+  it('Collapse hides groups; Expand 1 level reopens groups but keeps run rows folded', async () => {
+    const { target, component } = await mountPicker({
+      variant: 'flat', options: runOptions, value: [{ key: 'loss', context: 'train', run_ids: ['r1'] }],
+      onValueChange: vi.fn(), runLabelOf,
+    });
+    // Collapse → 只剩组头,指标与 run 行都收起
+    toolbarBtn('Collapse').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(document.body.querySelectorAll('[data-metric-id]').length).toBe(0);
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(0);
+    // Expand 1 level → 指标行回来,勾选指标的 run 行仍收着
+    toolbarBtn('Expand 1 level').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(metricRow('loss[train]')).toBeTruthy();
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(0);
+    // Expand → run 行展开
+    toolbarBtn('Expand').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(2);
+    unmount(component);
+    target.remove();
+  });
+
+  it('the metric-row chevron folds/unfolds its run rows (entry present)', async () => {
+    const { target, component } = await mountPicker({
+      variant: 'flat', options: runOptions,
+      value: [{ key: 'loss', context: 'train', run_ids: ['r1'] }],
+      onValueChange: vi.fn(), runLabelOf,
+    });
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(2);
+    // 指标行 chevron 折回
+    const chev = metricRow('loss[train]').querySelector('button[aria-label$="group"]') as HTMLElement;
+    expect(chev).toBeTruthy();
+    chev.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(0);
+    // 再点展开
+    metricRow('loss[train]').querySelector('button[aria-label$="group"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(2);
+    unmount(component);
+    target.remove();
+  });
+});
+
+// ─── Selected chip 带 run 名(同名 run 靠 (run_xx) 区分) ───
+
+describe('MetricPicker selected chips carry run names', () => {
+  it('shows "<base> — <run label>" on the chip when run_ids are explicit', async () => {
+    const { target, component } = await mountPicker({
+      variant: 'flat',
+      options: runOptions,
+      value: [{ key: 'loss', context: 'train', run_ids: ['r1'] }],
+      onValueChange: vi.fn(),
+      runLabelOf,
+      formatChip: (m: { run_ids?: string[] }) =>
+        m.run_ids?.length ? `loss [train] — ${m.run_ids.map(runLabelOf).join(', ')}` : 'loss [train]',
+    });
+    const body = document.body.textContent ?? '';
+    expect(body).toContain('loss [train] — alpha'); // runLabelOf(r1) = alpha
+    unmount(component);
+    target.remove();
+  });
+
+  it('shows "(no runs)" when the metric is checked with zero runs', async () => {
+    const { target, component } = await mountPicker({
+      variant: 'flat',
+      options: runOptions,
+      value: [{ key: 'loss', context: 'train', run_ids: [] }],
+      onValueChange: vi.fn(),
+      runLabelOf,
+      formatChip: (m: { run_ids?: string[] }) =>
+        m.run_ids && m.run_ids.length === 0 ? 'loss [train] — (no runs)' : 'loss [train]',
+    });
+    expect(document.body.textContent).toContain('loss [train] — (no runs)');
     unmount(component);
     target.remove();
   });

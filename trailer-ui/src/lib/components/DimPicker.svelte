@@ -21,6 +21,8 @@
     value: ScalarAxis[];
     onValueChange: (dims: ScalarAxis[]) => void;
     placeholder?: string;
+    /** tree = 层级折叠树(默认);flat = 与 Metrics 同款(大写组头 + 原生 checkbox,组内平铺) */
+    variant?: 'tree' | 'flat';
     triggerClass?: string;
     contentClass?: string;
   }
@@ -30,6 +32,7 @@
     value,
     onValueChange,
     placeholder = 'Dimensions',
+    variant = 'tree',
     triggerClass = '',
     contentClass = '',
   }: Props = $props();
@@ -76,9 +79,30 @@
       }
     }
   }
-  const allDirKeys = $derived.by(() => {
+  /** Collapse 全收:flat = 顶层组;tree = 全部目录 */
+  const allFoldKeys = $derived.by(() => {
     const s = new Set<string>();
-    collectDirKeys(tree, s);
+    if (variant === 'flat') {
+      for (const n of tree) if (n.type === 'dir') s.add(n.path);
+    } else {
+      collectDirKeys(tree, s);
+    }
+    return s;
+  });
+  /** Expand 1 level:顶层组展开、深层收起(flat 无深层 → 空集 = 全开) */
+  const deepFoldKeys = $derived.by(() => {
+    const s = new Set<string>();
+    if (variant === 'tree') {
+      const walk = (nodes: PathTreeNode<DimOption>[], depth: number) => {
+        for (const n of nodes) {
+          if (n.type === 'dir') {
+            if (depth >= 1) s.add(n.path);
+            walk(n.children, depth + 1);
+          }
+        }
+      };
+      walk(tree, 0);
+    }
     return s;
   });
 
@@ -137,7 +161,11 @@
   }
 
   function collapseAll() {
-    collapsed = new Set(allDirKeys);
+    collapsed = new Set(allFoldKeys);
+  }
+
+  function expandOneLevel() {
+    collapsed = new Set(deepFoldKeys);
   }
 </script>
 
@@ -216,12 +244,47 @@
         <button type="button" class="underline hover:text-foreground" onclick={clearAll}>None</button>
         <button type="button" class="underline hover:text-foreground" onclick={expandAll}>Expand</button>
         <button type="button" class="underline hover:text-foreground" onclick={collapseAll}>Collapse</button>
+        <button type="button" class="underline hover:text-foreground" onclick={expandOneLevel}>Expand 1 level</button>
       </div>
       <Command.List class="max-h-56 overflow-y-auto">
+        {#if variant === 'flat'}
+          {#each tree as top (top.type === 'dir' ? `d:${top.path}` : `l:${dimId(top.item.axis)}`)}
+            {#if top.type === 'dir'}
+              <div data-dim-group={top.path}>
+                <div class="flex items-center gap-1 px-2 pt-2 pb-1">
+                  <button
+                    type="button"
+                    class="rounded p-0.5 hover:bg-accent shrink-0"
+                    aria-label={collapsed.has(top.path) && !query ? 'Expand group' : 'Collapse group'}
+                    onclick={() => toggleCollapse(top.path)}
+                  >
+                    <ChevronRight class="size-3 transition-transform {collapsed.has(top.path) && !query ? '-rotate-90' : ''}" />
+                  </button>
+                  <div class="text-[11px] uppercase tracking-wide text-muted-foreground font-mono">{top.label}</div>
+                </div>
+                {#if !collapsed.has(top.path) || query}
+                  {#each top.items as o (dimId(o.axis))}
+                    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg/accent/50 cursor-pointer text-xs font-mono">
+                      <input
+                        type="checkbox"
+                        checked={has(o.axis)}
+                        onchange={() => toggle(o.axis)}
+                      />
+                      <span class="truncate">{o.label}</span>
+                    </label>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
+          {:else}
+            <p class="py-6 text-center text-sm text-muted-foreground">No matching dimensions</p>
+          {/each}
+        {:else}
         {#each tree as n (n.type === 'dir' ? `d:${n.path}` : `l:${dimId(n.item.axis)}`)}
           {@render node(n, 0)}
         {/each}
-        {#if tree.length === 0}
+        {/if}
+        {#if variant !== 'flat' && tree.length === 0}
           <p class="py-6 text-center text-sm text-muted-foreground">No matching dimensions</p>
         {/if}
       </Command.List>

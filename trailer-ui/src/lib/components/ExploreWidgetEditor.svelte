@@ -7,6 +7,7 @@
   import { X } from 'lucide-svelte';
   import MetricPicker from '$lib/components/MetricPicker.svelte';
   import DimPicker from '$lib/components/DimPicker.svelte';
+  import SinglePicker from '$lib/components/SinglePicker.svelte';
   import { groupMetricsByContext } from '$lib/utils/metricGroups';
   import { displayMetricName } from '$lib/utils/systemMetrics';
   import { widgetTypesFor, widgetTypeAvailability } from '$lib/utils/widgetTypes';
@@ -107,6 +108,35 @@
     }
   }
 
+  /** 单选面板的轴选项:config + summary(与原 optgroup 同 value 格式,round-trip 不变) */
+  const configAxisOpts = $derived(
+    configPaths.map((pp) => ({ group: 'config', label: `config.${pp}`, value: `config.${pp}` }))
+  );
+  const summaryAxisOpts = $derived(
+    summaryGroups.flatMap((g) =>
+      g.items.map((o) => ({ group: g.label, label: `${o.summaryKey}[last]`, value: `${o.summaryKey}[last]` }))
+    )
+  );
+  /** Pair 的 x/y 是指标轴(label 用展示名,value 用 metricLabel round-trip) */
+  const pairAxisOpts = $derived(
+    summaryGroups.flatMap((g) =>
+      g.items.map((o) => ({
+        group: g.label,
+        label: metricDisplay({ key: o.key, context: o.context }),
+        value: metricLabel({ key: o.key, context: o.context }),
+      }))
+    )
+  );
+  /** 着色选项:所有卡共用 —— 含 config(此前 Pair color 缺这段) */
+  const colorOpts = $derived([
+    { group: 'run', label: 'color: run', value: 'run_id' },
+    { group: 'run', label: 'color: project', value: 'project' },
+    ...configPaths.map((pp) => ({ group: 'config', label: `color: config.${pp}`, value: `config.${pp}` })),
+    ...summaryGroups.flatMap((g) =>
+      g.items.map((o) => ({ group: g.label, label: `color: ${o.summaryKey}[last]`, value: `${o.summaryKey}[last]` }))
+    ),
+  ]);
+
   function scalarLabel(axis: ScalarAxis): string {
     return axis.kind === 'config' ? `config.${axis.path}` : `${axis.summaryKey}[${axis.field}]`;
   }
@@ -115,10 +145,10 @@
     return m.context ? `${m.context}/${m.key}` : m.key;
   }
 
-  // 展示名:系统指标用友好名,选项 value 仍用 metricLabel 保证 round-trip。
-  // 归属 run 由树的 run 层表达(先选指标,再选 run)—— 不再拼 " — runA" 尾巴。
+  // 展示名与 Boards(Add Chart)同款:系统指标友好名,否则 `key [context]`;
+  // 选项 value 仍用 metricLabel 保证 round-trip。归属 run 由勾选后的 run 行表达。
   function metricDisplay(m: MetricRef): string {
-    return displayMetricName(m.key, m.context) ?? metricLabel(m);
+    return displayMetricName(m.key, m.context) ?? (m.context ? `${m.key} [${m.context}]` : m.key);
   }
 
   /** 该指标有数据的 run(= 选中 runs 中 summary 含该 key 的);树的 run 层数据源 */
@@ -127,20 +157,30 @@
     return runs.filter((r) => Object.keys(r.summary ?? {}).includes(summaryKey)).map((r) => r.run_id);
   }
 
+  /** run 行显示名:`minirl_grpo_cell_b2_seed0 (run_1c)` —— 同名 run 靠 id 前 6 位区分 */
   function runLabelOf(runId: string): string {
     const r = runs.find((x) => x.run_id === runId);
-    return r ? (r.name ?? runId.slice(0, 12)) : runId;
+    return r?.name ? `${r.name} (${runId.slice(0, 6)})` : runId.slice(0, 12);
+  }
+
+  /** 已选区 chip:勾了部分/零 run 时带上 run 名列表(同名 run 靠 (run_xx) 区分) */
+  function chipText(m: { key: string; context: string; run_ids?: string[] }): string {
+    const base = metricDisplay(m);
+    if (!m.run_ids) return base;
+    if (m.run_ids.length === 0) return `${base} — (no runs)`;
+    return `${base} — ${m.run_ids.map(runLabelOf).join(', ')}`;
   }
 
   /** Confirm 前归一化 line 卡的 run_ids:剔除已不在 owners 的 run;
-   *  收敛到全部 → 缺省(= 全部),删空 → 丢该 metric */
+   *  收敛到全部 → 缺省(= 全部);勾了但零 run 保留 [](手动挑,不画线);
+   *  没有任何 run 有该指标(owners 空)→ 丢该 metric */
   function confirm() {
     if (draft.type === 'line') {
       const metrics = draft.metrics.flatMap((m) => {
         if (!m.run_ids) return [m];
         const owners = ownersOf(m);
+        if (owners.length === 0) return [];
         const cleaned = m.run_ids.filter((id) => owners.includes(id));
-        if (cleaned.length === 0) return [];
         if (cleaned.length === owners.length) return [{ key: m.key, context: m.context }];
         return [{ key: m.key, context: m.context, run_ids: cleaned }];
       });
@@ -248,8 +288,9 @@
           value={lineW.metrics}
           onValueChange={(next) => (draft = { ...lineW, metrics: next })}
           formatLabel={metricDisplay}
-          formatLeaf={(m) => displayMetricName(m.key, m.context) ?? m.key}
+          formatChip={chipText}
           {runLabelOf}
+          variant="flat"
         />
         <select
           value={lineW.xKind}
@@ -322,62 +363,21 @@
       </div>
     {:else if scatterW}
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <select
+        <SinglePicker
+          options={[...configAxisOpts, ...summaryAxisOpts]}
           value={scalarLabel(scatterW.x)}
-          onchange={(e) => (draft = { ...scatterW, x: scalarAxisFromValue((e.target as HTMLSelectElement).value, scatterW.x) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
-        >
-          <optgroup label="config">
-            {#each configPaths as p}
-              <option value={`config.${p}`}>x: config.{p}</option>
-            {/each}
-          </optgroup>
-          {#each summaryGroups as g}
-            <optgroup label={g.label}>
-              {#each g.items as o}
-                <option value={`${o.summaryKey}[last]`}>x: {o.summaryKey}[last]</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
-        <select
+          onValueChange={(v) => (draft = { ...scatterW, x: scalarAxisFromValue(v, scatterW.x) })}
+        />
+        <SinglePicker
+          options={[...configAxisOpts, ...summaryAxisOpts]}
           value={scalarLabel(scatterW.y)}
-          onchange={(e) => (draft = { ...scatterW, y: scalarAxisFromValue((e.target as HTMLSelectElement).value, scatterW.y) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
-        >
-          {#each summaryGroups as g}
-            <optgroup label={g.label}>
-              {#each g.items as o}
-                <option value={`${o.summaryKey}[last]`}>y: {o.summaryKey}[last]</option>
-              {/each}
-            </optgroup>
-          {/each}
-          <optgroup label="config">
-            {#each configPaths as p}
-              <option value={`config.${p}`}>y: config.{p}</option>
-            {/each}
-          </optgroup>
-        </select>
-        <select
+          onValueChange={(v) => (draft = { ...scatterW, y: scalarAxisFromValue(v, scatterW.y) })}
+        />
+        <SinglePicker
+          options={colorOpts}
           value={colorLabel(scatterW.colorBy ?? { kind: 'run' })}
-          onchange={(e) => (draft = { ...scatterW, colorBy: colorFromValue((e.target as HTMLSelectElement).value) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
-        >
-          <option value="run_id">color: run</option>
-          <option value="project">color: project</option>
-          <optgroup label="config">
-            {#each configPaths as p}
-              <option value={`config.${p}`}>color: config.{p}</option>
-            {/each}
-          </optgroup>
-          {#each summaryGroups as g}
-            <optgroup label={g.label}>
-              {#each g.items as o}
-                <option value={`${o.summaryKey}[last]`}>color: {o.summaryKey}[last]</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
+          onValueChange={(v) => (draft = { ...scatterW, colorBy: colorFromValue(v) })}
+        />
         <label class="flex items-center gap-1">
           <input type="checkbox" checked={scatterW.xLog === true} onchange={(e) => (draft = { ...scatterW, xLog: (e.target as HTMLInputElement).checked })} />
           logX
@@ -397,64 +397,31 @@
           options={availableDims}
           value={parallelW.dims}
           onValueChange={(dims) => (draft = { ...parallelW, dims })}
+          variant="flat"
         />
-        <select
+        <SinglePicker
+          options={colorOpts}
           value={colorLabel(parallelW.colorBy ?? { kind: 'run' })}
-          onchange={(e) => (draft = { ...parallelW, colorBy: colorFromValue((e.target as HTMLSelectElement).value) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
-        >
-          <option value="run_id">color: run</option>
-          <option value="project">color: project</option>
-          <optgroup label="config">
-            {#each configPaths as p}
-              <option value={`config.${p}`}>color: config.{p}</option>
-            {/each}
-          </optgroup>
-          {#each summaryGroups as g}
-            <optgroup label={g.label}>
-              {#each g.items as o}
-                <option value={`${o.summaryKey}[last]`}>color: {o.summaryKey}[last]</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
+          onValueChange={(v) => (draft = { ...parallelW, colorBy: colorFromValue(v) })}
+        />
       </div>
     {:else if pairW}
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <select
+        <SinglePicker
+          options={pairAxisOpts}
           value={metricLabel(pairW.x)}
-          onchange={(e) => (draft = { ...pairW, x: metricFromValue((e.target as HTMLSelectElement).value) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
-        >
-          {#each summaryGroups as g}
-            <optgroup label={g.label}>
-              {#each g.items as o}
-                <option value={metricLabel({ key: o.key, context: o.context })}>x: {metricDisplay({ key: o.key, context: o.context })}</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
-        <select
+          onValueChange={(v) => (draft = { ...pairW, x: metricFromValue(v) })}
+        />
+        <SinglePicker
+          options={pairAxisOpts}
           value={metricLabel(pairW.y)}
-          onchange={(e) => (draft = { ...pairW, y: metricFromValue((e.target as HTMLSelectElement).value) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
-        >
-          {#each summaryGroups as g}
-            <optgroup label={g.label}>
-              {#each g.items as o}
-                <option value={metricLabel({ key: o.key, context: o.context })}>y: {metricDisplay({ key: o.key, context: o.context })}</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
-        <select
+          onValueChange={(v) => (draft = { ...pairW, y: metricFromValue(v) })}
+        />
+        <SinglePicker
+          options={colorOpts}
           value={colorLabel(pairW.colorBy ?? { kind: 'run' })}
-          onchange={(e) => (draft = { ...pairW, colorBy: colorFromValue((e.target as HTMLSelectElement).value) })}
-          class="px-1 py-0.5 border border-border rounded bg-background"
-        >
-          <option value="run_id">color: run</option>
-          <option value="project">color: project</option>
-        </select>
+          onValueChange={(v) => (draft = { ...pairW, colorBy: colorFromValue(v) })}
+        />
       </div>
     {:else if summaryW}
       <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -464,6 +431,7 @@
           value={summaryW.metrics ?? []}
           onValueChange={(next) => (draft = { ...summaryW, metrics: next.length > 0 ? next : undefined })}
           formatLabel={metricDisplay}
+          variant="flat"
         />
         <span class="text-muted-foreground">Empty = all summary metrics</span>
       </div>
@@ -472,6 +440,7 @@
         <DimPicker
           options={diffDims}
           value={diffValue}
+          variant="flat"
           onValueChange={(dims) =>
             (draft = {
               ...diffW,
