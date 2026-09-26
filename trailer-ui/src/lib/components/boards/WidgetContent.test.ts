@@ -192,6 +192,24 @@ describe('WidgetContent line — explore (multi run)', () => {
     target.remove();
   });
 
+  it('draws NOTHING for a metric with zero checked runs (默认不勾)', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: '', run_ids: [] },
+    ] }), {
+      metrics: [...metricSeries('r1'), ...metricSeries('r2')],
+      explore: makeCtx(),
+    });
+    const spec = await lastSpec();
+    const rows = (spec!.data ?? []) as Array<{ series: string }>;
+    // 勾了指标但一个 run 都没挑 → 全过滤,无线
+    expect([...new Set(rows.map((r) => r.series))]).toEqual([]);
+    // 系列清单也没有(没有真实画出的系列)
+    await openSeriesPanel(target);
+    expect(target.querySelectorAll('[data-series-row]').length).toBe(0);
+    unmount(component);
+    target.remove();
+  });
+
   it('draws only runs the metric run_ids checked (勾选细化到 run)', async () => {
     const { target, component } = await mountContent(lineWidget({ metrics: [
       { key: 'loss', context: '', run_ids: ['r1'] },

@@ -271,7 +271,8 @@ export function clampH(h: unknown, fallback = DEFAULT_H): number {
 }
 
 /** 修复旧版按最后一个 / 拆分产生的坏 MetricRef(与 explore.healChartDefs 同规则)。
- *  run_ids(勾选细化到 run):数组 → 清洗(仅字符串/非空/去重),清洗后为空 = 选了但无有效 run → 整条丢弃;
+ *  run_ids(勾选细化到 run):数组 → 清洗(仅字符串/非空/去重),**空数组合法**
+ *  (指标已选、一个 run 都没挑 → 画线侧全过滤,等手动勾);
  *  类型错的字段忽略(= 缺省全部 run),metric 本身保留;缺失 → undefined。 */
 export function healMetric(m: unknown): MetricSel | null {
   if (typeof m !== 'object' || m === null) return null;
@@ -283,7 +284,6 @@ export function healMetric(m: unknown): MetricSel | null {
   if (raw.run_ids === undefined) return base;
   if (!Array.isArray(raw.run_ids)) return base;
   const ids = [...new Set(raw.run_ids.filter((x): x is string => typeof x === 'string' && x.length > 0))];
-  if (ids.length === 0) return null;
   return { ...base, run_ids: ids };
 }
 

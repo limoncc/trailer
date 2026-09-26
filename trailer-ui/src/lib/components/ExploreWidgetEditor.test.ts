@@ -116,10 +116,11 @@ describe('ExploreWidgetEditor', () => {
     picker.click();
     await tick();
     await tick();
-    const opts = [...document.querySelectorAll('[data-slot="command-item"]')];
-    const item = opts.find((o) => (o.textContent ?? '').includes('params'));
+    // flat 变体:config 键是 label+checkbox 行(不再是 command-item)
+    const rows = [...document.body.querySelectorAll('[data-dim-group] label')];
+    const item = rows.find((o) => (o.textContent ?? '').includes('params'));
     expect(item).toBeTruthy();
-    item!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    (item!.querySelector('input') as HTMLInputElement).click();
     await tick();
     const confirm = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Confirm')!;
     confirm.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -177,20 +178,68 @@ describe('metric picker run layer (先选指标,再选 run)', () => {
     await tick();
     await tick();
     const body = document.body.textContent ?? '';
-    // 旧的 "acc — r1" 尾巴被树的 run 层取代
+    // 旧的 "acc — r1" 尾巴由勾选后的 run 行取代(Boards Add Chart 同款 flat 布局)
     expect(body).not.toContain(' — r1');
-    const runAttrs = [...document.body.querySelectorAll('[data-tree-run]')].map((l) =>
+    // loss 已选(lineWidget)→ 指标下展开 run 行
+    const lossRow = document.body.querySelector('[data-metric-id="loss"]');
+    expect(lossRow).toBeTruthy();
+    const lossRuns = [...lossRow!.querySelectorAll('[data-tree-run]')].map((l) =>
       l.getAttribute('data-tree-run')
     );
-    expect(runAttrs).toContain('r1');
-    expect(runAttrs).toContain('r2');
-    // acc 只有 r1 有 → acc 指标目录下只有 r1 这一个 run 叶
-    const accDir = [...document.body.querySelectorAll('[data-tree-dir]')].find(
-      (d) => d.getAttribute('data-metric-id') === 'acc'
-    );
-    expect(accDir).toBeTruthy();
-    const accRuns = [...accDir!.querySelectorAll('[data-tree-run]')].map((l) => l.getAttribute('data-tree-run'));
-    expect(accRuns).toEqual(['r1']);
+    expect(lossRuns).toContain('r1');
+    expect(lossRuns).toContain('r2');
+    // acc 未勾 → 有指标行但不展开 run(boards 勾选才出现下级的同构交互)
+    const accRow = document.body.querySelector('[data-metric-id="acc"]');
+    expect(accRow).toBeTruthy();
+    expect(accRow!.querySelectorAll('[data-tree-run]').length).toBe(0);
+    unmount(component);
+    target.remove();
+    document.querySelectorAll('[data-slot="popover-content"]').forEach((e) => e.remove());
+  });
+
+  it('keeps a checked metric with ZERO runs through Confirm (手动挑,不默认全选)', async () => {
+    const w: DashWidget = {
+      id: 'w1',
+      type: 'line',
+      xKind: 'step',
+      w: 12,
+      h: 4,
+      // r9 不在 owners(loss 的 owners = [r1, r2])→ 清洗为零,但指标保留
+      metrics: [{ key: 'loss', context: '', run_ids: ['r9'] }],
+    };
+    const { target, component, onConfirm } = mountEditor(w);
+    await tick();
+    const confirmBtn = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Confirm');
+    confirmBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    const out = onConfirm.mock.calls[0][0] as Extract<DashWidget, { type: 'line' }>;
+    expect(out.metrics).toEqual([{ key: 'loss', context: '', run_ids: [] }]);
+    unmount(component);
+    target.remove();
+  });
+
+  it('checking a NEW metric auto-expands its run rows (真实 draft 联动)', async () => {
+    const { target, component } = mountEditor(lineWidget);
+    await tick();
+    const trigger = target.querySelector('[data-slot="popover-trigger"]') as HTMLElement;
+    trigger.click();
+    await tick();
+    await tick();
+    const tool = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((b) => (b.textContent ?? '').trim() === label)!;
+    // Collapse → Expand 1 level:指标可见、run 行收起
+    tool('Collapse').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    tool('Expand 1 level').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(0);
+    // 勾一个未选中的指标(acc)→ draft 更新 → run 行自动展开
+    const accBox = document.body
+      .querySelector('[data-metric-id="acc"]')!
+      .querySelector('input[type="checkbox"]') as HTMLInputElement;
+    accBox.click();
+    await tick();
+    expect(document.body.querySelectorAll('[data-tree-run]').length).toBe(1); // acc 只有 r1
     unmount(component);
     target.remove();
     document.querySelectorAll('[data-slot="popover-content"]').forEach((e) => e.remove());
