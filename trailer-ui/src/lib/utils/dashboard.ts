@@ -98,6 +98,8 @@ export interface DiffWidget extends WidgetBase {
   type: 'diff';
   /** 参与对比的 config 点路径;缺省/空 = 对比全部差异键 */
   paths?: string[];
+  /** 用户拖过高度(同 info 卡):true 后手动值生效,下限仍是内容自动高度 */
+  hFixed?: boolean;
 }
 
 /** 指标汇总表:Run × 每指标(Last/Best/Min/Max);缺省取 summary key 并集 */
@@ -440,7 +442,12 @@ function parseWidget(raw: unknown): DashWidget | null {
       const paths = Array.isArray(r.paths)
         ? r.paths.filter((p): p is string => typeof p === 'string' && p.length > 0)
         : [];
-      return { ...base, type: 'diff', paths: paths.length > 0 ? paths : undefined };
+      return {
+        ...base,
+        type: 'diff',
+        paths: paths.length > 0 ? paths : undefined,
+        hFixed: r.hFixed === true ? true : undefined,
+      };
     }
     case 'summary': {
       const metrics = Array.isArray(r.metrics)
