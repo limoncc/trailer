@@ -107,6 +107,63 @@ describe('parseLayout', () => {
     expect(line.metrics[0]).toEqual({ key: 'eval', context: 'train/sr_d2' });
   });
 
+  it('parses diff widget paths (selected config keys) and drops invalid ones', () => {
+    const parsed = parseLayout(JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'd1', type: 'diff', w: 12, h: 6, paths: ['params.lr', 'model.depth'] },
+        { id: 'd2', type: 'diff', w: 12, h: 6, paths: ['ok', 42, null] },
+        { id: 'd3', type: 'diff', w: 12, h: 6, paths: [] },
+        { id: 'd4', type: 'diff', w: 12, h: 6 },
+      ],
+    }));
+    expect(parsed.widgets).toHaveLength(4);
+    expect((parsed.widgets[0] as { paths?: string[] }).paths).toEqual(['params.lr', 'model.depth']);
+    expect((parsed.widgets[1] as { paths?: string[] }).paths).toEqual(['ok']);
+    // 空数组与缺省都归一为 undefined(= 对比全部差异键)
+    expect((parsed.widgets[2] as { paths?: string[] }).paths).toBeUndefined();
+    expect((parsed.widgets[3] as { paths?: string[] }).paths).toBeUndefined();
+    const again = parseLayout(serializeLayout(parsed));
+    expect((again.widgets[0] as { paths?: string[] }).paths).toEqual(['params.lr', 'model.depth']);
+  });
+
+  it('parses metric run_ids (per-run selection) and round-trips', () => {
+    const s = JSON.stringify({
+      version: 3,
+      widgets: [
+        { id: 'w1', type: 'line', metrics: [{ key: 'loss', context: 'train', run_ids: ['r1', 'r2'] }], w: 6, h: 4 },
+        { id: 'w2', type: 'line', metrics: [{ key: 'loss', context: 'train' }], w: 6, h: 4 },
+      ],
+    });
+    const parsed = parseLayout(s);
+    expect((parsed.widgets[0] as any).metrics[0]).toEqual({ key: 'loss', context: 'train', run_ids: ['r1', 'r2'] });
+    // 缺省 = 全部 run(旧 layout 行为不变)
+    expect((parsed.widgets[1] as any).metrics[0].run_ids).toBeUndefined();
+    const again = parseLayout(serializeLayout(parsed));
+    expect((again.widgets[0] as any).metrics[0].run_ids).toEqual(['r1', 'r2']);
+  });
+
+  it('drops metrics whose run_ids sanitize to empty, ignores non-array run_ids', () => {
+    const s = JSON.stringify({
+      version: 3,
+      widgets: [
+        // 空数组 / 全非法项 = 选了但没有有效 run → 整条 metric 丢弃
+        { id: 'w1', type: 'line', metrics: [{ key: 'loss', context: '', run_ids: [] }], w: 6, h: 4 },
+        { id: 'w2', type: 'line', metrics: [{ key: 'acc', context: '', run_ids: [42, null] }], w: 6, h: 4 },
+        // 类型错的字段忽略(= 缺省全部),metric 本身保留
+        { id: 'w3', type: 'line', metrics: [{ key: 'loss', context: '', run_ids: 'r1' }], w: 6, h: 4 },
+        // 非法项清洗 + 去重
+        { id: 'w4', type: 'line', metrics: [{ key: 'loss', context: '', run_ids: ['r1', 7, 'r1', ''] }], w: 6, h: 4 },
+      ],
+    });
+    const parsed = parseLayout(s);
+    const byId = (id: string) => parsed.widgets.find((w) => w.id === id) as any;
+    expect(byId('w1')).toBeUndefined();
+    expect(byId('w2')).toBeUndefined();
+    expect(byId('w3').metrics[0].run_ids).toBeUndefined();
+    expect(byId('w4').metrics[0].run_ids).toEqual(['r1']);
+  });
+
   it('drops line widgets without metrics', () => {
     const s = JSON.stringify({
       version: 1,

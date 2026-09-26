@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { metricId, groupMetricsByContext, filterMetrics, selectionState } from './metricGroups';
+import { metricId, groupMetricsByContext, buildPathTree, filterMetrics, selectionState } from './metricGroups';
 
 const opts = [
   { key: 'loss', context: 'train' },
@@ -53,6 +53,69 @@ describe('groupMetricsByContext', () => {
     const withCount = [{ key: 'cpu', context: 'system', count: 42 }];
     const groups = groupMetricsByContext(withCount);
     expect(groups[0].items[0]).toEqual({ key: 'cpu', context: 'system', count: 42 });
+  });
+});
+
+describe('buildPathTree', () => {
+  // 层级树:多段 context 逐级成目录,key 为叶子 —— groupMetricsByContext 的"首段压扁"只留给 optgroup 用
+  const segs = (m: { key: string; context: string }) => (m.context ? m.context.split('/') : []);
+  const build = (items: typeof opts, o?: { rootLabel?: string; order?: string[] }) =>
+    buildPathTree(items, segs, (m) => m.key, o);
+
+  it('splits multi-segment context into nested dirs with the key as leaf', () => {
+    const tree = build([{ key: 'loss', context: 'train/s1_seq32k' }]);
+    // train → s1_seq32k → loss(三层,不再是 train 下平铺)
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({ type: 'dir', path: 'train', label: 'train' });
+    const s1 = tree[0].type === 'dir' ? tree[0].children[0] : null;
+    expect(s1).toMatchObject({ type: 'dir', path: 'train/s1_seq32k', label: 's1_seq32k' });
+    const leaf = s1 && s1.type === 'dir' ? s1.children[0] : null;
+    expect(leaf).toMatchObject({ type: 'leaf', label: 'loss' });
+  });
+
+  it('puts empty-segment items into the rootLabel dir', () => {
+    const tree = build([{ key: 'lr', context: '' }]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({ type: 'dir', label: 'root' });
+    const leaf = tree[0].type === 'dir' ? tree[0].children[0] : null;
+    expect(leaf).toMatchObject({ type: 'leaf', label: 'lr' });
+  });
+
+  it('sorts first segments root first, then order, then alpha', () => {
+    const tree = build(opts); // root/train/test/system(与 groupMetricsByContext 同序)
+    expect(tree.map((n) => (n.type === 'dir' ? n.label : n.label))).toEqual([
+      'root', 'train', 'test', 'system',
+    ]);
+    const ordered = build(opts, { order: ['system', 'train'] });
+    expect(ordered.map((n) => (n.type === 'dir' ? n.label : n.label))).toEqual([
+      'root', 'system', 'train', 'test',
+    ]);
+  });
+
+  it('sits dirs before leaves at the same level, each alpha', () => {
+    const tree = build([
+      { key: 'loss', context: 'train' },        // train 下直接叶子
+      { key: 'b_loss', context: 'train/aux' },  // train 下子目录(aux 晚于字母序的叶子? dir 优先)
+      { key: 'acc', context: 'train' },
+    ]);
+    const train = tree.find((n) => n.type === 'dir' && n.label === 'train')!;
+    expect(train.type).toBe('dir');
+    if (train.type !== 'dir') return;
+    // 子目录 aux 在前,叶子按 key 字母序在后
+    expect(train.children.map((c) => (c.type === 'dir' ? `dir:${c.label}` : `leaf:${c.label}`))).toEqual([
+      'dir:aux', 'leaf:acc', 'leaf:loss',
+    ]);
+  });
+
+  it('collects the whole subtree leaves into dir.items', () => {
+    const tree = build(opts);
+    const system = tree.find((n) => n.type === 'dir' && n.label === 'system')!;
+    if (system.type !== 'dir') throw new Error('expected dir');
+    // cpu(直接叶子)+ gpu0(nvidia 子目录)都算进 system 的子树
+    expect(system.items.map((i) => i.key).sort()).toEqual(['cpu', 'gpu0']);
+    const nvidia = system.children.find((c) => c.type === 'dir')!;
+    if (nvidia.type !== 'dir') throw new Error('expected dir');
+    expect(nvidia.items.map((i) => i.key)).toEqual(['gpu0']);
   });
 });
 

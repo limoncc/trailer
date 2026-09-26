@@ -192,6 +192,24 @@ describe('WidgetContent line — explore (multi run)', () => {
     target.remove();
   });
 
+  it('draws only runs the metric run_ids checked (勾选细化到 run)', async () => {
+    const { target, component } = await mountContent(lineWidget({ metrics: [
+      { key: 'loss', context: '', run_ids: ['r1'] },
+    ] }), {
+      metrics: [...metricSeries('r1'), ...metricSeries('r2')],
+      explore: makeCtx(),
+    });
+    const spec = await lastSpec();
+    const rows = spec!.data as Array<{ series: string }>;
+    // r2 的数据在缓存里,但该 metric 只勾了 r1 → 只画 r1 的线
+    expect([...new Set(rows.map((r) => r.series))]).toEqual(['alpha/loss']);
+    // 色槽也不给未勾 run(与 lineSeriesKeys 同源)
+    const range = (spec!.scale as unknown as { color: { range: string[] } }).color.range;
+    expect(range[0]).toBe(PALETTE[0]);
+    unmount(component);
+    target.remove();
+  });
+
   it('gives two metrics of the SAME run two colours (previously both took the run colour)', async () => {
     const { target, component } = await mountContent(lineWidget({ metrics: [
       { key: 'loss', context: 'train' },
@@ -254,8 +272,14 @@ describe('WidgetContent line — explore (multi run)', () => {
     expect(btn).toBeTruthy();
     expect(btn.textContent ?? '').toContain('2'); // 系列数
     // 定位在**内容容器**内(容器 relative),top-6 让开 y 轴刻度,不压标题栏
-    expect(btn.className).toContain('top-6');
-    expect(btn.className).toContain('left-1');
+    // 绘图区顶部空白行(1.8 刻度上方那条带),x 再右一截避开 y 轴刻度列
+    expect(btn.className).toContain('top-1');
+    expect(btn.className).toContain('left-16');
+    // 尺寸与右上角 Smooth/Select/Exclude 工具条按钮一致
+    const inner = btn.querySelector('button') as HTMLElement;
+    expect(inner.className).toContain('px-1.5');
+    expect(inner.className).toContain('py-0.5');
+    expect(inner.className).toContain('text-[10px]');
     const content = btn.closest('[data-series-anchor]') as HTMLElement;
     expect(content).toBeTruthy();
     expect(content.className).toContain('relative');
@@ -266,6 +290,10 @@ describe('WidgetContent line — explore (multi run)', () => {
     expect(panel.className).toContain('fixed');
     expect(panel.style.left).toBeTruthy();
     expect(panel.style.top).toBeTruthy();
+    // 半透明 + 背景模糊:展开时不把下方曲线完全挡死
+    const panelCard = panel.querySelector('div') as HTMLElement;
+    expect(panelCard.className).toContain('bg-card/75');
+    expect(panelCard.className).toContain('backdrop-blur');
     unmount(component);
     target.remove();
   });
@@ -310,6 +338,26 @@ describe('WidgetContent line — explore (multi run)', () => {
     const { target, component } = await mountContent(lineWidget());
     const btn = [...target.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Smooth'));
     expect(btn).toBeUndefined();
+    unmount(component);
+    target.remove();
+  });
+
+  it('diff table is transposed: header = config keys, rows = run names', async () => {
+    const { target, component } = await mountContent({ id: 'd9', type: 'diff', w: 12, h: 6 }, {
+      explore: makeCtx(),
+    });
+    const table = target.querySelector('table');
+    expect(table).toBeTruthy();
+    const head = [...table!.querySelectorAll('thead th')].map((th) => (th.textContent ?? '').trim());
+    // 首列表头 = Run,其后是差异的 config 键(列 = 指标/config)
+    expect(head[0]).toBe('Run');
+    expect(head).toContain('lr');
+    expect(head).not.toContain('alpha'); // run 名不在表头(在行首列)
+    // 行 = run 名
+    const rowLabels = [...table!.querySelectorAll('tbody tr')].map(
+      (tr) => (tr.querySelector('td')?.textContent ?? '').trim()
+    );
+    expect(rowLabels).toEqual(['alpha', 'beta']);
     unmount(component);
     target.remove();
   });

@@ -7,6 +7,7 @@
   import { refreshInterval } from '$lib/refresh.svelte';
   import RunPicker from '$lib/components/RunPicker.svelte';
   import ExploreBoard from '$lib/components/ExploreBoard.svelte';
+  import ExploreWidgetEditor from '$lib/components/ExploreWidgetEditor.svelte';
   import { api } from '$lib/utils/api';
   import type { MetricRef, RunRecord, SeriesData } from '$lib/utils/explore';
   import { loadSeries, parseSummaryKey, refreshSeriesIncremental } from '$lib/utils/explore';
@@ -37,8 +38,6 @@
   let runs: RunRecord[] = $state([]);
   // svelte-ignore state_referenced_locally
   let selectedRuns = $state<Set<string>>(new Set(initialRunIds));
-  /** 会话态隐藏的 run(不入库,仅当前视图剔除) */
-  let hiddenRuns = $state<Set<string>>(new Set());
   let series: SeriesData = $state(new Map());
   // svelte-ignore state_referenced_locally
   let widgets: DashWidget[] = $state(initialWidgets);
@@ -55,25 +54,14 @@
   let title = $state(initialTitle);
   /** 布局编辑模式:默认视图态(同 Boards),点 Edit Layout 才能拖拽/缩放/删卡 */
   let layoutEditing = $state(false);
-  /** Runs 显隐下拉(会话态,不入库) */
-  let runMenuOpen = $state(false);
-  let runFilter = $state('');
+  /** Add Widget 先选型选指标,确认后才落卡(创建态编辑器) */
+  let pendingWidget = $state<DashWidget | null>(null);
   let saving = $state(false);
   let saveMsg = $state<{ text: string; ok: boolean } | null>(null);
   let msgTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** 选中 run(保持选中顺序,含被隐藏的 —— 下拉列表用) */
+  /** 选中 run(保持选中顺序) */
   const selectedRecords = $derived(runs.filter((r) => selectedRuns.has(r.run_id)));
-  /** 可见 run = 选中(保持选中顺序)且未被隐藏 */
-  const visibleRuns = $derived(selectedRecords.filter((r) => !hiddenRuns.has(r.run_id)));
-  /** 下拉里按名称过滤 */
-  const menuRuns = $derived(
-    runFilter.trim()
-      ? selectedRecords.filter((r) =>
-          `${r.name ?? ''} ${r.run_id}`.toLowerCase().includes(runFilter.trim().toLowerCase())
-        )
-      : selectedRecords
-  );
 
   /** 卡片需要的指标:line 的 metrics + scatter-pair 的 x/y */
   function collectNeededMetrics(ws: DashWidget[]): MetricRef[] {
@@ -90,13 +78,13 @@
 
   /** 默认图表指标:选中 run 的第一个 summary 指标(保证有数据,而非硬编码 loss/'') */
   function pickDefaultMetric(): MetricRef {
-    const rec = visibleRuns[0];
+    const rec = selectedRecords[0];
     const k = rec?.summary ? Object.keys(rec.summary)[0] : null;
     return k ? parseSummaryKey(k) : { key: 'loss', context: '' };
   }
 
   function hasMetric(m: MetricRef): boolean {
-    return visibleRuns.some((r) =>
+    return selectedRecords.some((r) =>
       Object.keys(r.summary || {}).some((k) => {
         const { key, context } = parseSummaryKey(k);
         return key === m.key && context === m.context;
@@ -107,20 +95,24 @@
   /** 把当前需要的色值补进配色表(事件回调中调用,只增不减):
    *  run 级键 + line 卡的 (run, 指标) 组合键 + 各卡非 run colorBy 的解析值 */
   function syncColors() {
-    runColors = assignStableColors(runColors, [...selectedRuns, ...runScopeKeys(selectedRecords, widgets)]);
-    seriesColors = assignStableColors(seriesColors, lineSeriesKeys(selectedRecords, widgets, series));
+    // 以当前键集**重建**(而非在旧 map 上追加):失效键立即释放槽位 —— 否则 map 只增不减,
+    // 操作若干轮后 size 绕过 10 的倍数,新键 %10 回绕撞上老键的色(反馈"颜色还是一样")。
+    // 存活键因插入序不变而保持原槽(隐藏的 run 仍在 selectedRecords,不清除)。
+    const runKeys = [...selectedRuns, ...runScopeKeys(selectedRecords, widgets)];
+    runColors = assignStableColors(new Map(), runKeys);
+    seriesColors = assignStableColors(new Map(), lineSeriesKeys(selectedRecords, widgets, series));
   }
 
   async function refreshSeries() {
     // 默认(context='')且可见 run 无该指标的 line 图,自动替换为实际存在的指标
-    if (visibleRuns.length > 0) {
+    if (selectedRecords.length > 0) {
       const fallback = pickDefaultMetric();
       widgets = widgets.map((w) => {
         if (w.type !== 'line') return w;
         return { ...w, metrics: w.metrics.map((m) => (m.context === '' && !hasMetric(m) ? fallback : m)) };
       });
     }
-    await loadSeries(series, visibleRuns, collectNeededMetrics(widgets), 500);
+    await loadSeries(series, selectedRecords, collectNeededMetrics(widgets), 500);
     series = new Map(series);
     syncColors();
   }
@@ -142,7 +134,7 @@
 
   // ─── 实时刷新:唯一的 $effect = 轮询定时器 ───
   // 同步体只读 $refreshInterval(需随它重建定时器,这是用 effect 而非 onMount 的理由);
-  // poll() 内对 selectedRuns/hiddenRuns/widgets/runStates 的读写都在 interval 回调里
+  // poll() 内对 selectedRuns/widgets/runStates 的读写都在 interval 回调里
   // ——回调不被追踪,不构成「effect 内更新状态」与依赖循环(同 run 页/compare 先例)。
   $effect(() => {
     const iv = $refreshInterval;
@@ -162,7 +154,7 @@
       /* 单次失败保持旧状态,下轮再试 */
     }
     // ② 可见且运行中的 run 才增量补点(打开时/编辑指标的全量加载另有回调驱动)
-    const live = visibleRuns.filter((r) => runStates.get(r.run_id) === 'running');
+    const live = selectedRecords.filter((r) => runStates.get(r.run_id) === 'running');
     if (live.length === 0) return;
     await refreshSeriesIncremental(series, live, collectNeededMetrics(widgets), 500);
     series = new Map(series);
@@ -186,27 +178,25 @@
     refreshSeries();
   }
 
-  /** Runs 显隐下拉:会话态剔除 run(全卡同步),不入库 —— 隐藏后其余系列配色不变 */
-  function toggleHidden(runId: string) {
-    const next = new Set(hiddenRuns);
-    if (next.has(runId)) next.delete(runId);
-    else next.add(runId);
-    hiddenRuns = next;
-  }
 
+  /** 不再立即生成卡片:先弹 Edit Chart 选类型/指标,确认后才落卡(见 confirmCreate) */
   function addWidget() {
     const size = defaultSize('line');
-    widgets = [
-      ...widgets,
-      {
-        id: newWidgetId(),
-        type: 'line',
-        metrics: [pickDefaultMetric()],
-        xKind: 'step',
-        w: size.w,
-        h: size.h,
-      },
-    ];
+    pendingWidget = {
+      id: newWidgetId(),
+      type: 'line',
+      metrics: [pickDefaultMetric()],
+      xKind: 'step',
+      w: size.w,
+      h: size.h,
+    };
+  }
+
+  /** 编辑器确认 → 生成卡片 + 自动进入 Edit Layout(拖拽/缩放调整,Save 后退出) */
+  function confirmCreate(w: DashWidget) {
+    widgets = [...widgets, w];
+    pendingWidget = null;
+    layoutEditing = true;
     refreshSeries();
   }
 
@@ -237,6 +227,7 @@
         const data = await resp.json();
         onSaved?.(data.id as string);
         saveMsg = { text: savedId ? '✓ Saved' : '✓ Created', ok: true };
+        layoutEditing = false; // 保存完成 → 退出 Edit Layout,回到视图态
       } else {
         saveMsg = { text: `Save failed (HTTP ${resp.status})`, ok: false };
       }
@@ -265,43 +256,6 @@
       <span class="text-xs text-muted-foreground hidden sm:inline shrink-0">
         {selectedRuns.size} runs selected
       </span>
-    {/if}
-    <!-- Runs 显隐:全卡剔除 run(readOnly 也可用,会话态不入库) -->
-    {#if selectedRecords.length > 0}
-      <div class="relative" onfocusout={() => setTimeout(() => (runMenuOpen = false), 200)}>
-        <button
-          type="button"
-          class="px-2.5 py-1.5 text-xs border border-border rounded-md hover:bg-accent/50 transition-colors"
-          onclick={(e) => { e.stopPropagation(); runMenuOpen = !runMenuOpen; }}
-        >
-          Runs {visibleRuns.length}/{selectedRecords.length}
-        </button>
-        {#if runMenuOpen}
-          <div class="fixed inset-0 z-10" role="presentation" onclick={() => (runMenuOpen = false)} onkeydown={(e) => { if (e.key === 'Escape') runMenuOpen = false; }}></div>
-          <div class="absolute top-full left-0 mt-1 w-60 bg-card border border-border rounded-md shadow-lg z-20 py-1 max-h-72 flex flex-col">
-            <div class="px-2 py-1.5 border-b border-border">
-              <input
-                type="text"
-                placeholder="Filter runs..."
-                bind:value={runFilter}
-                class="w-full px-2 py-1 text-xs border border-border rounded bg-background"
-                onclick={(e) => e.stopPropagation()}
-              />
-            </div>
-            <div class="overflow-y-auto flex-1">
-              {#each menuRuns as r (r.run_id)}
-                <label class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent cursor-pointer">
-                  <input type="checkbox" checked={!hiddenRuns.has(r.run_id)} onchange={() => toggleHidden(r.run_id)} />
-                  <span class="font-mono truncate">{r.name || r.run_id.slice(0, 12)}</span>
-                </label>
-              {/each}
-            </div>
-            <div class="border-t border-border px-3 py-1.5 flex gap-2 text-[10px]">
-              <button type="button" class="underline text-muted-foreground" onclick={() => (hiddenRuns = new Set())}>Show all</button>
-            </div>
-          </div>
-        {/if}
-      </div>
     {/if}
     <div class="ml-auto flex items-center gap-1.5 shrink-0">
       {#if onShare && savedId && !readOnly}
@@ -361,7 +315,7 @@
     {:else}
       <ExploreBoard
         {widgets}
-        runs={visibleRuns}
+        runs={selectedRecords}
         {series}
         {runStates}
         {colors}
@@ -370,4 +324,14 @@
       />
     {/if}
   </div>
+
+  <!-- 创建态编辑器:Add Widget → 选型选指标 → 确认落卡并进入 Edit Layout -->
+  {#if pendingWidget}
+    <ExploreWidgetEditor
+      widget={pendingWidget}
+      runs={selectedRecords}
+      onConfirm={confirmCreate}
+      onClose={() => (pendingWidget = null)}
+    />
+  {/if}
 </div>

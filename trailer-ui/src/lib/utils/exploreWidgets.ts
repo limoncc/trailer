@@ -55,10 +55,13 @@ function stringifyLeaf(v: unknown): string {
  * 只保留「跨 run 取值不同」的 config 叶节点,按 path 排序。
  * 1 个或 0 个 run 无可比对象 → 空数组。
  */
-export function computeConfigDiff(runs: RunRecord[]): ConfigDiffRow[] {
+/** paths 缺省/空 = 对比全部差异键;传入时只保留选中的 config 点路径 */
+export function computeConfigDiff(runs: RunRecord[], paths?: string[]): ConfigDiffRow[] {
   if (runs.length < 2) return [];
+  const wanted = paths && paths.length > 0 ? new Set(paths) : null;
   const rows: ConfigDiffRow[] = [];
   for (const path of collectConfigPaths(runs)) {
+    if (wanted && !wanted.has(path)) continue;
     const values = runs.map((r) => stringifyLeaf(getByPath(r.config ?? {}, path)));
     if (values.every((v) => v === values[0])) continue;
     rows.push({ path, values });
@@ -128,7 +131,12 @@ export function lineSeriesKeys(
     for (const r of runs) {
       const groups = series ? series.get(r.run_id) : undefined;
       for (const m of w.metrics) {
-        if (series && !groups?.some((g) => g.key === m.key && g.context === m.context)) continue;
+        // 勾选细化到 run:run_ids 里的 run 才占色槽(与画线过滤同源,否则未勾组合挤掉真实曲线颜色)
+        if (m.run_ids && !m.run_ids.includes(r.run_id)) continue;
+        // 必须查 points.length > 0:batch-query 对无数据组合也回一个**空组**,
+        // 只查"组存在"会把 6 run × N 指标的全组合算进键(实测 42 键绕 10 色板 4 圈 →
+        // 同卡的系列撞同色)—— 与 seriesLegend 的 drawn 过滤保持同一语义
+        if (series && !groups?.some((g) => g.key === m.key && g.context === m.context && g.points.length > 0)) continue;
         keys.push(lineSeriesKey(r.run_id, m));
       }
     }
@@ -155,10 +163,13 @@ export function colorKeysOf(runs: RunRecord[], widgets: DashWidget[]): string[] 
 
 // ─── 稳定配色:颜色是「系列身份」的函数,显隐/排序变化不换色 ───
 
-/** 与 WidgetContent 同款 10 色色板 */
+/** 与 WidgetContent 同款 10 色色板 = **G2 官方 category10**(AntV 经典色板,
+ *  见 antv-g2-chart skill references/palette/g2-palette-category10):
+ *  相邻色相最小 56°(自拼的 Tailwind 亮色在 55-150° 段会挤成同族),
+ *  近色相靠饱和度/明度拉开(如 5D7092 灰蓝 vs 5B8FF9 亮蓝)。 */
 export const PALETTE = [
-  '#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6',
-  '#06b6d4', '#ec4899', '#84cc16', '#f59e0b', '#6366f1',
+  '#5B8FF9', '#5AD8A6', '#5D7092', '#F6BD16', '#6F5EF9',
+  '#6DC8EC', '#945FB9', '#FF9845', '#1E9493', '#FF99C3',
 ];
 
 /**
@@ -168,9 +179,19 @@ export const PALETTE = [
  */
 export function assignStableColors(prev: Map<string, string>, keys: Iterable<string>): Map<string, string> {
   const next = new Map(prev);
+  const used = new Set(next.values());
   for (const k of keys) {
     if (next.has(k)) continue;
-    next.set(k, PALETTE[next.size % PALETTE.length]);
+    // %10 可能落到已被占的槽(map 历史污染/回绕)→ 顺延找空色;
+    // 十色耗尽(同批 >10 个不同键)才允许重复,绕一圈即停防死循环
+    let i = next.size;
+    let color = PALETTE[i % PALETTE.length];
+    for (let tries = 0; tries < PALETTE.length && used.has(color); tries++) {
+      i += 1;
+      color = PALETTE[i % PALETTE.length];
+    }
+    next.set(k, color);
+    used.add(color);
   }
   return next;
 }

@@ -70,6 +70,17 @@ describe('computeConfigDiff', () => {
   it('returns an empty list for no runs', () => {
     expect(computeConfigDiff([])).toEqual([]);
   });
+
+  it('filters to the selected config paths (diff widget paths)', () => {
+    const diff = computeConfigDiff(runs.slice(0, 2), ['params', 'name']);
+    expect(diff.map((d) => d.path)).toEqual(['name', 'params']);
+    // 未选中的 model.depth 被排除
+    expect(diff.find((d) => d.path === 'model.depth')).toBeUndefined();
+    // 选中但无差异的键不出现
+    expect(computeConfigDiff(runs.slice(0, 2), ['model.depth'])).toEqual([]);
+    // 空 paths = 对比全部差异键(缺省语义)
+    expect(computeConfigDiff(runs.slice(0, 2), [])).toEqual(computeConfigDiff(runs.slice(0, 2)));
+  });
 });
 
 describe('buildSummaryRows', () => {
@@ -158,6 +169,32 @@ describe('assignStableColors', () => {
   });
 });
 
+describe('assignStableColors — rebuild & collision skip', () => {
+  it('rebuilding from scratch keeps surviving keys in the same slots (老键不换色)', () => {
+    // Workspace.syncColors 的语义:以当前键集重建 —— 失效键不再占槽(避免 map 膨胀
+    // 后 %10 回绕与新键撞色),存活键因插入序不变而保持原槽
+    const first = assignStableColors(new Map(), ['r1', 'r2', 'r3']);
+    expect(first.get('r1')).toBe(PALETTE[0]);
+    expect(first.get('r3')).toBe(PALETTE[2]);
+    // r2 被移除、r4 新增:重建后 r1/r3 槽不变,r4 拿到空出的槽
+    const rebuilt = assignStableColors(new Map(), ['r1', 'r3', 'r4']);
+    expect(rebuilt.get('r1')).toBe(PALETTE[0]);
+    expect(rebuilt.get('r3')).toBe(PALETTE[1]); // r2 的槽被压缩,后续顺移 —— 与膨胀 map 的 %10 回绕不同
+    expect(rebuilt.get('r4')).toBe(PALETTE[2]);
+    expect(rebuilt.size).toBe(3); // 失效键 r2 已清,不再占位
+  });
+
+  it('skips an already-taken colour when %10 lands on a used slot', () => {
+    // 模拟 map 膨胀污染:size=10(≡0)但值只占 {P0, P5} —— 新键 %10=0 撞 P0 → 顺延到空槽 P1
+    const prev = new Map<string, string>([['x0', PALETTE[0]]]);
+    for (let i = 1; i <= 9; i++) prev.set(`dup${i}`, PALETTE[5]);
+    expect(prev.size).toBe(10);
+    const next = assignStableColors(prev, ['new-key']);
+    expect(next.get('new-key')).toBe(PALETTE[1]);
+    expect(next.get('new-key')).not.toBe(next.get('x0'));
+  });
+});
+
 describe('stable colours end-to-end (run + value channels)', () => {
   const rs = [run({ run_id: 'r1', config: { lr: 0.1 } }), run({ run_id: 'r2', config: { lr: 0.2 } })];
 
@@ -208,12 +245,47 @@ describe('lineSeriesKey / colorKeysOf', () => {
     const widgets = [
       { id: 'a', type: 'line' as const, metrics: [{ key: 'loss', context: 'train' }, { key: 'acc', context: 'train' }], w: 12, h: 4 },
     ];
-    // 只有 r1 有 loss、r2 有 acc → 两个键各得一槽,不会因为空组合挤掉 8 个槽位
+    // r1 的 loss 有数据、r2 的 acc 是空组 → 只有有数据的组合拿槽
+    const pt = [{ step: 0, wall_time: 0, value: 1, idx: 0 }];
     const cache = new Map([
-      ['r1', [{ run_id: 'r1', key: 'loss', context: 'train', points: [] }]],
+      ['r1', [{ run_id: 'r1', key: 'loss', context: 'train', points: pt }]],
       ['r2', [{ run_id: 'r2', key: 'acc', context: 'train', points: [] }]],
     ]);
-    expect(lineSeriesKeys(rs, widgets, cache)).toEqual(['r1|train/loss', 'r2|train/acc']);
+    expect(lineSeriesKeys(rs, widgets, cache)).toEqual(['r1|train/loss']);
+    // 空组回归:batch-query 对无数据 (run × context/指标) 也回空组,
+    // 若算进键表 → 6 run × 5 context = 30 键绕 10 色板 → 同名指标跨 context 撞同色
+    const polluted = new Map([
+      ['r1', [{ run_id: 'r1', key: 'loss', context: 'train', points: pt }]],
+      ['r2', [
+        { run_id: 'r2', key: 'loss', context: 'train', points: [] },
+        { run_id: 'r2', key: 'acc', context: 'train', points: [] },
+      ]],
+    ]);
+    expect(lineSeriesKeys(rs, widgets, polluted)).toEqual(['r1|train/loss']);
+  });
+
+  it('honours metric run_ids: only checked runs take palette slots (勾选细化到 run)', () => {
+    const widgets = [
+      // loss 只勾了 r1;acc 无 run_ids(= 全部)
+      { id: 'w', type: 'line' as const, metrics: [
+        { key: 'loss', context: 'train', run_ids: ['r1'] },
+        { key: 'acc', context: '' },
+      ], w: 12, h: 4 },
+    ];
+    expect(lineSeriesKeys(rs, widgets)).toEqual(['r1|train/loss', 'r1|acc', 'r2|acc']);
+    // 与画线同源:被 run_ids 挡掉的 (r2, loss) 不占色槽,否则未勾组合挤掉真实曲线的颜色
+    const pt = [{ step: 0, wall_time: 0, value: 1, idx: 0 }];
+    const cache = new Map([
+      ['r1', [
+        { run_id: 'r1', key: 'loss', context: 'train', points: pt },
+        { run_id: 'r1', key: 'acc', context: '', points: pt },
+      ]],
+      ['r2', [
+        { run_id: 'r2', key: 'loss', context: 'train', points: pt },
+        { run_id: 'r2', key: 'acc', context: '', points: pt },
+      ]],
+    ]);
+    expect(lineSeriesKeys(rs, widgets, cache)).toEqual(['r1|train/loss', 'r1|acc', 'r2|acc']);
   });
 
   it('splits keys into two channels: series (line) keys and run-scope keys', () => {
@@ -232,5 +304,36 @@ describe('lineSeriesKey / colorKeysOf', () => {
       { id: 'w', type: 'scatter' as const, x: { kind: 'config' as const, path: 'lr' }, y: { kind: 'config' as const, path: 'lr' }, colorBy: { kind: 'config' as const, path: 'lr' }, w: 12, h: 8 },
     ];
     expect(colorKeysOf(rs, widgets)).toEqual(['0.1', '0.2']);
+  });
+});
+
+describe('PALETTE hue separation', () => {
+  // hex → HSL 色相(度)
+  function hue(hex: string): number {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max === min) return 0;
+    let h = 0;
+    if (max === r) h = ((g - b) / (max - min)) % 6;
+    else if (max === g) h = (b - r) / (max - min) + 2;
+    else h = (r - g) / (max - min) + 4;
+    return (h * 60 + 360) % 360;
+  }
+
+  it('adjacent slots differ by at least 40° of hue (末尾几槽不再"几乎一样")', () => {
+    const hues = PALETTE.map(hue);
+    for (let i = 0; i < hues.length; i++) {
+      const j = (i + 1) % hues.length;
+      const diff = Math.abs(hues[i] - hues[j]);
+      const wrapped = Math.min(diff, 360 - diff);
+      expect(wrapped, `slot ${i}(${PALETTE[i]}) vs slot ${j}(${PALETTE[j]})`).toBeGreaterThanOrEqual(40);
+    }
+  });
+
+  it('all ten slots are distinct colours', () => {
+    expect(new Set(PALETTE).size).toBe(10);
   });
 });
