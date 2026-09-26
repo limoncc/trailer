@@ -4,7 +4,7 @@
  * 与 exploreWidgets(数据快照层)分层:那边算「有什么数据」,这边算「怎么画」。
  * 不依赖组件/ExploreCtx,便于单测;数据层契约(exploreWidgets.test)不受影响。
  */
-import type { MetricRef, RunRecord } from './explore';
+import type { MetricRef, RunRecord, SummaryStats } from './explore';
 import { PALETTE, formatStat, type ConfigDiffRow, type SummaryTable } from './exploreWidgets';
 
 // ─── Summary:统计口径 ───
@@ -208,6 +208,49 @@ export function summaryMatrix(
     rows.sort((a, b) => a.avgRank - b.avgRank); // 兜底按综合;稳定 → 并列保持原 run 序
   }
   return { rows };
+}
+
+/**
+ * Summary 同名指标合并:勾了同 key 多 context(如 `loss/train/s1_seq32k` 与
+ * `loss/train/s2_seq256k_20b` —— 同一个 loss,只是训练阶段不同)时合成一列,
+ * 列头不再出现一排无法区分的 `train/loss`。
+ * - 每 run 取**自己有值的 context 中字典序最靠后**的一个(阶段名 s1<s2<s3 自然有序)
+ * - 代表 metric = 组内 context 最大者(列头/状态键与取值同源)
+ * - 列序按 key 首见位置;无重复 key 时原样返回(引用不变)
+ */
+export function mergeSummaryContexts(table: SummaryTable): SummaryTable {
+  const byKey = new Map<string, number[]>();
+  table.metrics.forEach((m, i) => {
+    const arr = byKey.get(m.key);
+    if (arr) arr.push(i);
+    else byKey.set(m.key, [i]);
+  });
+  if (byKey.size === table.metrics.length) return table; // 每 key 只有一列,无需合并
+
+  const metrics: MetricRef[] = [];
+  const merged: Array<Array<SummaryStats | undefined>> = table.rows.map(() => []);
+  const seen = new Set<string>();
+  table.metrics.forEach((m, i) => {
+    if (seen.has(m.key)) return;
+    seen.add(m.key);
+    const idxs = byKey
+      .get(m.key)!
+      .sort((a, b) => table.metrics[a].context.localeCompare(table.metrics[b].context));
+    metrics.push(table.metrics[idxs[idxs.length - 1]]); // 代表 = 最靠后 context
+    table.rows.forEach((r, ri) => {
+      // 升序排列 → 从后往前找第一个有值 = 最靠后阶段
+      let pick: SummaryStats | undefined;
+      for (let k = idxs.length - 1; k >= 0; k--) {
+        const cell = r.cells[idxs[k]];
+        if (cell !== undefined) {
+          pick = cell;
+          break;
+        }
+      }
+      merged[ri].push(pick);
+    });
+  });
+  return { metrics, rows: table.rows.map((r, ri) => ({ runId: r.runId, cells: merged[ri] })) };
 }
 
 // ─── Config Diff:键行卡片流派生 ───

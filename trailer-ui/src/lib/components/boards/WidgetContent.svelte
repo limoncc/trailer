@@ -49,6 +49,7 @@
     diffKeyRows,
     summaryMatrix,
     lowerIsBetter,
+    mergeSummaryContexts,
     type SummaryStat,
   } from '$lib/utils/exploreViz';
   import { Trophy, Clock, ArrowDown, ArrowUp } from 'lucide-svelte';
@@ -370,7 +371,9 @@
     widget.type === 'diff' && explore ? computeConfigDiff(explore.runs, widget.paths) : []
   );
   let summaryTable = $derived.by(() =>
-    widget.type === 'summary' && explore ? buildSummaryRows(explore.runs, widget.metrics) : null
+    widget.type === 'summary' && explore
+      ? mergeSummaryContexts(buildSummaryRows(explore.runs, widget.metrics))
+      : null
   );
 
   // ─── Summary 卡视图态(矩阵热力):每指标独立口径(列头图标循环)+ 独立方向(列头箭头),均不入库 ───

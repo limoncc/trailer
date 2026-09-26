@@ -742,6 +742,38 @@ describe('WidgetContent summary matrix visualization', () => {
     unmount(component);
     target.remove();
   });
+
+  it('merges same-key metrics across contexts into one column (latest context wins)', async () => {
+    // 同一个 loss、不同训练阶段 context → 合并成一列,列头不再出现一排重复的 train/loss
+    const r1 = run('r1', {});
+    r1.summary = {
+      'loss/train/s1_seq32k': { last: 0.9, best: 0.9, min: 0.9, max: 0.9 },
+      'loss/train/s2_seq256k_20b': { last: 0.5, best: 0.5, min: 0.5, max: 0.5 },
+    };
+    const r2 = run('r2', {});
+    r2.summary = { 'loss/train/s1_seq32k': { last: 0.7, best: 0.7, min: 0.7, max: 0.7 } };
+    const mergedW: DashWidget = {
+      id: 'sm',
+      type: 'summary',
+      w: 18,
+      h: 6,
+      metrics: [
+        { key: 'loss', context: 'train/s1_seq32k' },
+        { key: 'loss', context: 'train/s2_seq256k_20b' },
+      ],
+    };
+    const { target, component } = await mountContent(mergedW, {
+      explore: makeCtx({ runs: [r1, r2] }),
+    });
+    expect(target.querySelectorAll('[data-matrix-btn]').length).toBe(1); // 两列 → 一列
+    const rows = rowsOf(target);
+    // r1 两阶段都有值 → 取最靠后 s2=0.5;r2 只有 s1 → 0.7;loss(lower) → 0.5 排前
+    expect(rows.map((r) => r.getAttribute('data-run-id'))).toEqual(['r1', 'r2']);
+    const cells = rows.map((r) => (r.querySelector('[data-matrix-cell]')?.textContent ?? '').trim());
+    expect(cells).toEqual(['0.5000', '0.7000']);
+    unmount(component);
+    target.remove();
+  });
 });
 
 describe('WidgetContent diff visualization', () => {
