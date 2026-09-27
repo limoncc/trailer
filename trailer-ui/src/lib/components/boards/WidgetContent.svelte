@@ -1,6 +1,7 @@
 <script lang="ts">
   // ─── Widget 内容渲染分发(唯一扩展点:新增类型加一个分支) ───
   import { untrack } from 'svelte';
+  import { chartPalette } from '$lib/charts/chartTheme.svelte';
   import LineChart from '$lib/charts/LineChart.svelte';
   import HistogramChart from '$lib/charts/HistogramChart.svelte';
   import G2SpecChart from '$lib/charts/G2SpecChart.svelte';
@@ -265,6 +266,8 @@
   // Explore:颜色是系列身份的函数(取稳定配色表),按 lineData 出现序展开 → 显隐不换色。
   let lineColors = $derived.by(() => {
     if (widget.type !== 'line') return PALETTE;
+    // 图表主题激活时用主题色板,否则内置 AntV 10 色(与历史一致)
+    const pal = chartPalette() ?? PALETTE;
     const out: string[] = [];
     if (explore) {
       // 按可见系列在 lineData 中的首现序(= 排序后的 domain 序)取稳定色,
@@ -275,7 +278,7 @@
         const key = strip(row.series);
         if (seen.has(key)) continue;
         const item = lineSeriesList.find((x) => x.name === key);
-        seen.set(key, item ? explore.colorOfValue(item.cv) : PALETTE[0]);
+        seen.set(key, item ? explore.colorOfValue(item.cv) : pal[0]);
       }
       for (const color of seen.values()) {
         if (lineSmoothOn) out.push(withAlpha(color, RAW_ALPHA), color);
@@ -284,7 +287,7 @@
       return out;
     }
     lineSeriesNames.forEach((_, i) => {
-      const base = PALETTE[i % PALETTE.length];
+      const base = pal[i % pal.length];
       if (lineSmoothOn) out.push(withAlpha(base, RAW_ALPHA), base);
       else out.push(base);
     });
@@ -440,7 +443,7 @@
       return {
         ...r,
         label: explore.labelOf(r.runId),
-        color: run ? explore.colorOfValue(explore.colorValueOf(run)) : PALETTE[0],
+        color: run ? explore.colorOfValue(explore.colorValueOf(run)) : chartPalette()?.[0] ?? PALETTE[0],
       };
     });
   });

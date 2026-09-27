@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
   import { Chart } from '@antv/g2';
-  import { g2Theme, onChartThemeChange, adaptiveTicks } from './chartTheme.svelte';
+  import { g2Theme, onChartThemeChange, adaptiveTicks, chartPalette } from './chartTheme.svelte';
   import { filterLineData, findNearestDatum, pointKey, toNum, loadFilterState, saveFilterState } from './lineFilter';
   import type { ExcludeRange, XWindow, FilterPersistState } from './lineFilter';
 
@@ -59,7 +59,7 @@
     colors,
     height = 350,
     smooth = false,
-    color = '#2563eb',
+    color,
     lineWidth = 1.5,
     point = false,
     title = '',
@@ -281,7 +281,8 @@
     };
 
     if (seriesField) {
-      const palette = colors ?? ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4898', '#06b6d4', '#f97316', '#6366f1', '#14b8a6'];
+      // 色板解析链:显式 colors → 图表主题色板(激活时) → 内置缺省(缺省态兜底,与历史一致)
+      const palette = colors ?? chartPalette() ?? ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4898', '#06b6d4', '#f97316', '#6366f1', '#14b8a6'];
       options.encode = {
         x: xField,
         y: yField,
@@ -293,7 +294,7 @@
       options.style = { lineWidth, ...(smooth ? { shape: 'smooth' } : {}) };
     } else {
       options.style = {
-        stroke: color,
+        stroke: color ?? chartPalette()?.[0] ?? '#2563eb',
         lineWidth,
         ...(smooth ? { shape: 'smooth' } : {}),
       };
