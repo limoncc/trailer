@@ -156,7 +156,10 @@ export const CHART_COLORS: Record<string, { light: Record<string, string>; dark:
 /** G2 内置主题的实采色板(G2 5.4.8 esm/theme/*.js):
  *  antv = classic/classicDark 的 palette;light/dark = light/dark 主题 tokens;
  *  academy = academy 主题(Tableau10),dark 组为手工提亮变体(官方无暗色变体)。
- *  vivid/pastel 沿用原 Chart Color 预设(hex 化并扩到 10 色);deep 取 d3 dark2。 */
+ *  vivid/pastel 沿用原 Chart Color 预设(hex 化并扩到 10 色);deep 取 d3 dark2;
+ *  vega = Vega-Lite Tableau10;okabe = Okabe-Ito 色盲友好(补 2 色);
+ *  viridis = matplotlib viridis 等距采样(暗底天生友好,light/dark 同值);
+ *  ggplot = R grDevices hue_pal(10)。dark 组除标注外均为手工提亮变体。 */
 export const CHART_PALETTES: Record<string, { light: string[]; dark: string[] }> = {
   antv: {
     light: ['#5B8FF9', '#5AD8A6', '#5D7092', '#F6BD16', '#6F5EF9', '#6DC8EC', '#945FB9', '#FF9845', '#1E9493', '#FF99C3'],
@@ -169,6 +172,22 @@ export const CHART_PALETTES: Record<string, { light: string[]; dark: string[] }>
   academy: {
     light: ['#4e79a7', '#f28e2c', '#e15759', '#76b7b2', '#59a14f', '#edc949', '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab'],
     dark: ['#6b95c9', '#f5a650', '#e8707a', '#8cc9c4', '#6fb566', '#f0d966', '#c193b8', '#ffb3bd', '#b28f78', '#c8c2bd'],
+  },
+  vega: {
+    light: ['#4C78A8', '#F58518', '#E45756', '#72B7B2', '#54A24B', '#EECA3B', '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC'],
+    dark: ['#6E9BC9', '#F79A45', '#EC7372', '#8FCCC7', '#6FBE65', '#F2D96E', '#C795BC', '#FFB3BE', '#B78F79', '#CCC0BE'],
+  },
+  okabe: {
+    light: ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7', '#6A3D9A', '#8C8C8C', '#17BECF'],
+    dark: ['#F0B33A', '#82C6EF', '#1FC690', '#F5EA6E', '#4D96D9', '#F07A3A', '#DC9AC2', '#8E62B8', '#A6A6A6', '#40D0E5'],
+  },
+  viridis: {
+    light: ['#440154', '#482878', '#3e4989', '#31688e', '#26828e', '#1f9e89', '#35b779', '#6ece58', '#b5de2b', '#fde725'],
+    dark: ['#5c2d99', '#6247c2', '#5664c1', '#4486b5', '#35a3ae', '#2bc4a5', '#4ed695', '#8adb72', '#c8e94e', '#f9ea45'],
+  },
+  ggplot: {
+    light: ['#F8766D', '#E18C03', '#B98300', '#7CAE00', '#5DB300', '#00BA38', '#00C08B', '#00BFC4', '#00B0F6', '#619CFF'],
+    dark: ['#FA9088', '#F5A83B', '#D9A31F', '#9BCF26', '#7BD344', '#1ED25B', '#26D9AC', '#26D9DA', '#3FC3FF', '#85B4FF'],
   },
   vivid: {
     light: ['#7C6AF9', '#16B8A0', '#F5B914', '#F0537E', '#4D8DF7', '#F97316', '#06B6D4', '#84CC16', '#EC4899', '#8B5CF6'],
