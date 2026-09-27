@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import PCA3DChart from './PCA3DChart.svelte';
+  import { chartPalette } from './chartTheme.svelte';
   import { parsePcaBody } from '$lib/pca/pca';
   import type { PcaGroup, PcaData } from '$lib/pca/pcaTypes';
   import { followIndex } from '$lib/utils/replay';
@@ -176,7 +177,7 @@
               {#each (current.meta.explained_variance ?? []).slice(0, 3) as v, i}
                 {@const pct = Math.round((v ?? 0) * 1000) / 10}
                 <span class="inline-flex items-center gap-1 font-mono text-muted-foreground">
-                  <span class="size-1.5 rounded-sm" style="background:{['#5B8FF9', '#5AD8A6', '#F6BD16'][i]}"></span>
+                  <span class="size-1.5 rounded-sm" style="background:{(chartPalette() ?? ['#5B8FF9', '#5AD8A6', '#F6BD16'])[i]}"></span>
                   PC{i + 1} {pct}%
                 </span>
               {/each}

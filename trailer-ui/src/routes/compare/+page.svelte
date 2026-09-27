@@ -5,6 +5,7 @@
   import { ChartLine } from 'lucide-svelte';
   import { authReady } from '$lib/utils/auth';
   import { refreshInterval } from '$lib/refresh.svelte';
+  import { chartPalette } from '$lib/charts/chartTheme.svelte';
   import MetricPicker from '$lib/components/MetricPicker.svelte';
   import type { MetricRef } from '$lib/utils/explore';
 
@@ -188,9 +189,11 @@
 
   const BASE = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4898', '#06b6d4', '#f97316'];
   let chartColors = $derived.by(() => {
+    // 图表主题激活时用主题色板,否则内置缺省(与历史一致)
+    const base = chartPalette() ?? BASE;
     const palette: string[] = [];
     for (let i = 0; i < activeRunIds.length; i++) {
-      const c = BASE[i % BASE.length];
+      const c = base[i % base.length];
       if (smooth > 0) palette.push(hexToRgba(c, 0.3));
       palette.push(c);
     }
