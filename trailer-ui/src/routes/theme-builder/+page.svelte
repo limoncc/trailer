@@ -6,6 +6,8 @@
     RADII,
     THEME_VARS,
     CHART_COLORS,
+    CHART_PALETTES,
+    CHART_THEME_STYLES,
     FONTS,
     MENU_STYLES,
     MENU_ACCENTS,
@@ -23,6 +25,8 @@
     type ThemeState,
   } from '$lib/theme-builder/color';
   import { api } from '$lib/utils/api';
+  import { Chart } from '@antv/g2';
+  import { themeOpts, onChartThemeChange, chartPalette } from '$lib/charts/chartTheme.svelte';
 
   const PRESETS = ['light', 'dark', 'cyber', 'nature', 'editorial', 'midnight'];
   /** preview-02 风格主色主题(只在 app.css 覆盖主色,底色继承灰阶);对齐 shadcn 完整色板 */
@@ -44,11 +48,36 @@
     label: cap(id),
     swatch: BASE_COLORS[id].light.primary,
   }));
-  const chartItems = Object.keys(CHART_COLORS).map((id) => ({
-    id,
-    label: cap(id),
-    swatches: Object.values(CHART_COLORS[id].light),
-  }));
+  /** Chart Color 选项:default(未激活,图表走本地缺省) + 6 预设 + custom */
+  const chartItems = [
+    {
+      id: 'default',
+      label: 'Default',
+      swatches: Object.values(CHART_COLORS.default.light),
+    },
+    ...Object.entries(CHART_PALETTES).map(([id, p]) => ({
+      id,
+      label: cap(id),
+      swatches: p.light.slice(0, 5),
+    })),
+    { id: 'custom', label: 'Custom', swatches: (state.chartPalette?.light ?? CHART_PALETTES.antv.light).slice(0, 5) },
+  ];
+  const chartStyleItems = CHART_THEME_STYLES.map((id) => ({ id, label: cap(id) }));
+  /** custom 色板编辑的亮/暗 tab */
+  let paletteTab = $state<'light' | 'dark'>('light');
+  /** 预览色块:custom 用编辑中的组,预设用其亮/暗组;未激活(空)不显示色块 */
+  const previewSwatches = $derived.by(() => {
+    if (state.chartColor === 'custom') {
+      return state.isDark ? (state.chartPalette?.dark ?? []) : (state.chartPalette?.light ?? []);
+    }
+    const p = CHART_PALETTES[state.chartColor];
+    return state.isDark ? (p?.dark ?? []) : (p?.light ?? []);
+  });
+  /** Custom 编辑器当前 tab 的 10 色数组(非 custom 态为空) */
+  const editingPalette = $derived.by(() => {
+    if (state.chartColor !== 'custom' || !state.chartPalette) return [] as string[];
+    return paletteTab === 'dark' ? state.chartPalette.dark : state.chartPalette.light;
+  });
   const fontItems = FONTS.map((f) => ({ id: f.id, label: f.label, family: f.family }));
   const radiusItems = RADII.map((r) => ({ id: r.label, label: r.label, value: r.value }));
   const presetItems = [...PRESETS, ...COLOR_THEMES].map((p) => ({ id: p, label: cap(p) }));
@@ -65,6 +94,39 @@
     applyThemeState(state);
   }
 
+  // ─── Live Preview:真实 mini 多系列折线(与全局图表同一条 themeOpts/通知链,
+  //     预览即验证色板注入与重建);未激活时展示 AntV 参考色 ───
+  let previewEl = $state<HTMLDivElement | null>(null);
+  let previewChart: Chart | null = null;
+
+  function renderPreview() {
+    if (!previewEl) return;
+    previewChart?.destroy();
+    previewChart = null;
+    previewChart = new Chart({ container: previewEl, height: 150, autoFit: true });
+    const data: Array<{ step: number; value: number; series: string }> = [];
+    for (let s = 0; s < 6; s++) {
+      for (let i = 0; i <= 20; i++) {
+        data.push({
+          step: i,
+          value: Math.round((100 * Math.exp(-i / (6 + s * 2.5)) + 8 * Math.sin(i / 3 + s)) * 100) / 100,
+          series: `Series ${s + 1}`,
+        });
+      }
+    }
+    previewChart.options({
+      ...themeOpts(),
+      type: 'line',
+      data,
+      encode: { x: 'step', y: 'value', color: 'series' },
+      scale: { color: { range: chartPalette() ?? CHART_PALETTES.antv.light } },
+      style: { lineWidth: 2 },
+      axis: { x: { title: false }, y: { title: false } },
+      legend: false,
+    });
+    previewChart.render();
+  }
+
   function init() {
     const stored = loadThemeState();
     if (stored) {
@@ -75,8 +137,18 @@
       state.isDark = document.documentElement.classList.contains('dark');
     }
     apply();
+    renderPreview();
   }
-  onMount(init);
+  onMount(() => {
+    init();
+    // 主题/色板变化 → 全局图表重建通知 → 预览同步重建(所见即所得)
+    const off = onChartThemeChange(renderPreview);
+    return () => {
+      off();
+      previewChart?.destroy();
+      previewChart = null;
+    };
+  });
 
   function selectPreset(name: string) {
     state.theme = name;
@@ -102,6 +174,30 @@
 
   function selectChart(id: string) {
     state.chartColor = id;
+    // 首次进 Custom:从 AntV 预设拷贝两组作起点(亮/暗独立编辑,互不影响)
+    if (id === 'custom' && !state.chartPalette) {
+      state.chartPalette = { light: [...CHART_PALETTES.antv.light], dark: [...CHART_PALETTES.antv.dark] };
+    }
+    apply();
+  }
+
+  function selectChartStyle(id: string) {
+    state.chartThemeStyle = id;
+    apply();
+  }
+
+  /** Custom 色板单色编辑(即时预览) */
+  function setChartPaletteColor(mode: 'light' | 'dark', i: number, hex: string) {
+    if (!state.chartPalette) return;
+    const arr = [...state.chartPalette[mode]];
+    arr[i] = hex;
+    state.chartPalette = { ...state.chartPalette, [mode]: arr };
+    apply();
+  }
+
+  /** Custom 色板重置回 AntV 预设 */
+  function resetChartPalette() {
+    state.chartPalette = { light: [...CHART_PALETTES.antv.light], dark: [...CHART_PALETTES.antv.dark] };
     apply();
   }
 
@@ -225,6 +321,49 @@
             accent="chart"
           />
         </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2.5">
+          <Picker
+            label="Chart Style"
+            value={cap(state.chartThemeStyle)}
+            selected={state.chartThemeStyle}
+            items={chartStyleItems}
+            onSelect={selectChartStyle}
+          />
+          <div class="text-[11px] text-muted-foreground self-end pb-2 leading-snug">
+            Chart Style applies once a Chart Color is selected; Academy falls back to classicDark in dark mode.
+          </div>
+        </div>
+        {#if state.chartColor === 'custom' && state.chartPalette}
+          <div class="border border-border rounded-md p-2.5 mt-2 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex gap-1">
+                {#each ['light', 'dark'] as mode}
+                  <button
+                    type="button"
+                    class="px-2 py-0.5 text-[11px] rounded-md {paletteTab === mode ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}"
+                    onclick={() => (paletteTab = mode as 'light' | 'dark')}
+                  >{mode === 'light' ? 'Light' : 'Dark'}</button>
+                {/each}
+              </div>
+              <button
+                type="button"
+                onclick={resetChartPalette}
+                class="px-2 py-0.5 text-[11px] border border-border rounded-md hover:bg-accent/50"
+              >Reset</button>
+            </div>
+            <div class="grid grid-cols-10 gap-1">
+              {#each editingPalette as c, i}
+                <input
+                  type="color"
+                  value={cssColorToHex(c)}
+                  onchange={(e) => setChartPaletteColor(paletteTab, i, (e.currentTarget as HTMLInputElement).value)}
+                  class="h-7 w-full rounded border border-border bg-background cursor-pointer"
+                  title={`chart-${i + 1}`}
+                />
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
 
       <div class="border-t border-border pt-3">
@@ -324,11 +463,12 @@
         </div>
         <div>
           <div class="text-xs text-muted-foreground mb-1">Chart palette</div>
-          <div class="flex gap-1.5">
-            {#each ['chart-1', 'chart-2', 'chart-3', 'chart-4', 'chart-5'] as c}
-              <div class="flex-1 h-8 rounded-md" style={`background: ${mergedVars[c] || 'transparent'}`}></div>
+          <div class="flex gap-1.5 mb-2">
+            {#each previewSwatches as c (c)}
+              <div class="flex-1 h-8 rounded-md" style={`background: ${c}`}></div>
             {/each}
           </div>
+          <div class="border border-border rounded-md overflow-hidden" bind:this={previewEl}></div>
         </div>
         <div>
           <div class="text-xs text-muted-foreground mb-1">Sidebar (Menu / Menu Accent)</div>

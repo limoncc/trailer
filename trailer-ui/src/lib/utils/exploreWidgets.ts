@@ -177,9 +177,14 @@ export const PALETTE = [
 /**
  * 在既有映射上为新 key 分配色板槽位(首见序);已分配的 key 永不改色,
  * 移除的 key 不清除(重新出现仍拿原色)→ 隐藏 run 不触发其余系列重排。
+ * palette:图例主题激活时由调用方传 chartPalette(),缺省用内置 AntV 10 色。
  * 返回新 Map(不改入参)。
  */
-export function assignStableColors(prev: Map<string, string>, keys: Iterable<string>): Map<string, string> {
+export function assignStableColors(
+  prev: Map<string, string>,
+  keys: Iterable<string>,
+  palette: string[] = PALETTE,
+): Map<string, string> {
   const next = new Map(prev);
   const used = new Set(next.values());
   for (const k of keys) {
@@ -187,10 +192,10 @@ export function assignStableColors(prev: Map<string, string>, keys: Iterable<str
     // %10 可能落到已被占的槽(map 历史污染/回绕)→ 顺延找空色;
     // 十色耗尽(同批 >10 个不同键)才允许重复,绕一圈即停防死循环
     let i = next.size;
-    let color = PALETTE[i % PALETTE.length];
-    for (let tries = 0; tries < PALETTE.length && used.has(color); tries++) {
+    let color = palette[i % palette.length];
+    for (let tries = 0; tries < palette.length && used.has(color); tries++) {
       i += 1;
-      color = PALETTE[i % PALETTE.length];
+      color = palette[i % palette.length];
     }
     next.set(k, color);
     used.add(color);

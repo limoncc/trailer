@@ -133,7 +133,7 @@ export function generateCss(t: CustomTheme): string {
 
 /* ===== preview-02 风格主题状态 ===== */
 
-/** 图表色板(chart-1..5),light/dark 两套 */
+/** 未激活时 --chart-1..5 的兜底显示值(oklch,维持 shadcn 默认);激活后由 CHART_PALETTES hex 接管 */
 export const CHART_COLORS: Record<string, { light: Record<string, string>; dark: Record<string, string> }> = {
   default: {
     light: {
@@ -151,39 +151,66 @@ export const CHART_COLORS: Record<string, { light: Record<string, string>; dark:
       'chart-5': 'oklch(0.645 0.246 16.439)',
     },
   },
+};
+
+/** G2 内置主题的实采色板(G2 5.4.8 esm/theme/*.js):
+ *  antv = classic/classicDark 的 palette;light/dark = light/dark 主题 tokens;
+ *  academy = academy 主题(Tableau10),dark 组为手工提亮变体(官方无暗色变体)。
+ *  vivid/pastel 沿用原 Chart Color 预设(hex 化并扩到 10 色);deep 取 d3 dark2。 */
+export const CHART_PALETTES: Record<string, { light: string[]; dark: string[] }> = {
+  antv: {
+    light: ['#5B8FF9', '#5AD8A6', '#5D7092', '#F6BD16', '#6F5EF9', '#6DC8EC', '#945FB9', '#FF9845', '#1E9493', '#FF99C3'],
+    dark: ['#6C9EF2', '#79DDB4', '#7D89A5', '#FFCC4D', '#8B7CFA', '#8AD3F0', '#AB7FD1', '#FFAD6B', '#3BAEA7', '#FFB3D4'],
+  },
+  light: {
+    light: ['#1783FF', '#00C9C9', '#F0884D', '#D580FF', '#7863FF', '#60C42D', '#BD8F24', '#FF80CA', '#2491B3', '#17C76F'],
+    dark: ['#1783FF', '#00C9C9', '#F0884D', '#D580FF', '#7863FF', '#60C42D', '#BD8F24', '#FF80CA', '#2491B3', '#17C76F'],
+  },
+  academy: {
+    light: ['#4e79a7', '#f28e2c', '#e15759', '#76b7b2', '#59a14f', '#edc949', '#af7aa1', '#ff9da7', '#9c755f', '#bab0ab'],
+    dark: ['#6b95c9', '#f5a650', '#e8707a', '#8cc9c4', '#6fb566', '#f0d966', '#c193b8', '#ffb3bd', '#b28f78', '#c8c2bd'],
+  },
   vivid: {
-    light: {
-      'chart-1': 'oklch(0.585 0.233 277.117)',
-      'chart-2': 'oklch(0.67 0.187 162.48)',
-      'chart-3': 'oklch(0.828 0.189 84.429)',
-      'chart-4': 'oklch(0.645 0.246 16.439)',
-      'chart-5': 'oklch(0.746 0.16 232.661)',
-    },
-    dark: {
-      'chart-1': 'oklch(0.623 0.214 259.815)',
-      'chart-2': 'oklch(0.696 0.17 162.48)',
-      'chart-3': 'oklch(0.769 0.188 70.08)',
-      'chart-4': 'oklch(0.627 0.265 303.9)',
-      'chart-5': 'oklch(0.645 0.246 16.439)',
-    },
+    light: ['#7C6AF9', '#16B8A0', '#F5B914', '#F0537E', '#4D8DF7', '#F97316', '#06B6D4', '#84CC16', '#EC4899', '#8B5CF6'],
+    dark: ['#9B8CFA', '#3BD0BB', '#FFCB3D', '#F76E93', '#6FA6F9', '#FB8C3C', '#2DD4E8', '#A3E635', '#F472B6', '#A78BFA'],
   },
   pastel: {
-    light: {
-      'chart-1': 'oklch(0.75 0.08 250)',
-      'chart-2': 'oklch(0.78 0.1 160)',
-      'chart-3': 'oklch(0.8 0.09 90)',
-      'chart-4': 'oklch(0.76 0.1 320)',
-      'chart-5': 'oklch(0.72 0.07 25)',
-    },
-    dark: {
-      'chart-1': 'oklch(0.6 0.09 250)',
-      'chart-2': 'oklch(0.65 0.1 160)',
-      'chart-3': 'oklch(0.68 0.09 90)',
-      'chart-4': 'oklch(0.62 0.1 320)',
-      'chart-5': 'oklch(0.58 0.08 25)',
-    },
+    light: ['#9BA8E8', '#97C9A8', '#E3D08F', '#D6A6CE', '#D9A18F', '#A8C6E8', '#C9B6E3', '#E8B6B6', '#A6D6CE', '#D6C9A8'],
+    dark: ['#8291D1', '#7FB590', '#C9B67A', '#BE8AB4', '#C28A79', '#8FB0D1', '#AB98C9', '#C99B9B', '#8BBDB4', '#B9AC8F'],
+  },
+  deep: {
+    light: ['#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#66a61e', '#e6ab02', '#a6761d', '#666666', '#18837e', '#ad5343'],
+    dark: ['#2fc197', '#f57a1e', '#9691d6', '#f051a8', '#7dc736', '#f5c22b', '#c98f36', '#a0a0a0', '#23a6a0', '#d16a52'],
   },
 };
+
+/** G2 图表风格(内置主题名);暗色 UI 下由 chartThemeTypeFor 映射到对应暗色变体 */
+export const CHART_THEME_STYLES = ['classic', 'light', 'academy'] as const;
+
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+function isHex10(a: unknown): a is string[] {
+  return Array.isArray(a) && a.length === 10 && a.every((c) => typeof c === 'string' && HEX_RE.test(c));
+}
+
+/** 图表风格 → 当前暗亮下应使用的 G2 theme 名:
+ *  academy 无官方暗色变体,暗色回落 classicDark。 */
+export function chartThemeTypeFor(style: string, isDark: boolean): string {
+  if (!isDark) return (CHART_THEME_STYLES as readonly string[]).includes(style) ? style : 'classic';
+  if (style === 'light') return 'dark';
+  return 'classicDark';
+}
+
+/** 当前激活的图表色板(具体 hex 数组,供 G2 scale/theme 注入与衍生气使用)。
+ *  返回 null = 未激活(chartColor 为 default 或 custom 数据非法)→ 调用方走本地缺省兜底。 */
+export function chartPaletteFor(s: ThemeState, isDark: boolean): string[] | null {
+  if (s.chartColor === 'default') return null;
+  if (s.chartColor === 'custom') {
+    const arr = isDark ? s.chartPalette?.dark : s.chartPalette?.light;
+    return isHex10(arr) ? arr : null;
+  }
+  const p = CHART_PALETTES[s.chartColor];
+  return p ? (isDark ? p.dark : p.light) : null;
+}
 
 /** 字体选项:Inter 用真实字体,其余系统字体栈 */
 export const FONTS = [
@@ -201,8 +228,12 @@ export interface ThemeState {
   baseColor: string;
   /** 主题预设 id(light/dark/cyber/nature/editorial/midnight) */
   theme: string;
-  /** 图表色板 id(见 CHART_COLORS) */
+  /** 图表色板 id:'default'=未激活(图表走各自本地缺省);其余见 CHART_PALETTES;'custom'=chartPalette */
   chartColor: string;
+  /** G2 图表风格 id(见 CHART_THEME_STYLES);决定底色/轴/网格等非颜色观感 */
+  chartThemeStyle: string;
+  /** Custom 模式的色板(chartColor='custom' 时生效);light/dark 两组各 10 个 #rrggbb */
+  chartPalette?: { light: string[]; dark: string[] };
   /** 正文字体 id(见 FONTS) */
   font: string;
   /** 标题字体 id(见 FONTS) */
@@ -217,6 +248,7 @@ export const DEFAULT_THEME_STATE: ThemeState = {
   baseColor: 'neutral',
   theme: 'light',
   chartColor: 'default',
+  chartThemeStyle: 'classic',
   font: 'inter',
   headingFont: 'inter',
   menu: 'default',
@@ -228,8 +260,12 @@ export const DEFAULT_THEME_STATE: ThemeState = {
 /** 增量覆盖:chart 色板 + Menu/Menu Accent 的 sidebar 变量(核心色由 BASE_COLORS 应用时写入 vars) */
 export function resolveOverrides(state: ThemeState): Record<string, string> {
   const vars: Record<string, string> = {};
-  const chart = CHART_COLORS[state.chartColor];
-  if (chart) {
+  // 激活的图表色板 → --chart-1..5 写 hex 前 5 色;未激活保持 CHART_COLORS.default(oklch 现状)
+  const pal = chartPaletteFor(state, state.isDark);
+  if (pal) {
+    for (let i = 0; i < 5; i++) vars[`chart-${i + 1}`] = pal[i];
+  } else if (state.chartColor === 'default') {
+    const chart = CHART_COLORS.default;
     const s = state.isDark ? chart.dark : chart.light;
     for (const k of Object.keys(s)) vars[k] = s[k];
   }
@@ -250,7 +286,8 @@ export function applyFonts(font: string, headingFont: string) {
   el.style.setProperty('--font-heading', head.family);
 }
 
-/** 应用 ThemeState 全量到 <html>:data-theme 预设 + 内联变量 + chart/sidebar 覆盖 + 字体 */
+/** 应用 ThemeState 全量到 <html>:data-theme 预设 + 内联变量 + chart/sidebar 覆盖 + 字体。
+ *  应用完成通知订阅者(chartTheme 枢纽刷新激活快照并触发图表重建)。 */
 const OVERRIDE_KEYS = [
   ...THEME_VARS,
   'radius',
@@ -266,7 +303,25 @@ const OVERRIDE_KEYS = [
   'font-heading',
 ];
 
+const appliedListeners = new Set<() => void>();
+
+/** 最近一次 applyThemeState 的状态(内存快照);Theme Builder 预览只 apply 不落盘,
+ *  chartTheme 枢纽经此读取编辑中的激活态,不能只看 localStorage。 */
+let latestState: ThemeState | null = null;
+
+export function getCurrentThemeState(): ThemeState | null {
+  return latestState;
+}
+
+/** 订阅 ThemeState 应用事件(ThemeState 保存/预览/切换时触发)。返回退订函数。
+ *  chartTheme 枢纽经此补「只换色板不切暗色也重建」的通知缺口。 */
+export function onThemeStateApplied(cb: () => void): () => void {
+  appliedListeners.add(cb);
+  return () => appliedListeners.delete(cb);
+}
+
 export function applyThemeState(s: ThemeState) {
+  latestState = s;
   const el = document.documentElement;
   el.setAttribute('data-theme', s.theme);
   el.classList.toggle('dark', s.isDark);
@@ -276,6 +331,7 @@ export function applyThemeState(s: ThemeState) {
     if (v) el.style.setProperty(`--${k}`, v);
   }
   applyFonts(s.font, s.headingFont);
+  appliedListeners.forEach((fn) => fn());
 }
 
 /** 清除所有主题内联覆盖(供预设切换前让 data-theme 预设值生效) */
@@ -311,10 +367,22 @@ export function themeStateFromJson(raw: string | null | undefined): ThemeState {
   try {
     const t = JSON.parse(raw || '{}');
     if (!t || typeof t !== 'object') return { ...d };
+    // chartPalette 白名单校验:两组各 10 个合法 hex,非法整体丢弃(回退未激活)
+    const chartPalette =
+      t.chartPalette &&
+      typeof t.chartPalette === 'object' &&
+      isHex10(t.chartPalette.light) &&
+      isHex10(t.chartPalette.dark)
+        ? { light: [...t.chartPalette.light], dark: [...t.chartPalette.dark] }
+        : undefined;
     return {
       baseColor: typeof t.baseColor === 'string' ? t.baseColor : d.baseColor,
       theme: typeof t.theme === 'string' ? t.theme : d.theme,
       chartColor: typeof t.chartColor === 'string' ? t.chartColor : d.chartColor,
+      chartThemeStyle: (CHART_THEME_STYLES as readonly string[]).includes(t.chartThemeStyle)
+        ? t.chartThemeStyle
+        : d.chartThemeStyle,
+      chartPalette,
       font: typeof t.font === 'string' ? t.font : d.font,
       headingFont: typeof t.headingFont === 'string' ? t.headingFont : d.headingFont,
       menu: MENU_STYLES.includes(t.menu) ? t.menu : d.menu,

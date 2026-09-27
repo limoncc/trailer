@@ -5,6 +5,7 @@
   import ExploreWidgetEditor from './ExploreWidgetEditor.svelte';
   import { EMPTY_BOARDS_DATA, type MetricSeries } from './boards/boardsData';
   import { colorValueOf, PALETTE, type ExploreCtx } from '$lib/utils/exploreWidgets';
+  import { chartPalette } from '$lib/charts/chartTheme.svelte';
   import type { DashWidget } from '$lib/utils/dashboard';
   import type { RunRecord, SeriesData } from '$lib/utils/explore';
 
@@ -41,7 +42,7 @@
       return r?.name ?? runId.slice(0, 12);
     },
     colorValueOf,
-    colorOfValue: (cv) => colors.get(cv) ?? PALETTE[0],
+    colorOfValue: (cv) => colors.get(cv) ?? chartPalette()?.[0] ?? PALETTE[0],
     isRunning: (runId) => runStates.get(runId) === 'running',
     series,
   });

@@ -2,6 +2,7 @@
 import { inview } from '$lib/utils/inview';
 import LineChart from './LineChart.svelte';
 import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics';
+import { chartPalette } from './chartTheme.svelte';
 
   interface Point {
     step: number;
@@ -162,7 +163,9 @@ import { displayMetricName, systemAxisFormatter } from '$lib/utils/systemMetrics
       yField="value"
       xIsTime={xField === 'wall_time'}
       seriesField={seriesField || (smooth >= 1 ? 'series' : undefined)}
-      colors={colors || ['rgba(59,130,246,0.15)', '#3b82f6']}
+      colors={colors || (chartPalette()
+        ? [chartPalette()![0] + '26', chartPalette()![0]]
+        : ['rgba(59,130,246,0.15)', '#3b82f6'])}
       height={250}
       point={false}
       yFormat={yFmt}
