@@ -13,8 +13,10 @@ import {
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
 describe('CHART_PALETTES', () => {
-  it('6 套预设 × light/dark 各 10 个合法 hex', () => {
-    expect(Object.keys(CHART_PALETTES).sort()).toEqual(['academy', 'antv', 'deep', 'light', 'pastel', 'vivid']);
+  it('10 套预设 × light/dark 各 10 个合法 hex', () => {
+    expect(Object.keys(CHART_PALETTES).sort()).toEqual([
+      'academy', 'antv', 'deep', 'ggplot', 'light', 'okabe', 'pastel', 'vega', 'viridis', 'vivid',
+    ]);
     for (const p of Object.values(CHART_PALETTES)) {
       expect(p.light).toHaveLength(10);
       expect(p.dark).toHaveLength(10);
