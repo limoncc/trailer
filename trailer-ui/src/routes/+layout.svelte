@@ -4,7 +4,7 @@
   import '../app.css';
   import Button from '$lib/components/ui/Button.svelte';
   import { api } from '$lib/utils/api';
-  import { applyCustomTheme, loadCustomTheme, saveCustomTheme, loadThemeState, applyThemeState } from '$lib/theme-builder/color';
+  import { applyCustomTheme, loadCustomTheme, saveCustomTheme, loadThemeState, applyThemeState, themeStateFromJson } from '$lib/theme-builder/color';
   import {
     Compass, FileText, LayoutGrid, Microscope, Moon, Sun, Trash2, Upload, Zap, Leaf, BookOpen, Eclipse,
     FlaskConical, Palette,
@@ -112,6 +112,15 @@
       if (!resp.ok) return;
       const data = await resp.json();
       const t = JSON.parse(data.theme || '{}');
+      // custom:后端存的是完整 ThemeState(themeStateToJson 带 name 字段)→ 全量恢复
+      // (含字体/图表色板/菜单;旧路径只恢复 vars+isDark 会丢这些维度)
+      if (t && t.name === 'custom') {
+        const ts = themeStateFromJson(data.theme);
+        theme = 'custom';
+        localStorage.setItem('trailer_theme', 'custom');
+        applyThemeState(ts);
+        return;
+      }
       if (t && t.name) applyThemePreference(t);
     } catch { /* ignore */ }
   }

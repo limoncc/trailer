@@ -13,7 +13,8 @@
   import { loadSeries, parseSummaryKey, refreshSeriesIncremental } from '$lib/utils/explore';
   import type { DashWidget } from '$lib/utils/dashboard';
   import { defaultSize, newWidgetId, serializeLayout } from '$lib/utils/dashboard';
-  import { assignStableColors, lineSeriesKeys, runScopeKeys } from '$lib/utils/exploreWidgets';
+  import { assignStableColors, lineSeriesKeys, runScopeKeys, PALETTE } from '$lib/utils/exploreWidgets';
+  import { chartPalette } from '$lib/charts/chartTheme.svelte';
 
   interface Props {
     initialRunIds?: string[];
@@ -99,8 +100,10 @@
     // 操作若干轮后 size 绕过 10 的倍数,新键 %10 回绕撞上老键的色(反馈"颜色还是一样")。
     // 存活键因插入序不变而保持原槽(隐藏的 run 仍在 selectedRecords,不清除)。
     const runKeys = [...selectedRuns, ...runScopeKeys(selectedRecords, widgets)];
-    runColors = assignStableColors(new Map(), runKeys);
-    seriesColors = assignStableColors(new Map(), lineSeriesKeys(selectedRecords, widgets, series));
+    // 图表主题激活时用主题色板,否则内置 AntV 10 色(跨页切主题后重挂载自然刷新)
+    const pal = chartPalette() ?? PALETTE;
+    runColors = assignStableColors(new Map(), runKeys, pal);
+    seriesColors = assignStableColors(new Map(), lineSeriesKeys(selectedRecords, widgets, series), pal);
   }
 
   async function refreshSeries() {

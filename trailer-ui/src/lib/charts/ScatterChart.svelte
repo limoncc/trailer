@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
-  import { onChartThemeChange, themeOpts, adaptiveTicks } from './chartTheme.svelte';
+  import { onChartThemeChange, themeOpts, adaptiveTicks, chartPalette } from './chartTheme.svelte';
 
   interface DataPoint {
     x: number;
@@ -100,7 +100,8 @@
       style: {
         // size: pointSize,
         lineWidth: 0,
-        fill: '#2563eb',
+        // 图表主题激活时用主题首色,缺省保持历史蓝
+        fill: chartPalette()?.[0] ?? '#2563eb',
         fillOpacity: 0.3,
       },
     }};

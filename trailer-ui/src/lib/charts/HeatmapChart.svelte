@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Chart } from '@antv/g2';
-  import { onChartThemeChange, themeOpts } from './chartTheme.svelte';
+  import { onChartThemeChange, themeOpts, chartPalette } from './chartTheme.svelte';
 
   interface HeatmapDataPoint {
     x: string;
@@ -27,7 +27,7 @@
     colorField = 'value',
     height = 400,
     title = 'Confusion Matrix',
-    colorScale = ['#f0f9ff', '#2563eb'] as [string, string],
+    colorScale,
   }: Props = $props();
 
   let container: HTMLDivElement;
@@ -45,7 +45,10 @@
       scale: {
         color: {
           type: 'linear',
-          range: colorScale,
+          // 色带解析链:显式 colorScale → 图表主题首色派生渐变(激活时) → 内置缺省
+          range: colorScale ?? (chartPalette()
+            ? (['#f8fafc', chartPalette()![0]] as [string, string])
+            : (['#f0f9ff', '#2563eb'] as [string, string])),
         },
       },
       style: {
