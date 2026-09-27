@@ -702,7 +702,6 @@
       height={heightPx}
       seriesField="series"
       colors={lineColors}
-      lineWidth={explore ? 2 : undefined}
       xIsTime={widget.xKind === 'wall_time'}
       logX={widget.xLog === true}
       logY={widget.yLog === true}
