@@ -9,14 +9,17 @@
     size?: "default" | "sm" | "lg" | "icon";
     onclick?: () => void;
     disabled?: boolean;
+    /** 其余属性(title/aria-* 等)透传到底层 <button> */
+    [key: string]: unknown;
   }
 
-  let { children, class: className = "", variant = "default", size = "default", onclick, disabled = false }: Props = $props();
+  let { children, class: className = "", variant = "default", size = "default", onclick, disabled = false, ...rest }: Props = $props();
 </script>
 
 <button
   {onclick}
   {disabled}
+  {...rest}
   class={cn(
     "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size'])]:size-4",
     variant === "default" && "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90",
