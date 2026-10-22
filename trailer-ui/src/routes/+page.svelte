@@ -46,9 +46,15 @@
       <p class="text-2xl font-bold mb-3 text-foreground">Welcome to Trailer</p>
       <p class="text-sm text-muted-foreground mb-6">Select a project from the sidebar, or start tracking:</p>
       <pre class="text-sm bg-muted/50 p-4 rounded-xl text-left border border-border shadow-sm inline-block"><code
-        ><span class="text-blue-500 dark:text-blue-400">from</span> trailer <span class="text-blue-500 dark:text-blue-400">import</span> Tracker
-tracker <span class="text-purple-500">=</span> Tracker(project<span class="text-purple-500">=</span><span class="text-green-600 dark:text-green-400">"my_project"</span>)
-tracker.<span class="text-yellow-600 dark:text-yellow-400">log</span>(&#123;<span class="text-green-600 dark:text-green-400">"train/loss"</span>: <span class="text-orange-500">0.5</span>, <span class="text-green-600 dark:text-green-400">"val/loss"</span>: <span class="text-orange-500">0.55</span>&#125;)
+        ><span class="text-blue-500 dark:text-blue-400">import</span> random
+<span class="text-blue-500 dark:text-blue-400">from</span> trailer <span class="text-blue-500 dark:text-blue-400">import</span> Tracker
+
+tracker <span class="text-purple-500">=</span> Tracker(project<span class="text-purple-500">=</span><span class="text-green-600 dark:text-green-400">"my_training"</span>)
+<span class="text-blue-500 dark:text-blue-400">for</span> step <span class="text-blue-500 dark:text-blue-400">in</span> <span class="text-yellow-600 dark:text-yellow-400">range</span>(<span class="text-orange-500">100</span>):
+    base <span class="text-purple-500">=</span> <span class="text-orange-500">0.9</span> <span class="text-purple-500">*</span> <span class="text-orange-500">0.96</span> <span class="text-purple-500">**</span> step
+    tracker.<span class="text-yellow-600 dark:text-yellow-400">log</span>(&#123;<span class="text-green-600 dark:text-green-400">"train/loss"</span>: base <span class="text-purple-500">+</span> random.<span class="text-yellow-600 dark:text-yellow-400">random</span>() <span class="text-purple-500">*</span> <span class="text-orange-500">0.04</span>,
+                 <span class="text-green-600 dark:text-green-400">"val/loss"</span>: base <span class="text-purple-500">+</span> <span class="text-orange-500">0.06</span> <span class="text-purple-500">+</span> random.<span class="text-yellow-600 dark:text-yellow-400">random</span>() <span class="text-purple-500">*</span> <span class="text-orange-500">0.06</span>&#125;,
+                   step<span class="text-purple-500">=</span>step)
 tracker.<span class="text-yellow-600 dark:text-yellow-400">finish</span>()</code></pre>
     </div>
   </div>
