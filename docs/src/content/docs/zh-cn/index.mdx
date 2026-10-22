@@ -7,7 +7,7 @@ hero:
   tagline: '高性能 Rust 核心 · Python SDK · 丰富 Web UI'
   actions:
     - text: 快速开始
-      link: /zh-cn/getting-started/
+      link: ./getting-started/
       variant: primary
       icon: right-arrow
     - text: GitHub
@@ -138,21 +138,21 @@ trailer up   # 打开 http://127.0.0.1:5120
 按顺序读，从入门到进阶：
 
 <CardGrid>
-  <LinkCard title="快速开始" href="/zh-cn/getting-started/" icon="rocket">
+  <LinkCard title="快速开始" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/zh-cn/getting-started/`} icon="rocket">
     5 分钟安装、记录第一个实验、打开看板。
   </LinkCard>
-  <LinkCard title="第一个完整实验" href="/zh-cn/tutorial/first-experiment/" icon="puzzle">
+  <LinkCard title="第一个完整实验" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/zh-cn/tutorial/first-experiment/`} icon="puzzle">
     改超参重跑三次，用 Compare 找出最优组合，建立实验跟踪闭环。
   </LinkCard>
-  <LinkCard title="指标、超参与 best 语义" href="/zh-cn/tutorial/beyond-loss/" icon="analytics">
+  <LinkCard title="指标、超参与 best 语义" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/zh-cn/tutorial/beyond-loss/`} icon="analytics">
     train/val 自动分组、config 快照、指标方向与 step 语义。
   </LinkCard>
-  <LinkCard title="核心概念" href="/zh-cn/core-concepts/" icon="open-book">
+  <LinkCard title="核心概念" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/zh-cn/core-concepts/`} icon="open-book">
     项目 / Run / Sweep 数据模型全景。
   </LinkCard>
-  <LinkCard title="Grokking 进阶案例" href="/zh-cn/case-studies/grokking/" icon="star">
+  <LinkCard title="Grokking 进阶案例" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/zh-cn/case-studies/grokking/`} icon="star">
     完整研究实验：模型图、权重直方图、嵌入 PCA、损失景观与断点续训。
   </LinkCard>
 </CardGrid>
 
-参考手册：[Python SDK](/zh-cn/sdk/logging/)（记录数据）· [Web UI](/zh-cn/ui/dashboard/)（看板功能）· [部署](/zh-cn/deployment/) · [CLI](/zh-cn/cli/)
+参考手册：[Python SDK](sdk/logging/)（记录数据）· [Web UI](ui/dashboard/)（看板功能）· [部署](deployment/) · [CLI](cli/)

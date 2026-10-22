@@ -55,5 +55,5 @@ export TRAILER_TOKEN=rt_xxxx
 
 ## 相关
 
-- [部署](/zh-cn/deployment/)——多用户 server 模式与 PostgreSQL
-- [本地 / 远程 / 文件模式](/zh-cn/sdk/modes/)——SDK 如何连接远程 server
+- [部署](../deployment/)——多用户 server 模式与 PostgreSQL
+- [本地 / 远程 / 文件模式](../sdk/modes/)——SDK 如何连接远程 server

@@ -26,7 +26,7 @@ The run page (`/run/[id]`) shows up to 10 tabs. Tabs appear only when the run ha
 
 ## Landscape tab
 
-Each logged landscape (`t.log_loss_landscape(...)`, see [Advanced Data Types](/sdk/advanced-data/)) becomes a card:
+Each logged landscape (`t.log_loss_landscape(...)`, see [Advanced Data Types](../sdk/advanced-data/)) becomes a card:
 
 - **Heat** — pure colormap field, hover reads (α, β, loss)
 - **Contour** — pure contour lines (no fill)

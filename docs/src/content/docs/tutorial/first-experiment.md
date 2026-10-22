@@ -59,7 +59,7 @@ The interesting part is the three `Tracker` parameters:
 
 - `name=f"lr-{args.lr}"` — the run name carries the key hyperparameter
 - `config={"lr": ..., "steps": ...}` — a full hyperparameter snapshot
-- `metric_directions={"accuracy": "max"}` — best semantics (see [the next page](/tutorial/beyond-loss/))
+- `metric_directions={"accuracy": "max"}` — best semantics (see [the next page](../tutorial/beyond-loss/))
 
 ## Step 2: Run it three times
 
@@ -116,4 +116,4 @@ Habits worth building now:
 - The two-level workflow: run table for triage, Compare for fine comparison
 - The basics of experiment-recording discipline
 
-Next: [Metrics, config, and best semantics](/tutorial/beyond-loss/) explains the mechanisms behind these APIs.
+Next: [Metrics, config, and best semantics](../tutorial/beyond-loss/) explains the mechanisms behind these APIs.

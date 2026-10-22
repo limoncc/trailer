@@ -78,7 +78,7 @@ tracker.log_model(model, name="my-net")                   # PyTorch model graph
 
 Hardware (CPU / memory / GPU) is sampled automatically by default — zero code, aligned with your metrics on the same axis in the dashboard.
 
-See [Advanced data types](/sdk/advanced-data/).
+See [Advanced data types](sdk/advanced-data/).
 
 ## 5. Name runs and record hyperparameters
 
@@ -95,9 +95,9 @@ tracker = Tracker(
 
 Read in order to go from beginner to advanced:
 
-1. [Your first full experiment](/tutorial/first-experiment/) — change a hyperparameter, rerun, and use Compare to pick the winner
-2. [Metrics, config, and best semantics](/tutorial/beyond-loss/) — train/val grouping, step semantics, metric directions
-3. [Core concepts](/core-concepts/) — the full data model (projects / runs / sweeps)
-4. For a real research experiment tracked with trailer's full feature set, see the advanced case study [Grokking loss landscapes](/case-studies/grokking/) (read after the three above)
+1. [Your first full experiment](tutorial/first-experiment/) — change a hyperparameter, rerun, and use Compare to pick the winner
+2. [Metrics, config, and best semantics](tutorial/beyond-loss/) — train/val grouping, step semantics, metric directions
+3. [Core concepts](core-concepts/) — the full data model (projects / runs / sweeps)
+4. For a real research experiment tracked with trailer's full feature set, see the advanced case study [Grokking loss landscapes](case-studies/grokking/) (read after the three above)
 
-For team servers and alternative storage backends, see [Local / remote / file modes](/sdk/modes/).
+For team servers and alternative storage backends, see [Local / remote / file modes](sdk/modes/).

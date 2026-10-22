@@ -32,7 +32,7 @@ Run 状态由心跳机制管理:SDK 每 30s 发一次心跳,server 60s 未收到
 
 ## Sweep
 
-超参扫描分组。给多个 run 传相同的 `sweep_id` 即归为一组，前端 [Sweeps 页](/zh-cn/ui/sweeps/) 用平行坐标图展示"参数 → 指标"的关系。跨项目的自由分析仍用 [Explore 工作台](/zh-cn/ui/explore/)。
+超参扫描分组。给多个 run 传相同的 `sweep_id` 即归为一组，前端 [Sweeps 页](ui/sweeps/) 用平行坐标图展示"参数 → 指标"的关系。跨项目的自由分析仍用 [Explore 工作台](ui/explore/)。
 
 ## 配置(Config)
 

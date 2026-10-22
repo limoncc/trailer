@@ -165,4 +165,4 @@ Model 标签页渲染计算图,含层 shape 与数据流边。
 t = Tracker(project="demo", config={"lr": 0.01, "batch_size": 32})
 ```
 
-argparse / OmegaConf / Hydra 参数自动捕获。详见 [配置](/zh-cn/sdk/configuration/)。
+argparse / OmegaConf / Hydra 参数自动捕获。详见 [配置](../sdk/configuration/)。

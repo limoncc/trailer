@@ -105,7 +105,7 @@ tracker2 = Tracker(project="grokking-mini",
 
 `from_step=N` deletes **all** time-series data with step > N (metrics / histograms / figures / tables / media), recomputes the summary, and continues from N+1. Without truncation, the old 501..800 would overlap the new data at the same steps, corrupting plots / Compare / Explore.
 
-The script's `--resume-demo` flag demonstrates this automatically. See [Resuming a run](/sdk/logging/#resuming-a-run).
+The script's `--resume-demo` flag demonstrates this automatically. See [Resuming a run](../sdk/logging/#resuming-a-run).
 
 ## Step 5: Read it in the dashboard
 
@@ -139,4 +139,4 @@ With the defaults (`p=31, d_model=128, d_mlp=512, lr=3e-3, wd=1.0, batch=128`) o
 - Replaying the loss surface with `log_loss_landscape` (fixed subset, fixed seed, interpolation snapshots)
 - Safely restarting from a checkpoint with `resume_from` + `from_step`
 
-This three-way tracking — external curves, internal state, and loss surface — is exactly where trailer pulls ahead of scalar-only tools. For more analysis, head to the [Explore workspace](/ui/explore/) for cross-project analysis, or [Sweeps](/ui/sweeps/) for hyperparameter grids.
+This three-way tracking — external curves, internal state, and loss surface — is exactly where trailer pulls ahead of scalar-only tools. For more analysis, head to the [Explore workspace](../ui/explore/) for cross-project analysis, or [Sweeps](../ui/sweeps/) for hyperparameter grids.

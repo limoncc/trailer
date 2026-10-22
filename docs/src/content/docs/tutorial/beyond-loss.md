@@ -70,6 +70,6 @@ This is the data source for the best / last columns in the run table — maintai
 
 ## Next steps
 
-- Recording non-scalar data (images / tables / embeddings / loss landscapes) → [Advanced data types](/sdk/advanced-data/)
-- Multi-machine collaboration and storage backends → [Local / remote / file modes](/sdk/modes/)
-- Training interrupted? → [Resuming a run](/sdk/logging/#resuming-a-run)
+- Recording non-scalar data (images / tables / embeddings / loss landscapes) → [Advanced data types](../sdk/advanced-data/)
+- Multi-machine collaboration and storage backends → [Local / remote / file modes](../sdk/modes/)
+- Training interrupted? → [Resuming a run](../sdk/logging/#resuming-a-run)
