@@ -24,8 +24,12 @@ export default defineConfig({
       customCss: ['./src/custom.css', '@fontsource-variable/inter'],
       plugins: [starlightLlmsTxt()],
       sidebar: [
-        { label: 'Guides', items: [
+        { label: 'Tutorials', translations: { 'zh-cn': '入门教程' }, items: [
           'getting-started',
+          'tutorial/first-experiment',
+          'tutorial/beyond-loss',
+        ]},
+        { label: 'Guides', translations: { 'zh-cn': '核心指南' }, items: [
           'core-concepts',
           'deployment',
           'cli',
@@ -43,7 +47,7 @@ export default defineConfig({
           'ui/explore',
           'ui/reports',
         ]},
-        { label: 'Project', items: [
+        { label: 'Project', translations: { 'zh-cn': '项目' }, items: [
           'license',
         ]},
       ],
