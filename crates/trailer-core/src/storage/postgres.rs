@@ -432,6 +432,69 @@ impl Storage for PgStorage {
         Ok(())
     }
 
+    async fn truncate_after_step(&self, run_id: &str, keep_step: i64) -> StorageResult<()> {
+        // 1) 删除 6 张时序表中 step > keep_step 的行(与 delete_run 涉及的带 step 表一致)
+        for table in ["metrics", "histograms", "texts", "figures", "tables", "media"] {
+            sqlx::query(&format!(
+                "DELETE FROM {table} WHERE run_id = $1 AND step > $2"
+            ))
+            .bind(run_id)
+            .bind(keep_step)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        // 2) 清掉已无保留数据的 (key, context) summary 行(手工 user_val 随行删除;
+        //    仍有数据的行由 upsert 的 COALESCE 保留 user_val)
+        sqlx::query(
+            "DELETE FROM run_summary WHERE run_id = $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM metrics m
+                 WHERE m.run_id = run_summary.run_id
+                   AND m.key = run_summary.key
+                   AND m.context = run_summary.context)",
+        )
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+
+        // 3) 截断后全量读保留行(重算 summary 用;truncate 是低频运维操作)
+        let rows: Vec<(i64, f64, String, String, f64)> = sqlx::query_as(
+            "SELECT step, wall_time, key, context, value FROM metrics WHERE run_id = $1",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // 4) 重算 run_summary(last/best/min/max 只反映保留区间)
+        if rows.is_empty() {
+            sqlx::query("DELETE FROM run_summary WHERE run_id = $1")
+                .bind(run_id)
+                .execute(&self.pool)
+                .await?;
+        } else {
+            let config = self
+                .get_run(run_id)
+                .await?
+                .map(|r| r.config)
+                .unwrap_or_else(|| serde_json::json!({}));
+            let metric_rows: Vec<MetricRow> = rows
+                .into_iter()
+                .map(|(step, wall_time, key, context, value)| MetricRow {
+                    run_id: run_id.to_string(),
+                    step,
+                    wall_time,
+                    key,
+                    context,
+                    value,
+                })
+                .collect();
+            let sums = super::summarize_rows_for_run(run_id, &config, &metric_rows);
+            self.upsert_summary(&sums).await?;
+        }
+        Ok(())
+    }
+
     async fn insert_histograms(&self, records: &[HistogramRow]) -> StorageResult<()> {
         let mut tx = self.pool.begin().await?;
         for rec in records {

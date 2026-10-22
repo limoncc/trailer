@@ -124,6 +124,23 @@ impl SummaryTap {
         self.dirs.lock().await.insert(run_id.to_string(), map);
         dir
     }
+
+    /// 清掉某 run 的内存 accumulator。截断续训(resume from checkpoint)删除旧区间后调用,
+    /// 否则下一批 flush 会把含已删区间的旧统计经 upsert 覆盖回 run_summary。
+    /// 方向缓存 dirs 保留——那是只读配置,不含数据统计。
+    pub async fn reset_run(&self, run_id: &str) {
+        let mut state = self.state.lock().await;
+        state.retain(|(rid, _, _), _| rid != run_id);
+    }
+}
+
+/// 共享引用同样实现 BatchTap:ingest writer 与 AppState(resume 截断时 reset_run)
+/// 持有同一 SummaryTap 实例。
+#[async_trait::async_trait]
+impl BatchTap for std::sync::Arc<SummaryTap> {
+    async fn on_batch(&self, envelopes: &[Envelope]) -> StorageResult<()> {
+        SummaryTap::on_batch(self, envelopes).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -302,6 +319,56 @@ mod tests {
         assert_eq!(loss_summary.min_val.unwrap(), 0.2);
         assert_eq!(loss_summary.max_val.unwrap(), 1.0);
         assert_eq!(loss_summary.best.unwrap(), 0.2);
+    }
+
+    /// 截断续训后必须清掉 SummaryTap 的内存 accumulator,
+    /// 否则下一批 flush 会用含已删区间的旧统计覆盖重算后的 summary。
+    #[tokio::test]
+    async fn summary_tap_reset_run_clears_memory_state() {
+        let store = new_sqlite_storage("sqlite::memory:").await.unwrap();
+        let tap = SummaryTap::new(store.clone());
+        store
+            .upsert_run(&crate::domain::RunMeta {
+                run_id: "s3".into(),
+                project: "test".into(),
+                group_name: None,
+                name: None,
+                state: "running".into(),
+                config: serde_json::json!({}),
+                env: serde_json::json!({}),
+                git_commit: None,
+                sweep_id: None,
+                created_at: 0.0,
+                heartbeat_at: None,
+                tags: None,
+                owner_id: None,
+            })
+            .await
+            .unwrap();
+
+        // 第一段训练:loss 1.0 → 0.8(内存 state 累积 max=1.0)
+        tap.on_batch(&[metric_env("s3", 0, 1.0, 0.01), metric_env("s3", 1, 0.8, 0.01)])
+            .await
+            .unwrap();
+
+        // 模拟截断续训:清掉该 run 的内存状态
+        tap.reset_run("s3").await;
+
+        // 第二段训练第一批:loss 0.9 —— accumulator 应从 0.9 重新开始
+        tap.on_batch(&[metric_env("s3", 2, 0.9, 0.01)]).await.unwrap();
+        let summaries = store.get_summary(&["s3".into()]).await.unwrap();
+        let loss = summaries.iter().find(|s| s.key == "loss").unwrap();
+        assert_eq!(loss.last.unwrap(), 0.9, "last 应为新批的值");
+        assert_eq!(
+            loss.max_val.unwrap(),
+            0.9,
+            "内存 state 未清时 max 会残留第一段的 1.0"
+        );
+        assert_eq!(
+            loss.best.unwrap(),
+            0.9,
+            "内存 state 未清时 best 会残留第一段的 0.8"
+        );
     }
 
     #[test]

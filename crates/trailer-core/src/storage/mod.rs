@@ -22,6 +22,11 @@ pub trait Storage: Send + Sync {
     async fn query_metrics(&self, q: &MetricQuery) -> StorageResult<Vec<MetricRow>>;
     async fn get_max_step(&self, run_id: &str) -> StorageResult<Option<i64>>;
     async fn delete_metrics_for_run(&self, run_id: &str) -> StorageResult<()>;
+    /// 截断续训(resume from checkpoint):删除该 run 中 **step > keep_step** 的所有
+    /// 时序数据(metrics / histograms / texts / figures / tables / media),
+    /// 并重算 run_summary(见 [`summarize_rows_for_run`])。
+    /// 保留 `<= keep_step` 的行,与"从 checkpoint(keep_step) 恢复、keep_step+1 起重训"对齐。
+    async fn truncate_after_step(&self, run_id: &str, keep_step: i64) -> StorageResult<()>;
 
     // ── Histograms ──
     async fn insert_histograms(&self, records: &[HistogramRow]) -> StorageResult<()>;
@@ -206,6 +211,101 @@ pub trait Storage: Send + Sync {
 pub async fn new_sqlite_storage(path: &str) -> StorageResult<Arc<dyn Storage>> {
     let store = crate::storage::sqlite::SqliteStorage::open(path).await?;
     Ok(Arc::new(store))
+}
+
+/// 截断续训后从该 run 的**全量** metrics 行重算 summary 聚合。
+/// best 方向与 [`crate::taps::SummaryTap`] 同源:
+/// config.metric_directions > 命名约定([`crate::taps::infer_direction`]) > 默认 minimize。
+/// 返回 upsert 用的 SummaryRow 列表;user_val 恒为 None → upsert 的 COALESCE 保留手工值。
+/// 空输入返回空 Vec(调用方应删除该 run 的 summary 行)。
+/// 注意:不可用 `query_metrics` 取行——它带 stride 采样,会丢点导致 best 错算。
+pub fn summarize_rows_for_run(
+    run_id: &str,
+    config: &serde_json::Value,
+    rows: &[crate::domain::MetricRow],
+) -> Vec<crate::domain::SummaryRow> {
+    use crate::domain::SummaryRow;
+    use crate::taps::{infer_direction, MetricDirection};
+    use std::collections::HashMap;
+
+    // 方向表:config.metric_directions(显式声明 > 命名约定)
+    let mut dirs: HashMap<&str, MetricDirection> = HashMap::new();
+    if let Some(obj) = config.get("metric_directions").and_then(|v| v.as_object()) {
+        for (k, v) in obj {
+            if let Some(s) = v.as_str() {
+                let d = if s.eq_ignore_ascii_case("max") || s.eq_ignore_ascii_case("maximize") {
+                    MetricDirection::Maximize
+                } else {
+                    MetricDirection::Minimize
+                };
+                dirs.insert(k.as_str(), d);
+            }
+        }
+    }
+
+    struct Acc {
+        last: f64,
+        last_step: i64,
+        last_wall: f64,
+        min: f64,
+        max: f64,
+        best: f64,
+        best_step: i64,
+    }
+    let mut map: HashMap<(String, String), Acc> = HashMap::new();
+    for r in rows {
+        let direction = dirs
+            .get(r.key.as_str())
+            .copied()
+            .unwrap_or_else(|| infer_direction(&r.key));
+        let e = map
+            .entry((r.key.clone(), r.context.clone()))
+            .or_insert(Acc {
+                last: r.value,
+                last_step: r.step,
+                last_wall: r.wall_time,
+                min: r.value,
+                max: r.value,
+                best: r.value,
+                best_step: r.step,
+            });
+        // last = 最大 (step, wall_time) 处的值(同 step 取 wall_time 更新者)
+        if r.step > e.last_step || (r.step == e.last_step && r.wall_time >= e.last_wall) {
+            e.last = r.value;
+            e.last_step = r.step;
+            e.last_wall = r.wall_time;
+        }
+        e.min = e.min.min(r.value);
+        e.max = e.max.max(r.value);
+        match direction {
+            MetricDirection::Minimize => {
+                if r.value < e.best {
+                    e.best = r.value;
+                    e.best_step = r.step;
+                }
+            }
+            MetricDirection::Maximize => {
+                if r.value > e.best {
+                    e.best = r.value;
+                    e.best_step = r.step;
+                }
+            }
+        }
+    }
+
+    map.into_iter()
+        .map(|((key, context), a)| SummaryRow {
+            run_id: run_id.to_string(),
+            key,
+            context,
+            last: Some(a.last),
+            best: Some(a.best),
+            best_step: Some(a.best_step),
+            min_val: Some(a.min),
+            max_val: Some(a.max),
+            user_val: None,
+        })
+        .collect()
 }
 
 /// 文件模式存储(本地目录,TensorBoard 风格)。

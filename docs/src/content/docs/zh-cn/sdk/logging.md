@@ -33,13 +33,15 @@ t.log({"loss": 0.5, "accuracy": 0.91}, step=10)
 ## 断点续训(resume)
 
 ```python
-t = Tracker(project="demo", resume_from="run_a1b2c3")   # 恢复:复用 run_id,从 last_step 继续
+t = Tracker(project="demo", resume_from="run_a1b2c3")                # 恢复:复用 run_id,从 last_step 继续
+t = Tracker(project="demo", resume_from="run_a1b2c3", from_step=50)  # 从 50 步 checkpoint 重训:删除 step>50 的旧数据
 ```
 
 - 传同一个 `run_id` 给 `resume_from`,新数据会追加到旧 run 而不是新建。首次运行时把 `t.run_id` 持久化(如写入 checkpoint 文件),以便日后恢复
-- 恢复时 SDK 会向 server 查询该 run 的 last step,自动步进从 `last_step + 1` 继续;若用显式 `step=`,x 轴起点由你自己控制
-- **resume 协商总是走 HTTP**(`POST /api/v1/runs/{id}/resume` + `GET /api/v1/runs/{id}/last_step`,默认 `127.0.0.1:5120`),本地模式也不例外。需要先 `trailer up`,否则协商静默失败、自动 step 从 0 重新开始
-- 三种本地存储后端都支持续训:SQLite(`storage="sqlite"`,默认)、文件模式(`storage="file", data_dir="data"`)、PostgreSQL(`storage="postgres"`)
+- 恢复时 SDK 取该 run 的 last step,自动步进从 `last_step + 1` 继续;若用显式 `step=`,x 轴起点由你自己控制
+- `from_step=N`(可选):**截断续训** —— 删除该 run 中 **step > N** 的全部时序数据(metrics / histograms / texts / figures / tables / media)并重算 run summary,再从 `N + 1` 继续。对应"训练到 84 步、从 50 步 checkpoint 重新开始"的场景:不截断的话旧的 51..84 会与新数据在同一步重叠,出图 / Compare / Explore 都会错乱
+- resume 协商:远程模式走 HTTP(`POST /api/v1/runs/{id}/resume` + `GET /api/v1/runs/{id}/last_step`);本地模式经 PyO3 直连 Rust 存储(同库截断 + 查 last step),**不再依赖先 `trailer up`**
+- 三种本地存储后端都支持续训(含截断):SQLite(`storage="sqlite"`,默认)、文件模式(`storage="file", data_dir="data"`)、PostgreSQL(`storage="postgres"`)
 
 ## 生命周期
 

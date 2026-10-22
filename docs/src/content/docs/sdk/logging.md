@@ -33,13 +33,15 @@ t.log({"loss": 0.5, "accuracy": 0.91}, step=10)
 ## Resuming a run
 
 ```python
-t = Tracker(project="demo", resume_from="run_a1b2c3")   # reuse the run_id, continue from last_step
+t = Tracker(project="demo", resume_from="run_a1b2c3")                # reuse the run_id, continue from last_step
+t = Tracker(project="demo", resume_from="run_a1b2c3", from_step=50)  # restart from a step-50 checkpoint: drop data after step 50
 ```
 
 - Pass the same `run_id` via `resume_from` to append data to a previous run instead of creating a new one. On first run, persist `t.run_id` (e.g. into a checkpoint file) so it can be restored later
-- On resume the SDK asks the server for the run's last step and auto-increments from `last_step + 1`; with explicit `step=` you control the x-axis yourself
-- **Resume negotiation always goes over HTTP** (`POST /api/v1/runs/{id}/resume` + `GET /api/v1/runs/{id}/last_step`, default `127.0.0.1:5120`) — even in local mode. Run `trailer up` so step continuation works; otherwise the negotiation fails silently and auto-steps restart from 0
-- All three local storage backends support resuming: SQLite (`storage="sqlite"`, default), file mode (`storage="file", data_dir="data"`), PostgreSQL (`storage="postgres"`)
+- On resume the SDK determines the run's last step and auto-increments from `last_step + 1`; with explicit `step=` you control the x-axis yourself
+- `from_step=N` (optional): **truncate-tail resume** — deletes all time-series data of the run with `step > N` (metrics / histograms / texts / figures / tables / media) and recomputes the run summary, then continues from `N + 1`. Use this when retraining from an earlier checkpoint (e.g. trained to step 84, restarting from the step-50 checkpoint): without truncation the stale steps 51–84 would overlap with the new run and corrupt charts, Compare, and Explore
+- Resume negotiation: remote mode goes over HTTP (`POST /api/v1/runs/{id}/resume` + `GET /api/v1/runs/{id}/last_step`); local mode talks to the Rust storage directly via PyO3 — **no `trailer up` required** anymore
+- All three local storage backends support resuming (and truncation): SQLite (`storage="sqlite"`, default), file mode (`storage="file", data_dir="data"`), PostgreSQL (`storage="postgres"`)
 
 ## Lifecycle
 
