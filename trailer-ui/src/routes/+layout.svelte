@@ -6,7 +6,10 @@
   import { api } from '$lib/utils/api';
   import { applyCustomTheme, loadCustomTheme, saveCustomTheme, loadThemeState, applyThemeState, themeStateFromJson } from '$lib/theme-builder/color';
   import {
-    Compass, FileText, LayoutGrid, Microscope, Moon, Sun, Trash2, Upload, Zap, Leaf, BookOpen, Eclipse,
+    CORE_THEMES, NEW_LIGHT_THEMES, NEW_DARK_THEMES, THEME_SWATCHES, isDarkTheme, migrateThemeName, themeLabel,
+  } from '$lib/theme-builder/themePresets';
+  import {
+    Check, Compass, FileText, LayoutGrid, Microscope, Moon, Sun, Trash2, Upload, Zap, Leaf,
     FlaskConical, Palette,
   } from 'lucide-svelte';
   import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -54,8 +57,16 @@
     projectSearch = (e.currentTarget as HTMLInputElement).value;
     projectPage = 1;
   }
-  const THEMES = ['light', 'dark', 'cyber', 'nature', 'editorial', 'midnight'] as const;
-  let theme = $state<string>(typeof localStorage !== 'undefined' ? localStorage.getItem('trailer_theme') || 'light' : 'light');
+  // 主题初始化:旧名(editorial/red…)先迁移再应用,保证老用户不落回未定义态
+  let theme = $state<string>(typeof localStorage !== 'undefined' ? migrateThemeName(localStorage.getItem('trailer_theme')) : 'light');
+  /** 主题面板开关(16 个预设,点选代替循环切换) */
+  let themePanelOpen = $state(false);
+  /** 面板分组:固定四主题 + 染色明底 + 染色暗底 */
+  const PANEL_GROUPS = [
+    { label: 'Core', themes: [...CORE_THEMES] },
+    { label: 'Tinted light', themes: [...NEW_LIGHT_THEMES] },
+    { label: 'Tinted dark', themes: [...NEW_DARK_THEMES] },
+  ] as const;
 
   const isMobile = new IsMobile();
 
@@ -68,10 +79,6 @@
     { href: '/theme-builder', label: 'Theme Builder', icon: Palette, adminOnly: false },
   ] as const;
   const visibleNav = $derived(NAV_ITEMS.filter((i) => !i.adminOnly || user?.role === 'admin'));
-
-  function isDarkTheme(name: string): boolean {
-    return name === 'dark' || name === 'cyber' || name === 'midnight';
-  }
 
   function clearInlineTheme() {
     const el = document.documentElement;
@@ -121,22 +128,24 @@
         applyThemeState(ts);
         return;
       }
-      if (t && t.name) applyThemePreference(t);
+      if (t && t.name) {
+        // 旧预设名(editorial/red…)迁移后应用;isDark 按新主题名单推导
+        applyThemePreference({ ...t, name: migrateThemeName(t.name) });
+      }
     } catch { /* ignore */ }
   }
 
-  function cycleTheme() {
-    const idx = THEMES.indexOf(theme as any);
-    if (idx === -1) { applyThemePreference({ name: 'light', isDark: false }); return; }
-    const next = THEMES[(idx + 1) % THEMES.length];
-    const isDark = isDarkTheme(next);
-    applyThemePreference({ name: next, isDark });
-    persistTheme(next, isDark);
+  /** 面板点选预设主题:应用 + 持久化 + 关面板 */
+  function selectTheme(name: string) {
+    const isDark = isDarkTheme(name);
+    applyThemePreference({ name, isDark });
+    persistTheme(name, isDark);
+    themePanelOpen = false;
   }
 
   // Apply on init (localStorage for fast paint, then backend per-user theme)
   $effect(() => {
-    const stored = localStorage.getItem('trailer_theme') || 'light';
+    const stored = migrateThemeName(localStorage.getItem('trailer_theme'));
     theme = stored;
     if (stored === 'custom') {
       // 优先恢复完整 ThemeState(含预设名/字体/chart/menu),旧数据回退到 CustomTheme
@@ -147,7 +156,7 @@
       theme = 'light';
     }
     document.documentElement.setAttribute('data-theme', stored);
-    document.documentElement.classList.toggle('dark', stored === 'dark' || stored === 'cyber' || stored === 'midnight');
+    document.documentElement.classList.toggle('dark', isDarkTheme(stored));
   });
 
   onMount(() => {
@@ -282,6 +291,9 @@
   <title>Trailer</title>
 </svelte:head>
 
+<!-- Esc 关闭主题面板 -->
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') themePanelOpen = false; }} />
+
 <Sidebar.Provider
   open={sidebarState.open}
   onOpenChange={(v) => sidebarState.setOpen(v)}
@@ -298,17 +310,54 @@
             <span class="block text-xs text-muted-foreground">Experiment Tracking</span>
           </span>
         </a>
-        <div class="flex shrink-0 items-center gap-0.5 group-data-[collapsible=icon]:hidden">
-          <Button variant="ghost" size="icon" onclick={cycleTheme} title={theme}>
+        <div class="relative flex shrink-0 items-center gap-0.5 group-data-[collapsible=icon]:hidden">
+          <Button
+            variant="ghost"
+            size="icon"
+            onclick={() => (themePanelOpen = !themePanelOpen)}
+            title={themeLabel(theme)}
+            aria-haspopup="dialog"
+            aria-expanded={themePanelOpen}
+          >
             {#if theme === 'light'}<Sun class="size-4" />
             {:else if theme === 'dark'}<Moon class="size-4" />
             {:else if theme === 'cyber'}<Zap class="size-4" />
             {:else if theme === 'nature'}<Leaf class="size-4" />
-            {:else if theme === 'editorial'}<BookOpen class="size-4" />
-            {:else if theme === 'midnight'}<Eclipse class="size-4" />
-            {/if}
+            {:else}<Palette class="size-4" />{/if}
           </Button>
           <Sidebar.Trigger class="size-8" />
+          <!-- 主题面板:遮罩点击关闭;面板按 Core / Tinted light / Tinted dark 分组 -->
+          {#if themePanelOpen}
+            <div class="fixed inset-0 z-40" role="presentation" onclick={() => (themePanelOpen = false)}></div>
+            <div
+              class="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-card p-2 shadow-xl"
+              role="dialog"
+              aria-label="Theme"
+            >
+              {#each PANEL_GROUPS as group}
+                <div class="mb-1.5 last:mb-0">
+                  <div class="px-1 pb-1 text-[10px] font-semibold uppercase text-muted-foreground">{group.label}</div>
+                  <div class="grid grid-cols-2 gap-0.5">
+                    {#each group.themes as t (t)}
+                      <button
+                        type="button"
+                        onclick={() => selectTheme(t)}
+                        aria-pressed={theme === t}
+                        class="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs transition-colors {theme === t ? 'bg-accent font-medium text-accent-foreground' : 'hover:bg-accent/60'}"
+                      >
+                        <span
+                          class="size-3.5 shrink-0 rounded-full border border-border"
+                          style="background: linear-gradient(135deg, {THEME_SWATCHES[t].bg} 55%, {THEME_SWATCHES[t].primary} 45%);"
+                        ></span>
+                        <span class="truncate">{themeLabel(t)}</span>
+                        {#if theme === t}<Check class="ml-auto size-3 shrink-0" />{/if}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       </div>
       <!-- 折叠态:居中的展开按钮(主题按钮让位) -->
