@@ -23,7 +23,7 @@ use trailer_core::domain::{
 };
 use trailer_core::downsample::lttb;
 use trailer_core::run_manager::RunManager;
-use trailer_core::taps::SseEventData;
+use trailer_core::taps::{SseEventData, SummaryTap};
 
 /// Simple TTL-based LTTB cache. Key = "{run_id}|{key}|{context}|{max_points}"
 pub struct LttbCache {
@@ -64,6 +64,14 @@ impl LttbCache {
         }
         self.data.insert(key, (Instant::now(), value));
     }
+
+    /// 清掉某 run 的全部缓存条目(key 形如 "{run_id}|...")。
+    /// 截断续训(resume from checkpoint)删除旧区间后必须调用,否则 TTL 内
+    /// 仍会返回含已删点的降采样曲线。
+    pub fn invalidate_run(&mut self, run_id: &str) {
+        let prefix = format!("{}|", run_id);
+        self.data.retain(|k, _| !k.starts_with(&prefix));
+    }
 }
 
 #[allow(dead_code)]
@@ -87,6 +95,9 @@ pub struct AppState {
     pub auth: SharedAuth,
     /// 弹幕发送限流:key → 上次发送时刻(单机内存,多实例不共享)。
     pub danmaku_rl: Arc<Mutex<HashMap<String, Instant>>>,
+    /// 共享给 ingest writer 的 SummaryTap —— 截断续训(resume from checkpoint)时
+    /// 需要清掉该 run 的内存 accumulator,否则下一批 flush 会用已删区间的旧统计覆盖重算结果。
+    pub summary_tap: Arc<SummaryTap>,
 }
 
 // ─── POST /api/v1/ingest ───
@@ -1148,15 +1159,44 @@ pub async fn delete_project_handler(
 
 // ─── POST /api/v1/runs/{id}/resume ───
 
+/// POST /runs/{id}/resume 请求体(全部可选,旧客户端可不带 body):
+/// - `from_step`: 截断续训 —— 删除该 run 中 step > from_step 的全部时序数据后再续训。
+///   对应"从 checkpoint(from_step 步) 重新训练"场景,避免 51..84 等旧区间与新数据重叠。
+#[derive(Deserialize)]
+pub struct ResumeRequest {
+    pub from_step: Option<i64>,
+}
+
 pub async fn resume_run(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Path(run_id): Path<String>,
+    body: Option<Json<ResumeRequest>>,
 ) -> impl IntoResponse {
     let run = match require_run_write(&state, &run_id, &headers).await {
         Ok(run) => run,
         Err(s) => return s.into_response(),
     };
+
+    // 截断续训:删旧区间 + 清 SummaryTap 内存状态 + 清 LTTB 缓存
+    if let Some(from_step) = body.and_then(|Json(b)| b.from_step) {
+        if from_step < 0 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "from_step must be >= 0"})),
+            )
+                .into_response();
+        }
+        if let Err(e) = state.store.truncate_after_step(&run_id, from_step).await {
+            tracing::error!(?e, run_id = %run_id, from_step, "truncate_after_step failed");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        // 内存统计与缓存不删会在下一批 flush / 下一次查询时把旧区间"带回来"
+        state.summary_tap.reset_run(&run_id).await;
+        state.lttb_cache.lock().await.invalidate_run(&run_id);
+        tracing::info!(run_id = %run_id, from_step, "run truncated for checkpoint resume");
+    }
+
     let mut updated = run;
     updated.state = "running".into();
     let now = std::time::SystemTime::now()
@@ -3075,13 +3115,15 @@ mod tests {
         let run_mgr = Arc::new(RunManager::new(store.clone(), Duration::from_secs(60)));
         let (sse_tx, _) = broadcast::channel(2048);
 
-        // Spawn writer with SummaryTap so run_summary is generated (matches production)
-        let summary_store = query_store.clone();
+        // Spawn writer with SummaryTap so run_summary is generated (matches production).
+        // Arc 共享同一实例:AppState 里 resume 截断时要 reset 其内存状态。
+        let summary_tap = Arc::new(SummaryTap::new(query_store.clone()));
+        let writer_tap = summary_tap.clone();
         tokio::spawn(async move {
             run_ingestion_writer_with_taps(
                 rx,
                 query_store,
-                vec![Box::new(SummaryTap::new(summary_store))],
+                vec![Box::new(writer_tap)],
             )
             .await
         });
@@ -3097,6 +3139,7 @@ mod tests {
             lttb_cache: Arc::new(Mutex::new(LttbCache::new(10, 500))),
             auth,
             danmaku_rl: Arc::new(Mutex::new(HashMap::new())),
+            summary_tap,
         };
 
         let router = Router::new()
@@ -3425,6 +3468,111 @@ mod tests {
         let runs: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(runs.len(), 1, "only the low-loss run should match");
         assert_eq!(runs[0]["run_id"], "r1");
+    }
+
+    /// 截断续训:POST /resume 带 from_step → 删除 step > from_step 的时序数据并置 running。
+    #[tokio::test]
+    async fn resume_with_from_step_truncates_tail() {
+        let (app, store) = test_app_with_store().await;
+        let token = login_and_create_run(&app, "p_trunc", "r_trunc").await;
+
+        // 种 0..=84 的 metrics(直插 store,绕过 ingest)
+        let rows: Vec<trailer_core::domain::MetricRow> = (0..=84i64)
+            .map(|s| trailer_core::domain::MetricRow {
+                run_id: "r_trunc".into(),
+                step: s,
+                wall_time: 1000.0 + s as f64,
+                key: "loss".into(),
+                context: String::new(),
+                value: s as f64 * 0.01,
+            })
+            .collect();
+        store.insert_metrics(&rows).await.unwrap();
+
+        // POST resume {"from_step": 50}
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/r_trunc/resume")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", token))
+            .body(Body::from(r#"{"from_step": 50}"#))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "resume 应成功");
+
+        // metrics 只剩 <=50;run 置为 running
+        let q = trailer_core::domain::MetricQuery {
+            run_id: Some("r_trunc".into()),
+            ..Default::default()
+        };
+        let left = store.query_metrics(&q).await.unwrap();
+        assert_eq!(left.len(), 51, "51..84 应被删除");
+        assert!(left.iter().all(|r| r.step <= 50));
+        assert_eq!(store.get_max_step("r_trunc").await.unwrap(), Some(50));
+        let run = store.get_run("r_trunc").await.unwrap().unwrap();
+        assert_eq!(run.state, "running");
+    }
+
+    /// from_step 为负数 → 400 拒绝,不截断。
+    #[tokio::test]
+    async fn resume_negative_from_step_is_rejected() {
+        let (app, store) = test_app_with_store().await;
+        let token = login_and_create_run(&app, "p_trunc2", "r_neg").await;
+        store
+            .insert_metrics(&[trailer_core::domain::MetricRow {
+                run_id: "r_neg".into(),
+                step: 3,
+                wall_time: 1.0,
+                key: "loss".into(),
+                context: String::new(),
+                value: 1.0,
+            }])
+            .await
+            .unwrap();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/r_neg/resume")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", token))
+            .body(Body::from(r#"{"from_step": -1}"#))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        // 数据未被截断
+        assert_eq!(store.get_max_step("r_neg").await.unwrap(), Some(3));
+    }
+
+    /// 不带 body 的旧调用方式保持兼容:不截断,只置 running。
+    #[tokio::test]
+    async fn resume_without_body_stays_compatible() {
+        let (app, store) = test_app_with_store().await;
+        let token = login_and_create_run(&app, "p_trunc3", "r_plain").await;
+        for s in [5i64, 9] {
+            store
+                .insert_metrics(&[trailer_core::domain::MetricRow {
+                    run_id: "r_plain".into(),
+                    step: s,
+                    wall_time: 1000.0 + s as f64,
+                    key: "loss".into(),
+                    context: String::new(),
+                    value: 1.0,
+                }])
+                .await
+                .unwrap();
+        }
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/r_plain/resume")
+            .header("authorization", format!("Bearer {}", token))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "无 body 的旧调用应兼容");
+        assert_eq!(store.get_max_step("r_plain").await.unwrap(), Some(9), "不应截断");
+        let run = store.get_run("r_plain").await.unwrap().unwrap();
+        assert_eq!(run.state, "running");
     }
 
     #[tokio::test]

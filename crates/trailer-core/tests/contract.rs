@@ -1853,3 +1853,332 @@ async fn sqlite_metrics_stride_sampling() {
     assert!(after.iter().all(|r| r.step > 85), "after_step 过滤");
     assert_eq!(after.last().map(|r| r.step), Some(99), "增量也保尾");
 }
+
+// ─── truncate_after_step (checkpoint resume) ───
+
+/// 截断续训共享契约:run 训练到 84 步,从 50 步 checkpoint 截断。
+/// 保留 step <= 50 的全部时序数据,删除 step > 50 的
+/// (metrics/histograms/texts/figures/tables/media),并重算 run_summary:
+/// last/best/best_step/min/max 只反映保留区间;user_val 保留不动。
+/// best 方向与 SummaryTap 同源:config.metric_directions > 命名约定 > minimize。
+async fn contract_truncate_after_step(store: Arc<dyn Storage>) {
+    let run = RunMeta {
+        run_id: "rt1".into(),
+        project: "pt".into(),
+        group_name: None,
+        name: Some("resume-demo".into()),
+        state: "finished".into(),
+        config: serde_json::json!({"metric_directions": {"score": "max"}}),
+        env: serde_json::json!({}),
+        git_commit: None,
+        sweep_id: None,
+        created_at: 1000.0,
+        heartbeat_at: Some(2000.0),
+        tags: None,
+        owner_id: Some(1),
+    };
+    store.upsert_run(&run).await.expect("upsert run");
+
+    // metrics: step 0..=84 —— loss 随 step 上升(minimize),score 也上升(maximize)
+    let mut rows = Vec::new();
+    for s in 0..=84i64 {
+        rows.push(MetricRow {
+            run_id: "rt1".into(),
+            step: s,
+            wall_time: 1000.0 + s as f64,
+            key: "loss".into(),
+            context: "".into(),
+            value: s as f64 * 0.01,
+        });
+        rows.push(MetricRow {
+            run_id: "rt1".into(),
+            step: s,
+            wall_time: 1000.0 + s as f64,
+            key: "score".into(),
+            context: "".into(),
+            value: s as f64 * 0.001,
+        });
+    }
+    store.insert_metrics(&rows).await.expect("insert metrics");
+
+    // 其他五类时序数据:step 10(应保留)与 step 60(应删除)
+    let hist = |step: i64| HistogramRow {
+        run_id: "rt1".into(),
+        step,
+        wall_time: 1000.0 + step as f64,
+        key: "weight".into(),
+        context: "layer0".into(),
+        bucket_limits: vec![0.0, 1.0],
+        bucket_counts: vec![5, 5],
+        min: 0.0,
+        max: 1.0,
+        num: 10,
+        sum: 5.0,
+        sum_squares: 3.0,
+    };
+    store
+        .insert_histograms(&[hist(10), hist(60)])
+        .await
+        .expect("insert histograms");
+    for s in [10i64, 60] {
+        store
+            .insert_texts(&[TextRow {
+                run_id: "rt1".into(),
+                step: s,
+                name: "note".into(),
+                body: format!("step {}", s),
+            }])
+            .await
+            .expect("insert text");
+        store
+            .insert_figure(&FigureRow {
+                run_id: "rt1".into(),
+                step: s,
+                name: "fig".into(),
+                kind: "png".into(),
+                body: "aGk=".into(),
+            })
+            .await
+            .expect("insert figure");
+        store
+            .insert_table(&TableRow {
+                id: None,
+                run_id: "rt1".into(),
+                step: s,
+                name: "tbl".into(),
+                columns: vec!["a".into()],
+                data: serde_json::json!([[1]]),
+                row_count: 1,
+                created_at: 1000.0 + s as f64,
+            })
+            .await
+            .expect("insert table");
+        store
+            .insert_media(&MediaRow {
+                id: None,
+                run_id: "rt1".into(),
+                step: s,
+                name: format!("img{}", s),
+                kind: "image".into(),
+                ext: "png".into(),
+                hash: format!("h{}", s),
+                file_path: format!("media/rt1/img{}.png", s),
+                size: 10,
+                created_at: 1000.0 + s as f64,
+            })
+            .await
+            .expect("insert media");
+    }
+
+    // 旧 summary(模拟已训到 84 的统计)+ 手工 user_val
+    store
+        .upsert_summary(&[
+            SummaryRow {
+                run_id: "rt1".into(),
+                key: "loss".into(),
+                context: "".into(),
+                last: Some(0.84),
+                best: Some(0.0),
+                best_step: Some(0),
+                min_val: Some(0.0),
+                max_val: Some(0.84),
+                user_val: Some(0.5),
+            },
+            SummaryRow {
+                run_id: "rt1".into(),
+                key: "score".into(),
+                context: "".into(),
+                last: Some(0.084),
+                best: Some(0.084),
+                best_step: Some(84),
+                min_val: Some(0.0),
+                max_val: Some(0.084),
+                user_val: None,
+            },
+        ])
+        .await
+        .expect("seed summary");
+
+    // ── truncate: 保留 <= 50 ──
+    store
+        .truncate_after_step("rt1", 50)
+        .await
+        .expect("truncate_after_step");
+
+    // metrics 只剩 <=50,每 key 恰好 51 点
+    let left = store
+        .query_metrics(&MetricQuery {
+            run_id: Some("rt1".into()),
+            max_points: Some(10_000),
+            ..Default::default()
+        })
+        .await
+        .expect("query metrics after truncate");
+    assert_eq!(left.len(), 102, "metrics 应剩 51 步 × 2 key");
+    assert!(left.iter().all(|r| r.step <= 50), "不应残留 step > 50");
+    assert_eq!(
+        store.get_max_step("rt1").await.expect("max step"),
+        Some(50),
+        "get_max_step 应回落到最后保留步"
+    );
+
+    // histograms / texts / figures / tables / media:step 10 保留,60 删除
+    let h = store
+        .query_histograms("rt1", None, None)
+        .await
+        .expect("query histograms");
+    assert_eq!(h.len(), 1, "histogram 60 应删");
+    assert_eq!(h[0].step, 10);
+    let t = store
+        .query_texts("rt1", "note", None)
+        .await
+        .expect("query texts");
+    assert_eq!(t.len(), 1, "text 60 应删");
+    assert_eq!(t[0].step, 10);
+    let f = store
+        .query_figures("rt1", None)
+        .await
+        .expect("query figures");
+    assert_eq!(f.len(), 1, "figure 60 应删");
+    assert_eq!(f[0].step, 10);
+    let tm = store
+        .query_tables("rt1", None)
+        .await
+        .expect("query tables");
+    assert_eq!(tm.len(), 1, "table 60 应删");
+    assert_eq!(tm[0].step, 10);
+    let md = store
+        .query_media("rt1", None)
+        .await
+        .expect("query media");
+    assert_eq!(md.len(), 1, "media 60 应删");
+    assert_eq!(md[0].step, 10);
+
+    // summary 重算(只反映 <=50 的数据),user_val 保留
+    let sums = store
+        .get_summary(&["rt1".into()])
+        .await
+        .expect("get summary");
+    let loss = sums
+        .iter()
+        .find(|s| s.key == "loss" && s.context == "")
+        .expect("loss summary");
+    assert!(
+        (loss.last.unwrap() - 0.5).abs() < 1e-9,
+        "last 应为 step50 的值, got {:?}",
+        loss.last
+    );
+    assert_eq!(loss.best_step, Some(0), "loss(minimize) best 应回到 0");
+    assert_eq!(loss.min_val, Some(0.0));
+    assert!(
+        (loss.max_val.unwrap() - 0.5).abs() < 1e-9,
+        "max_val 不应含已删的 51..84, got {:?}",
+        loss.max_val
+    );
+    assert_eq!(loss.user_val, Some(0.5), "user_val 应保留不动");
+    let score = sums
+        .iter()
+        .find(|s| s.key == "score" && s.context == "")
+        .expect("score summary");
+    assert_eq!(
+        score.best_step,
+        Some(50),
+        "score(maximize) best 应为保留区间的最大点 50"
+    );
+    assert!(
+        (score.best.unwrap() - 0.05).abs() < 1e-9,
+        "best 不应是已删的 step84 值, got {:?}",
+        score.best
+    );
+    assert_eq!(score.last.as_ref().map(|v| (v * 1000.0).round() as i64), Some(50));
+}
+
+/// metrics 全部被删光(keep_step < 最小 step)时,run_summary 应被清空而不是留陈旧行。
+async fn contract_truncate_clears_summary_when_empty(store: Arc<dyn Storage>) {
+    let run = RunMeta {
+        run_id: "rt2".into(),
+        project: "pt".into(),
+        group_name: None,
+        name: None,
+        state: "finished".into(),
+        config: serde_json::json!({}),
+        env: serde_json::json!({}),
+        git_commit: None,
+        sweep_id: None,
+        created_at: 1000.0,
+        heartbeat_at: None,
+        tags: None,
+        owner_id: Some(1),
+    };
+    store.upsert_run(&run).await.expect("upsert rt2");
+    store
+        .insert_metrics(&[MetricRow {
+            run_id: "rt2".into(),
+            step: 10,
+            wall_time: 1000.0,
+            key: "loss".into(),
+            context: "".into(),
+            value: 1.0,
+        }])
+        .await
+        .expect("insert rt2 metrics");
+    store
+        .upsert_summary(&[SummaryRow {
+            run_id: "rt2".into(),
+            key: "loss".into(),
+            context: "".into(),
+            last: Some(1.0),
+            best: Some(1.0),
+            best_step: Some(10),
+            min_val: Some(1.0),
+            max_val: Some(1.0),
+            user_val: None,
+        }])
+        .await
+        .expect("seed rt2 summary");
+
+    store
+        .truncate_after_step("rt2", 0)
+        .await
+        .expect("truncate rt2");
+    assert_eq!(store.get_max_step("rt2").await.unwrap(), None);
+    let sums = store
+        .get_summary(&["rt2".into()])
+        .await
+        .expect("get rt2 summary");
+    assert!(
+        sums.is_empty(),
+        "数据删光后 run_summary 不应残留陈旧行, got {:?}",
+        sums
+    );
+}
+
+#[tokio::test]
+async fn sqlite_truncate_after_step() {
+    let store = trailer_core::storage::new_sqlite_storage("sqlite::memory:")
+        .await
+        .expect("failed to open in-memory SQLite");
+    contract_truncate_after_step(store).await;
+}
+
+#[tokio::test]
+async fn sqlite_truncate_clears_summary_when_empty() {
+    let store = trailer_core::storage::new_sqlite_storage("sqlite::memory:")
+        .await
+        .expect("failed to open in-memory SQLite");
+    contract_truncate_clears_summary_when_empty(store).await;
+}
+
+#[tokio::test]
+async fn file_truncate_after_step() {
+    let store = file_store("trunc").await;
+    contract_truncate_after_step(store).await;
+    cleanup("trunc");
+}
+
+#[tokio::test]
+async fn file_truncate_clears_summary_when_empty() {
+    let store = file_store("trunc2").await;
+    contract_truncate_clears_summary_when_empty(store).await;
+    cleanup("trunc2");
+}

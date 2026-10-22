@@ -383,6 +383,141 @@ impl Storage for FileStorage {
         Ok(())
     }
 
+    async fn truncate_after_step(&self, run_id: &str, keep_step: i64) -> StorageResult<()> {
+        let run = match self.get_run(run_id).await? {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        let base = self.run_dir(&run.project, run_id);
+
+        // 1) metrics:逐文件过滤 Vec<MetricRow>,并收集全量行供 summary 重算
+        let mut all_metrics: Vec<MetricRow> = Vec::new();
+        let metrics_dir = base.join("metrics");
+        if metrics_dir.exists() {
+            for entry in std::fs::read_dir(&metrics_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with(".json") || fname.ends_with(".tmp") {
+                    continue;
+                }
+                let rows = self
+                    .read_json::<Vec<MetricRow>>(&path)
+                    .await?
+                    .unwrap_or_default();
+                let kept: Vec<MetricRow> = rows
+                    .into_iter()
+                    .filter(|r| r.step <= keep_step)
+                    .collect();
+                all_metrics.extend(kept.iter().cloned());
+                self.write_json(&path, &kept).await?;
+            }
+        }
+
+        // 2) histograms / texts:逐文件过滤 Vec<T>
+        let hist_dir = base.join("histograms");
+        if hist_dir.exists() {
+            for entry in std::fs::read_dir(&hist_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with(".json") || fname.ends_with(".tmp") {
+                    continue;
+                }
+                let rows = self
+                    .read_json::<Vec<HistogramRow>>(&path)
+                    .await?
+                    .unwrap_or_default();
+                let kept: Vec<HistogramRow> =
+                    rows.into_iter().filter(|r| r.step <= keep_step).collect();
+                self.write_json(&path, &kept).await?;
+            }
+        }
+        let texts_dir = base.join("texts");
+        if texts_dir.exists() {
+            for entry in std::fs::read_dir(&texts_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with(".json") || fname.ends_with(".tmp") {
+                    continue;
+                }
+                let rows = self
+                    .read_json::<Vec<TextRow>>(&path)
+                    .await?
+                    .unwrap_or_default();
+                let kept: Vec<TextRow> =
+                    rows.into_iter().filter(|r| r.step <= keep_step).collect();
+                self.write_json(&path, &kept).await?;
+            }
+        }
+
+        // 3) figures / tables / media:单行 JSON 文件,step > keep 直接删文件
+        for dir_name in ["figures", "tables", "media"] {
+            let dir = base.join(dir_name);
+            if !dir.exists() {
+                continue;
+            }
+            for entry in std::fs::read_dir(&dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with(".json") || fname.ends_with(".tmp") {
+                    continue;
+                }
+                // 三种单行结构都含 step 字段,用 Value 通用提取
+                if let Some(v) = self.read_json::<serde_json::Value>(&path).await? {
+                    if v.get("step").and_then(|s| s.as_i64()).is_some_and(|s| s > keep_step) {
+                        std::fs::remove_file(&path)?;
+                    }
+                }
+            }
+        }
+
+        // 4) summary:删掉已无保留数据的 (key,context),其余重算覆盖。
+        //    file 模式的 SummaryRow 是整行单文件、无法部分更新,重算前先取回
+        //    现有手工 user_val 一并写回(SQLite/PG 后端经 upsert COALESCE 保留)。
+        let summary_dir = base.join("summary");
+        if all_metrics.is_empty() {
+            if summary_dir.exists() {
+                std::fs::remove_dir_all(&summary_dir)?;
+            }
+            return Ok(());
+        }
+        let valid: std::collections::HashSet<(String, String)> = all_metrics
+            .iter()
+            .map(|m| (m.key.clone(), m.context.clone()))
+            .collect();
+        let mut user_vals: std::collections::HashMap<(String, String), Option<f64>> =
+            std::collections::HashMap::new();
+        if summary_dir.exists() {
+            for entry in std::fs::read_dir(&summary_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with(".json") || fname.ends_with(".tmp") {
+                    continue;
+                }
+                if let Some(s) = self.read_json::<SummaryRow>(&path).await? {
+                    if valid.contains(&(s.key.clone(), s.context.clone())) {
+                        user_vals.insert((s.key, s.context), s.user_val);
+                    } else {
+                        std::fs::remove_file(&path)?;
+                    }
+                }
+            }
+        }
+        let mut sums = super::summarize_rows_for_run(run_id, &run.config, &all_metrics);
+        for s in &mut sums {
+            s.user_val = user_vals
+                .get(&(s.key.clone(), s.context.clone()))
+                .copied()
+                .flatten();
+        }
+        self.upsert_summary(&sums).await?;
+        Ok(())
+    }
+
     // ── Histograms ──
 
     async fn insert_histograms(&self, records: &[HistogramRow]) -> StorageResult<()> {

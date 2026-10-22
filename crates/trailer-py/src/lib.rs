@@ -22,6 +22,9 @@ struct RustTracker {
     tx: Mutex<Option<mpsc::Sender<Vec<Envelope>>>>,
     writer_handle: Mutex<Option<JoinHandle<()>>>,
     store: Arc<dyn trailer_core::Storage>,
+    /// 与 writer 共享的 SummaryTap —— truncate_run_after(截断续训)时
+    /// 需要清掉该 run 的内存 accumulator,否则下一批 flush 会用已删区间的旧统计覆盖。
+    summary_tap: Arc<SummaryTap>,
     _rt: tokio::runtime::Runtime,
 }
 
@@ -50,12 +53,14 @@ impl RustTracker {
         let (tx, rx) = mpsc::channel::<Vec<Envelope>>(10_000);
 
         let writer_store = store.clone();
-        let summary_store = store.clone();
+        // Arc 共享:writer 做增量 upsert;truncate_run_after 时 reset 内存状态
+        let summary_tap = Arc::new(SummaryTap::new(store.clone()));
+        let writer_summary_tap = summary_tap.clone();
         let writer_handle = rt.spawn(async move {
             run_ingestion_writer_with_taps(
                 rx,
                 writer_store,
-                vec![Box::new(SummaryTap::new(summary_store))],
+                vec![Box::new(writer_summary_tap)],
             )
             .await;
         });
@@ -64,6 +69,7 @@ impl RustTracker {
             tx: Mutex::new(Some(tx)),
             writer_handle: Mutex::new(Some(writer_handle)),
             store,
+            summary_tap,
             _rt: rt,
         })
     }
@@ -87,6 +93,26 @@ impl RustTracker {
     /// every queued batch to storage. Idempotent; called by finish().
     fn drain(&self) -> PyResult<()> {
         self.drain_impl()
+    }
+
+    /// 截断续训(resume from checkpoint):删除该 run 中 step > keep_step 的全部时序
+    /// 数据(metrics/histograms/texts/figures/tables/media)并重算 run_summary,
+    /// 同时清掉 writer SummaryTap 的内存 accumulator。返回保留后的 last_step。
+    fn truncate_run_after(&self, run_id: String, keep_step: i64) -> PyResult<Option<i64>> {
+        self._rt
+            .block_on(async {
+                self.store.truncate_after_step(&run_id, keep_step).await?;
+                self.summary_tap.reset_run(&run_id).await;
+                self.store.get_max_step(&run_id).await
+            })
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// 该 run 当前最大 step(resume 自动步进用;无数据返回 None)。
+    fn get_max_step(&self, run_id: String) -> PyResult<Option<i64>> {
+        self._rt
+            .block_on(self.store.get_max_step(&run_id))
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Update heartbeat timestamp for an active run.

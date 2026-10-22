@@ -128,6 +128,7 @@ class Tracker:
         storage: str | None = None,
         data_dir: str = "data",
         resume_from: str | None = None,
+        from_step: int | None = None,
         auto_collect: bool = True,
         sweep_id: str | None = None,
         config: dict | None = None,
@@ -153,30 +154,6 @@ class Tracker:
         self._sample_requested_step: int = -1  # 主线程请求采样的 step
         self._sample_event = threading.Event()
 
-        # If resuming, get last step from server
-        if resume_from:
-            host = self._host or "http://127.0.0.1:5120"
-            import urllib.request as _req
-            try:
-                # Resume the run
-                req = _req.Request(
-                    f"{host.rstrip('/')}/api/v1/runs/{resume_from}/resume",
-                    headers=self._auth_headers(),
-                    method="POST",
-                )
-                _req.urlopen(req)
-                # Get last step
-                resp = _req.urlopen(
-                    _req.Request(
-                        f"{host.rstrip('/')}/api/v1/runs/{resume_from}/last_step",
-                        headers=self._auth_headers(),
-                    )
-                )
-                data = json.loads(resp.read())
-                self._step = (data.get("last_step") or 0) + 1
-            except Exception as e:
-                print(f"Trailer: resume failed: {e}")
-
         # Select backend based on host (参数或环境变量)
         host = self._host
         if host:
@@ -199,6 +176,45 @@ class Tracker:
                 self._backend = MockBackend()
                 self._mode = "mock"
                 self.storage = "mock"
+
+        # Resume 协商:remote 走 HTTP;local 直连 PyO3(不再依赖 trailer up 的 server)。
+        # from_step = 截断续训:删除该 run 中 step > from_step 的旧数据后再续训,
+        # 对应"从 checkpoint 重新训练"场景,避免旧区间与新数据重叠。
+        if resume_from:
+            if from_step is not None and from_step < 0:
+                raise ValueError(f"from_step must be >= 0, got {from_step}")
+            if self._mode == "remote":
+                import urllib.request as _req
+                try:
+                    body = {} if from_step is None else {"from_step": int(from_step)}
+                    req = _req.Request(
+                        f"{self._host.rstrip('/')}/api/v1/runs/{resume_from}/resume",
+                        data=json.dumps(body).encode(),
+                        headers=self._auth_headers(),
+                        method="POST",
+                    )
+                    _req.urlopen(req)
+                    resp = _req.urlopen(
+                        _req.Request(
+                            f"{self._host.rstrip('/')}/api/v1/runs/{resume_from}/last_step",
+                            headers=self._auth_headers(),
+                        )
+                    )
+                    data = json.loads(resp.read())
+                    self._step = (data.get("last_step") or 0) + 1
+                except Exception as e:
+                    print(f"Trailer: resume failed: {e}")
+            elif self._mode == "local":
+                rust = self._backend._rust
+                try:
+                    if from_step is not None:
+                        rust.truncate_run_after(self.run_id, int(from_step))
+                    last = rust.get_max_step(self.run_id)
+                    self._step = (last or 0) + 1
+                except Exception as e:
+                    print(f"Trailer: resume failed: {e}")
+            else:
+                print("Trailer: resume is not supported in mock mode")
 
         # Create run entry in the database
         try:
