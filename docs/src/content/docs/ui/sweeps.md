@@ -41,7 +41,7 @@ Click into a sweep (`/sweeps/<sweep_id>`) — the centerpiece is the **parallel 
 The right sidebar offers:
 
 - **Top Runs**: lists the sweep's runs in order; click one to jump straight to its detail page
-- **Compare all**: sends the whole group of runs to the [Compare](/ui/compare/) page in one click for a closer comparison
+- **Compare all**: sends the whole group of runs to the [Compare](../ui/compare/) page in one click for a closer comparison
 
 ## Typical workflow
 
@@ -52,5 +52,5 @@ The right sidebar offers:
 
 ## Related
 
-- `sweep_id` is a `Tracker` constructor argument — see [Logging Metrics & Data](/sdk/logging/)
-- For free-form cross-project analysis use [Explore](/ui/explore/); Sweeps focuses on the parameters → metrics relationship within a single sweep
+- `sweep_id` is a `Tracker` constructor argument — see [Logging Metrics & Data](../sdk/logging/)
+- For free-form cross-project analysis use [Explore](../ui/explore/); Sweeps focuses on the parameters → metrics relationship within a single sweep

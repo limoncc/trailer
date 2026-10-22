@@ -78,7 +78,7 @@ tracker.log_model(model, name="my-net")                   # PyTorch 模型结构
 
 硬件（CPU / 内存 / GPU）默认自动采样，无需任何代码，看板里与指标同轴对齐展示。
 
-详见 [高级数据类型](/zh-cn/sdk/advanced-data/)。
+详见 [高级数据类型](sdk/advanced-data/)。
 
 ## 5. 给 run 起名、记录超参
 
@@ -95,9 +95,9 @@ tracker = Tracker(
 
 按顺序读，能从入门走到进阶：
 
-1. [第一个完整实验](/zh-cn/tutorial/first-experiment/) — 改超参重跑，用 Compare 找出最优组合
-2. [指标、超参与 best 语义](/zh-cn/tutorial/beyond-loss/) — train/val 分组、Step 语义、指标方向
-3. [核心概念](/zh-cn/core-concepts/) — 数据模型全景（项目 / Run / Sweep）
-4. 想看一个真实研究实验怎么用 trailer 全套能力跟踪，读进阶案例 [Grokking 损失景观](/zh-cn/case-studies/grokking/)（读完上面三篇后再来）
+1. [第一个完整实验](tutorial/first-experiment/) — 改超参重跑，用 Compare 找出最优组合
+2. [指标、超参与 best 语义](tutorial/beyond-loss/) — train/val 分组、Step 语义、指标方向
+3. [核心概念](core-concepts/) — 数据模型全景（项目 / Run / Sweep）
+4. 想看一个真实研究实验怎么用 trailer 全套能力跟踪，读进阶案例 [Grokking 损失景观](case-studies/grokking/)（读完上面三篇后再来）
 
-远程协作（团队 server）与多存储后端见 [本地 / 远程 / 文件模式](/zh-cn/sdk/modes/)。
+远程协作（团队 server）与多存储后端见 [本地 / 远程 / 文件模式](sdk/modes/)。

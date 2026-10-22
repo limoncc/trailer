@@ -57,7 +57,7 @@ tracker.finish()
 
 - `name=f"lr-{args.lr}"`：run 名带上关键超参
 - `config={"lr": ..., "steps": ...}`：完整超参快照
-- `metric_directions={"accuracy": "max"}`：best 语义（详见[下一篇](/zh-cn/tutorial/beyond-loss/)）
+- `metric_directions={"accuracy": "max"}`：best 语义（详见[下一篇](../tutorial/beyond-loss/)）
 
 ## 第二步：跑三次
 
@@ -114,4 +114,4 @@ tracker = Tracker(
 - run 表格初筛 + Compare 精细对比的两级流程
 - 实验记录的基本纪律
 
-下一步：[指标、超参与 best 语义](/zh-cn/tutorial/beyond-loss/) 把这几个 API 背后的机制讲透。
+下一步：[指标、超参与 best 语义](../tutorial/beyond-loss/) 把这几个 API 背后的机制讲透。

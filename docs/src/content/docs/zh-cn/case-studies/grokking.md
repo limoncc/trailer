@@ -104,7 +104,7 @@ tracker2 = Tracker(project="grokking-mini",
 
 `from_step=N` 会删除该 run 中 step > N 的**全部时序数据**（metrics / histograms / figures / tables / media）并重算 summary，再从 N+1 继续。不截断的话，旧的 501..800 会与新数据在同一步重叠，出图 / Compare / Explore 都会错乱。
 
-脚本的 `--resume-demo` 标志会自动演示这一过程。详见 [断点续训](/zh-cn/sdk/logging/#断点续训resume)。
+脚本的 `--resume-demo` 标志会自动演示这一过程。详见 [断点续训](../sdk/logging/#断点续训resume)。
 
 ## 第五步：在看板里解读
 
@@ -138,4 +138,4 @@ trailer up
 - 用 `log_loss_landscape`（含固定子集、固定 seed、插值快照）回放损失曲面
 - 用 `resume_from` + `from_step` 安全地从 checkpoint 截断续训
 
-这套"外部曲线 + 内部状态 + 损失曲面"的三维跟踪，正是 trailer 相对只记标量的工具的优势。想探索更多分析方式，去 [Explore 工作台](/zh-cn/ui/explore/) 做跨项目分析，或用 [Sweeps](/zh-cn/ui/sweeps/) 扫描超参。
+这套"外部曲线 + 内部状态 + 损失曲面"的三维跟踪，正是 trailer 相对只记标量的工具的优势。想探索更多分析方式，去 [Explore 工作台](../ui/explore/) 做跨项目分析，或用 [Sweeps](../ui/sweeps/) 扫描超参。

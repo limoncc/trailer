@@ -7,7 +7,7 @@ hero:
   tagline: 'High-performance Rust core · Python SDK · Rich Web UI'
   actions:
     - text: Get Started
-      link: /getting-started/
+      link: ./getting-started/
       variant: primary
       icon: right-arrow
     - text: View on GitHub
@@ -138,21 +138,21 @@ Data is buffered in a ring buffer and flushed in batches through PyO3 (local) or
 Read in order, from beginner to advanced:
 
 <CardGrid>
-  <LinkCard title="Getting Started" href="/getting-started/" icon="rocket">
+  <LinkCard title="Getting Started" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/getting-started/`} icon="rocket">
     Install, log your first experiment, and open the dashboard in 5 minutes.
   </LinkCard>
-  <LinkCard title="Your first full experiment" href="/tutorial/first-experiment/" icon="puzzle">
+  <LinkCard title="Your first full experiment" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/tutorial/first-experiment/`} icon="puzzle">
     Change a hyperparameter, rerun three times, and pick the winner with Compare.
   </LinkCard>
-  <LinkCard title="Metrics, config, and best semantics" href="/tutorial/beyond-loss/" icon="analytics">
+  <LinkCard title="Metrics, config, and best semantics" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/tutorial/beyond-loss/`} icon="analytics">
     train/val auto-grouping, config snapshots, metric directions, and step semantics.
   </LinkCard>
-  <LinkCard title="Core concepts" href="/core-concepts/" icon="open-book">
+  <LinkCard title="Core concepts" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/core-concepts/`} icon="open-book">
     The full project / run / sweep data model.
   </LinkCard>
-  <LinkCard title="Grokking case study" href="/case-studies/grokking/" icon="star">
+  <LinkCard title="Grokking case study" href={`${import.meta.env.BASE_URL.replace(/\/+$/, '')}/case-studies/grokking/`} icon="star">
     A full research experiment: model graph, weight histograms, embedding PCA, loss landscapes, and resume.
   </LinkCard>
 </CardGrid>
 
-Reference: [Python SDK](/sdk/logging/) (logging) · [Web UI](/ui/dashboard/) · [Deployment](/deployment/) · [CLI](/cli/)
+Reference: [Python SDK](sdk/logging/) (logging) · [Web UI](ui/dashboard/) · [Deployment](deployment/) · [CLI](cli/)

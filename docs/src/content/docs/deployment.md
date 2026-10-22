@@ -145,4 +145,4 @@ Precedence: CLI args > environment variables > config file > defaults.
 - Writes require admin or project owner
 - Anonymous sharing: run / Explore pages generate `?token=` links for read-only access
 
-For the full story on roles, API tokens, and anonymous sharing, see [Sharing and permissions](/ui/sharing/).
+For the full story on roles, API tokens, and anonymous sharing, see [Sharing and permissions](ui/sharing/).

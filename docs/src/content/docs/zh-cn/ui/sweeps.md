@@ -41,7 +41,7 @@ for lr in [0.01, 0.05, 0.1]:
 右侧栏提供：
 
 - **Top Runs**：按顺序列出该 sweep 的 run，点击直达详情
-- **Compare all**：一键把整组 run 送进 [Compare](/zh-cn/ui/compare/) 页精细对比
+- **Compare all**：一键把整组 run 送进 [Compare](../ui/compare/) 页精细对比
 
 ## 典型工作流
 
@@ -52,5 +52,5 @@ for lr in [0.01, 0.05, 0.1]:
 
 ## 相关
 
-- `sweep_id` 是 `Tracker` 的构造参数，见 [记录指标与数据](/zh-cn/sdk/logging/)
-- 跨项目自由分析用 [Explore](/zh-cn/ui/explore/)，Sweeps 专注"单次扫描内参数→指标"的关系
+- `sweep_id` 是 `Tracker` 的构造参数，见 [记录指标与数据](../sdk/logging/)
+- 跨项目自由分析用 [Explore](../ui/explore/)，Sweeps 专注"单次扫描内参数→指标"的关系

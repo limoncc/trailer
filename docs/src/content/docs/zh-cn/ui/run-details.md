@@ -26,7 +26,7 @@ Run 页面(`/run/[id]`)展示最多 10 个标签。只有 run 有对应数据时
 
 ## Landscape 标签
 
-每张记录的损失景观(`t.log_loss_landscape(...)`,见[高级数据类型](/zh-cn/sdk/advanced-data/))对应一张卡片:
+每张记录的损失景观(`t.log_loss_landscape(...)`,见[高级数据类型](../sdk/advanced-data/))对应一张卡片:
 
 - **Heat** — 纯色彩场,悬停读取 (α, β, loss)
 - **Contour** — 纯等高线(无底色)

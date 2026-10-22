@@ -70,6 +70,6 @@ tracker.log({"loss": 0.4})            # 不传 step: 自动递增(首次为 0)
 
 ## 下一步
 
-- 想记录曲线之外的数据（图像 / 表格 / 嵌入 / 损失景观）→ [高级数据类型](/zh-cn/sdk/advanced-data/)
-- 多机协作与存储后端 → [本地 / 远程 / 文件模式](/zh-cn/sdk/modes/)
-- 训练中断了想接着跑 → [断点续训 resume](/zh-cn/sdk/logging/#断点续训resume)
+- 想记录曲线之外的数据（图像 / 表格 / 嵌入 / 损失景观）→ [高级数据类型](../sdk/advanced-data/)
+- 多机协作与存储后端 → [本地 / 远程 / 文件模式](../sdk/modes/)
+- 训练中断了想接着跑 → [断点续训 resume](../sdk/logging/#断点续训resume)
