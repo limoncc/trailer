@@ -32,11 +32,16 @@ pip install trailer-sdk
 ```
 
 ```python
+import random
 from trailer import Tracker
 
-t = Tracker(project="my_experiment")
-t.log({"train/loss": 0.5, "val/loss": 0.6})
-t.finish()
+tracker = Tracker(project="my_training")
+for step in range(100):
+    base = 0.9 * 0.96 ** step
+    tracker.log({"train/loss": base + random.random() * 0.04,
+                 "val/loss": base + 0.06 + random.random() * 0.06},
+                step=step)
+tracker.finish()
 ```
 
 Launch the dashboard:
