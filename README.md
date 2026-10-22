@@ -19,11 +19,21 @@ The ultimate trailer for your deep learning experiments — combining TensorBoar
 
 ## Screenshots
 
-<img src="docs/public/ScreenShot_1.png" width="32%"/> <img src="docs/public/ScreenShot_2.png" width="32%"/> <img src="docs/public/ScreenShot_3.png" width="32%"/>
+**Run detail** — Config / Metrics / Histograms / PCA / Landscape / Model
 
-<img src="docs/public/ScreenShot_4.png" width="32%"/> <img src="docs/public/ScreenShot_5.png" width="32%"/> <img src="docs/public/ScreenShot_6.png" width="32%"/>
+<img src="docs/public/run-config.png" width="32%"/> <img src="docs/public/run-metrics.png" width="32%"/> <img src="docs/public/run-histograms.png" width="32%"/>
 
-<img src="docs/public/ScreenShot_7.png" width="32%"/> <img src="docs/public/ScreenShot_8.png" width="32%"/> <img src="docs/public/ScreenShot_9.png" width="32%"/>
+<img src="docs/public/run-pca.png" width="32%"/> <img src="docs/public/run-landscape.png" width="32%"/> <img src="docs/public/run-model.png" width="32%"/>
+
+**Compare & explore** — Compare / Sweeps / Explore / Reports
+
+<img src="docs/public/compare.png" width="32%"/> <img src="docs/public/sweeps-detail.png" width="32%"/> <img src="docs/public/explore.png" width="32%"/>
+
+<img src="docs/public/reports.png" width="32%"/> <img src="docs/public/project-table.png" width="32%"/> <img src="docs/public/dashboard.png" width="32%"/>
+
+**Home & welcome** — project list / onboarding
+
+<img src="docs/public/home-welcome.png" width="32%"/> <img src="docs/public/sweeps-list.png" width="32%"/>
 
 ## Quick start
 
