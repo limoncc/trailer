@@ -7,8 +7,8 @@ The run page (`/run/[id]`) shows up to 10 tabs. Tabs appear only when the run ha
 
 | Tab | Content |
 |-----|---------|
-| Config | Hyperparameters, env, git snapshot |
-| Metrics | All scalar curves — line charts with log axis, smoothing, Step / Wall Time toggle |
+| Config | Hyperparameters from `Tracker(config=...)` plus the hardware environment (GPU model / memory) |
+| Metrics | All scalar curves — line charts with log axis, smoothing, Step / Wall Time toggle (including auto-collected `system/*` hardware metrics) |
 | Histograms | Weight distributions over steps (three-pane evolution) |
 | PCA | 3D scatter of embeddings (Three.js), with step slider and auto-play |
 | Landscape | 2D loss-landscape grids — heatmap, contour overlay, 3D surface; step slider + auto-play |

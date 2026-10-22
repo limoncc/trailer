@@ -129,7 +129,6 @@ data/[project]/[run_id]/
 |------|------|
 | `TRAILER_HOST` | SDK 远程模式服务端地址(默认 127.0.0.1:5120) |
 | `TRAILER_TOKEN` | SDK 远程模式认证 token |
-| `TRAILER_DB` | SQLite 路径(默认 `trailer.db`) |
 | `TRAILER_STORAGE` | `sqlite` / `file` / `pg`(默认 **sqlite**) |
 | `TRAILER_DATA_DIR` | 文件模式数据目录(默认 `data`) |
 | `TRAILER_DATABASE_URL` | 数据库 URL(SQLite 路径或 PostgreSQL 连接串) |
@@ -145,3 +144,5 @@ data/[project]/[run_id]/
 - `experimenter`:只能看到自己(`owner_id`)的 run
 - 写操作仅 admin / 项目 owner
 - 匿名共享:run 页 / Explore 页生成 `?token=` 链接,只读访问
+
+角色权限、API token 管理与匿名分享的完整说明见 [分享与权限](/zh-cn/ui/sharing/)。

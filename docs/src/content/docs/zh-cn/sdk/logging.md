@@ -52,6 +52,20 @@ t.finish()   # 标记 run 完成(state → finished)
 - SDK 后台每 30s 自动心跳;异常退出 60s 后 server 标记 `crashed`
 - `finish()` 会刷新剩余缓冲并唤醒采样线程,确保最后一步不丢失
 
+## 硬件监控（自动）
+
+无需任何代码,SDK 默认自动采集 CPU / 内存 / GPU 并与指标同轴对齐:
+
+- **采样时机**:每个新 step 触发一次采样(绑定到该 step),另有 5s 时间兜底——保证系统信息图与指标图 x 轴一致,切到 Wall Time 视图也有数据
+- **设备探针**:创建 run 时一次性写入 `env.hardware`(GPU 型号、显存总量等),供前端辨识设备
+- **命名**:`system/cpu_util`、`system/mem_used`、`system/mem_util`(0–1)、`system/cpu/temp_c`、`system/cpu/power_w`;每张 GPU 记在 `system/<vendor>/gpu<i>/` 下(`gpu_util`、`vram_used`、`vram_util`、`temp_c`、`power_w`)
+
+```python
+t = Tracker(project="demo", auto_collect=False)   # 关闭自动硬件监控
+```
+
+采样失败静默降级(如无 GPU 时只记 CPU),绝不阻塞训练。
+
 ## 性能特性
 
 - 写入走线程安全 `RingBuffer`(10 万条,P99 < 100µs),`log()` 不阻塞训练

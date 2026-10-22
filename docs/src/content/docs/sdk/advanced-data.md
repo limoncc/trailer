@@ -5,6 +5,22 @@ description: Text, figures, tables, images, video, audio, histograms, embeddings
 
 Beyond scalar metrics, `Tracker` logs a full range of data types.
 
+## Which one should I use?
+
+| What you want to log | Use | Page |
+|----------------------|-----|------|
+| A number changing over steps | `log()` | Metrics |
+| A piece of text / a conclusion | `log_text()` | Texts |
+| A chart (matplotlib / G2 spec) | `log_figure()` | Figures |
+| Structured data (samples, predictions) | `log_table()` | Tables |
+| Images (samples, intermediate results) | `log_image()` | Media |
+| Video (generated results, replays) | `log_video()` | Media |
+| Audio (TTS, audio generation) | `log_audio()` | Media |
+| Weight / activation distributions over time | `log_histogram()` | Histograms |
+| 2D scatter of high-dimensional vectors | `log_embedding()` / `log_pca()` | Figures / PCA |
+| Model structure | `log_model()` | Model |
+| Loss surface around the weights | `log_loss_landscape()` | Landscape |
+
 ## Text
 
 ```python
@@ -34,11 +50,16 @@ t.log_table([{"a": 1, "b": "x"}, {"a": 2, "b": "y"}], name="samples")
 
 ## Images / Video / Audio
 
+All three share the Media tab, and all read from **disk files** or in-memory objects:
+
 ```python
-t.log_image(img, name="sample")       # PIL image, numpy array, or file path
-t.log_video("output.mp4", name="demo")
-t.log_audio("audio.wav", name="tts")
+t.log_image(img, name="sample")       # PIL / numpy / file path
+t.log_video("output.mp4", name="demo", step=epoch)   # disk video file; format detected from the extension
+t.log_audio("audio.wav", name="tts", step=epoch)     # disk audio file
 ```
+
+- `log_image` accepts PIL Images, numpy arrays, or paths; `log_video` / `log_audio` take disk paths (the file extension is the format; defaults are mp4 / wav)
+- Commonly used in generative experiments: log samples for image generation, finished videos for video generation, and voice clips for TTS — combined with step, you can replay how generation quality evolves during training
 
 ## Histograms
 
@@ -51,13 +72,18 @@ t.log_histogram(torch.randn(1000), name="w1", step=step)
 
 The Histograms tab shows three-pane weight evolution over steps.
 
-## Embeddings
+## Embedding vectors (2D scatter)
 
-PCA-reduced embeddings (requires `trailer[embedding]` for real PCA):
+High-dimensional vectors are PCA-reduced to 2D and rendered as a G2 scatter chart on the Figures page (install `trailer[embedding]` to enable real PCA; without scikit-learn it falls back to taking the first two columns):
 
 ```python
-t.log_embedding(vectors, name="embeddings", step=step)
+t.log_embedding(vectors, name="embeddings", step=step)     # (n_samples, n_features)
+t.log_embedding(vectors, metadata=labels, name="by-class") # metadata colors the points by label
 ```
+
+- `vectors`: a 2D array `(n_samples, n_features)` with at least 2 samples
+- `metadata`: an optional list of labels used to color points by class (e.g. ground-truth labels or clustering results)
+- Either this or `log_pca` (3D + clustering) below will do: use `log_embedding` for a quick 2D look at the distribution, and `log_pca` when you need interactive rotation and automatic clustering
 
 ## PCA (3D scatter)
 

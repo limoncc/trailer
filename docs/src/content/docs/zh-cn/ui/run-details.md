@@ -7,8 +7,8 @@ Run 页面(`/run/[id]`)展示最多 10 个标签。只有 run 有对应数据时
 
 | 标签 | 内容 |
 |------|------|
-| Config | 超参、环境、git 快照 |
-| Metrics | 全部标量曲线——折线图,支持 log 轴、平滑、Step / Wall Time 切换 |
+| Config | `Tracker(config=...)` 记录的超参 + 硬件环境（GPU 型号 / 显存） |
+| Metrics | 全部标量曲线——折线图,支持 log 轴、平滑、Step / Wall Time 切换（含自动采集的 `system/*` 硬件指标） |
 | Histograms | 权重分布随 step 演化(三栏) |
 | PCA | 嵌入 3D 散点(Three.js),step 滑块 + 自动播放 |
 | Landscape | 2D 损失景观网格——热力图、等高线叠加、3D 曲面;step 滑块 + 自动播放 |

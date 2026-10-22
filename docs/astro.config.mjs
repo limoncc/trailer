@@ -46,6 +46,8 @@ export default defineConfig({
           'ui/compare',
           'ui/explore',
           'ui/reports',
+          'ui/sweeps',
+          'ui/sharing',
         ]},
         { label: 'Project', translations: { 'zh-cn': '项目' }, items: [
           'license',
