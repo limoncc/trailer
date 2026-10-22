@@ -49,6 +49,9 @@ export default defineConfig({
           'ui/sweeps',
           'ui/sharing',
         ]},
+        { label: 'Case Studies', translations: { 'zh-cn': '进阶实战' }, items: [
+          'case-studies/grokking',
+        ]},
         { label: 'Project', translations: { 'zh-cn': '项目' }, items: [
           'license',
         ]},
