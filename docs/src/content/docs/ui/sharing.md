@@ -55,5 +55,5 @@ Share a run, an Explore analysis, or a Report read-only — no account required 
 
 ## Related
 
-- [Deployment](/deployment/) — multi-user server mode and PostgreSQL
-- [Local / remote / file modes](/sdk/modes/) — how the SDK connects to a remote server
+- [Deployment](../deployment/) — multi-user server mode and PostgreSQL
+- [Local / remote / file modes](../sdk/modes/) — how the SDK connects to a remote server

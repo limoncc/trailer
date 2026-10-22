@@ -145,4 +145,4 @@ data/[project]/[run_id]/
 - 写操作仅 admin / 项目 owner
 - 匿名共享:run 页 / Explore 页生成 `?token=` 链接,只读访问
 
-角色权限、API token 管理与匿名分享的完整说明见 [分享与权限](/zh-cn/ui/sharing/)。
+角色权限、API token 管理与匿名分享的完整说明见 [分享与权限](ui/sharing/)。

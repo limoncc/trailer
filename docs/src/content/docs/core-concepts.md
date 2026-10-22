@@ -32,7 +32,7 @@ Incremental statistics per run per metric: `last`, `min`, `max`, `best`, `best_s
 
 ## Sweep
 
-A hyperparameter sweep group. Pass the same `sweep_id` to multiple runs to group them; the [Sweeps page](/ui/sweeps/) visualizes the parameter → metric relationship with a parallel coordinates chart. For free-form cross-project analysis, use the [Explore workspace](/ui/explore/).
+A hyperparameter sweep group. Pass the same `sweep_id` to multiple runs to group them; the [Sweeps page](ui/sweeps/) visualizes the parameter → metric relationship with a parallel coordinates chart. For free-form cross-project analysis, use the [Explore workspace](ui/explore/).
 
 ## Config
 

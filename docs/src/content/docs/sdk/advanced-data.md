@@ -208,4 +208,4 @@ least recently opened containers re-collapse automatically.
 t = Tracker(project="demo", config={"lr": 0.01, "batch_size": 32})
 ```
 
-argparse / OmegaConf / Hydra parameters are captured automatically. See [Configuration](/sdk/configuration/).
+argparse / OmegaConf / Hydra parameters are captured automatically. See [Configuration](../sdk/configuration/).
