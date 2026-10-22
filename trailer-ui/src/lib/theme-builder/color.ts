@@ -245,7 +245,7 @@ export const MENU_ACCENTS = ['subtle', 'bold'] as const;
 export interface ThemeState {
   /** 基础色板 id(见 BASE_COLORS) */
   baseColor: string;
-  /** 主题预设 id(light/dark/cyber/nature/editorial/midnight) */
+  /** 主题预设 id(light/dark/cyber/nature 固定 + 12 染色主题;现行清单见 themePresets.ts) */
   theme: string;
   /** 图表色板 id:'default'=未激活(图表走各自本地缺省);其余见 CHART_PALETTES;'custom'=chartPalette */
   chartColor: string;

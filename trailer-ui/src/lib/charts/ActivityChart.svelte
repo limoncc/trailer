@@ -29,8 +29,8 @@
   });
   const COLS = 53;
 
-  // GitHub-style palette
-  const colors = ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
+  // GitHub-style palette — 走主题变量(app.css):未激活格随背景派生,暗色梯度提亮
+  const colors = ['var(--activity-0)', 'var(--activity-1)', 'var(--activity-2)', 'var(--activity-3)', 'var(--activity-4)'];
 
   // Build grid: cols[week][day] where day 0 = Monday
   let grid = $derived.by(() => {
@@ -76,13 +76,13 @@
   <div style="position:relative;width:{W}px;height:{H + 16}px;margin:0 auto">
     <!-- Month labels -->
     {#each months as m}
-      <span style="position:absolute;left:{m.x}px;top:0;font-size:9px;color:#898781">{m.label}</span>
+      <span style="position:absolute;left:{m.x}px;top:0;font-size:9px;color:var(--muted-foreground)">{m.label}</span>
     {/each}
 
     <!-- Day labels -->
     {#each DAYS as label, i}
       {#if label}
-        <span style="position:absolute;left:-28px;top:{i * STEP + 14}px;font-size:9px;color:#898781;width:24px;text-align:right">{label}</span>
+        <span style="position:absolute;left:-28px;top:{i * STEP + 14}px;font-size:9px;color:var(--muted-foreground);width:24px;text-align:right">{label}</span>
       {/if}
     {/each}
 
@@ -92,7 +92,7 @@
         <div
           role="gridcell" tabindex="0"
           style="position:absolute;left:{ci * STEP}px;top:{ri * STEP + 14}px;width:{cellSize}px;height:{cellSize}px;border-radius:2px;background:{colors[day.level]};cursor:pointer"
-          onmouseenter={(e) => { e.currentTarget.style.outline = '1.5px solid #57606a'; tooltip = { x: e.clientX, y: e.clientY, text: `${day.date}: ${day.count} run${day.count !== 1 ? 's' : ''}` }; }}
+          onmouseenter={(e) => { e.currentTarget.style.outline = '1.5px solid var(--ring)'; tooltip = { x: e.clientX, y: e.clientY, text: `${day.date}: ${day.count} run${day.count !== 1 ? 's' : ''}` }; }}
           onmousemove={(e) => { tooltip = { x: e.clientX, y: e.clientY, text: tooltip?.text || '' }; }}
           onmouseleave={(e) => { e.currentTarget.style.outline = 'none'; tooltip = null; }}
         ></div>
@@ -102,13 +102,13 @@
 
   <!-- Floating tooltip -->
   {#if tooltip}
-    <div style="position:fixed;left:{tooltip.x + 12}px;top:{tooltip.y - 30}px;background:#24292f;color:#fff;padding:3px 8px;border-radius:4px;font-size:11px;white-space:nowrap;z-index:999;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,0.15)">
+    <div style="position:fixed;left:{tooltip.x + 12}px;top:{tooltip.y - 30}px;background:var(--popover);color:var(--popover-foreground);border:1px solid var(--border);padding:3px 8px;border-radius:4px;font-size:11px;white-space:nowrap;z-index:999;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,0.15)">
       {tooltip.text}
     </div>
   {/if}
 
   <!-- Legend -->
-  <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:9px;color:#898781;justify-content:flex-end">
+  <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:9px;color:var(--muted-foreground);justify-content:flex-end">
     <span>Less</span>
     {#each colors as c}
       <span style="display:inline-block;width:{cellSize}px;height:{cellSize}px;border-radius:2px;background:{c}"></span>

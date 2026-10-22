@@ -27,14 +27,11 @@
   import { api } from '$lib/utils/api';
   import { Chart } from '@antv/g2';
   import { themeOpts, onChartThemeChange, chartPalette } from '$lib/charts/chartTheme.svelte';
+  import { CORE_THEMES, NEW_LIGHT_THEMES, NEW_DARK_THEMES, DARK_THEMES } from '$lib/theme-builder/themePresets';
 
-  const PRESETS = ['light', 'dark', 'cyber', 'nature', 'editorial', 'midnight'];
-  /** preview-02 风格主色主题(只在 app.css 覆盖主色,底色继承灰阶);对齐 shadcn 完整色板 */
-  const COLOR_THEMES = [
-    'red', 'rose', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal',
-    'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink',
-  ];
-  const PRESET_DARK = ['dark', 'cyber', 'midnight'];
+  // 预设主题清单与暗名单与 +layout 共用单一来源(themePresets.ts)
+  const PRESETS = [...CORE_THEMES, ...NEW_LIGHT_THEMES, ...NEW_DARK_THEMES];
+  const PRESET_DARK = [...DARK_THEMES];
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   let state: ThemeState = $state({ ...DEFAULT_THEME_STATE });
@@ -48,8 +45,9 @@
     label: cap(id),
     swatch: BASE_COLORS[id].light.primary,
   }));
-  /** Chart Color 选项:default(未激活,图表走本地缺省) + 6 预设 + custom */
-  const chartItems = [
+  /** Chart Color 选项:default(未激活,图表走本地缺省) + 6 预设 + custom。
+   *  用 $derived:custom 项色块跟随编辑中的 state.chartPalette 实时更新(顶层 const 只捕获初始值还会触发 state_referenced_locally) */
+  const chartItems = $derived([
     {
       id: 'default',
       label: 'Default',
@@ -61,7 +59,7 @@
       swatches: p.light.slice(0, 5),
     })),
     { id: 'custom', label: 'Custom', swatches: (state.chartPalette?.light ?? CHART_PALETTES.antv.light).slice(0, 5) },
-  ];
+  ]);
   const chartStyleItems = CHART_THEME_STYLES.map((id) => ({ id, label: cap(id) }));
   /** custom 色板编辑的亮/暗 tab */
   let paletteTab = $state<'light' | 'dark'>('light');
@@ -80,7 +78,7 @@
   });
   const fontItems = FONTS.map((f) => ({ id: f.id, label: f.label, family: f.family }));
   const radiusItems = RADII.map((r) => ({ id: r.label, label: r.label, value: r.value }));
-  const presetItems = [...PRESETS, ...COLOR_THEMES].map((p) => ({ id: p, label: cap(p) }));
+  const presetItems = PRESETS.map((p) => ({ id: p, label: cap(p) }));
   const styleItems = [{ id: 'default', label: 'Default' }];
   const iconItems = [{ id: 'lucide', label: 'Lucide' }];
   const menuItems = MENU_STYLES.map((m) => ({ id: m, label: cap(m) }));
@@ -152,8 +150,8 @@
 
   function selectPreset(name: string) {
     state.theme = name;
-    // 主色主题不改变明暗(由 Dark mode 开关决定);预设主题按自身明暗
-    if (!COLOR_THEMES.includes(name)) state.isDark = PRESET_DARK.includes(name);
+    // 预设主题按自身明暗(CORE/染色暗底名单见 themePresets)
+    state.isDark = PRESET_DARK.includes(name);
     const el = document.documentElement;
     el.setAttribute('data-theme', name);
     el.classList.toggle('dark', state.isDark);
