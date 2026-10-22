@@ -57,6 +57,7 @@ docs/开源计划.md
 docs/日常工作流.md
 docs/损失景观开发计划.md
 docs/激活值可视化开发.md
+docs/本地模式SQLite访问约束.md
 .zcode/
 AGENTS.md
 CLAUDE.md
