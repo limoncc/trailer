@@ -82,7 +82,10 @@ async fn main() {
     // SSE broadcast channel + taps
     let (sse_tx, _) = broadcast::channel(2048);
     let sse_tap = SseTap::new(sse_tx.clone());
-    let summary_tap = SummaryTap::new(store.clone());
+    // Arc 共享:writer 消费它做增量 upsert;AppState 持有同一实例,
+    // resume 截断续训时 reset 该 run 的内存状态(见 routes::resume_run)
+    let summary_tap = std::sync::Arc::new(SummaryTap::new(store.clone()));
+    let writer_summary_tap = summary_tap.clone();
 
     // Spawn writer background task with SSE + Summary taps
     let writer_store = store.clone();
@@ -90,7 +93,7 @@ async fn main() {
         run_ingestion_writer_with_taps(
             rx,
             writer_store,
-            vec![Box::new(summary_tap), Box::new(sse_tap)],
+            vec![Box::new(writer_summary_tap), Box::new(sse_tap)],
         )
         .await;
     });
@@ -123,6 +126,7 @@ async fn main() {
         lttb_cache: Arc::new(Mutex::new(LttbCache::new(30, 500))),
         auth,
         danmaku_rl: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        summary_tap,
     };
 
     // Build router
