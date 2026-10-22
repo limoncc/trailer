@@ -130,4 +130,23 @@ describe('app.css 主题体系', () => {
       expect(THEME_SWATCHES[name]?.primary, `${name} swatch primary`).toBe(blocks[name].primary.toLowerCase());
     }
   });
+
+  it('活动热力图色阶就位:::root 未激活格从主题背景派生,.dark 梯度提亮', () => {
+    const rootVars = /:root\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    for (const k of ['activity-0', 'activity-1', 'activity-2', 'activity-3', 'activity-4']) {
+      expect(rootVars, `:root --${k}`).toContain(`--${k}:`);
+    }
+    // 未激活格必须由当前主题 background/foreground 派生(16 主题 + custom 全自动适配)
+    expect(rootVars, 'activity-0 must derive from theme background').toContain('color-mix');
+    const darkVars = [...css.matchAll(/\.dark\s*\{([^}]*)\}/g)].map((m) => m[1]).join('\n');
+    for (const k of ['activity-1', 'activity-2', 'activity-3', 'activity-4']) {
+      expect(darkVars, `.dark --${k}`).toContain(`--${k}:`);
+    }
+    // 暗色梯度必须与亮色不同(反向提亮,防深绿沉底)
+    for (const k of ['activity-1', 'activity-2', 'activity-3', 'activity-4']) {
+      const light = new RegExp(`--${k}:\\s*([^;]+)`).exec(rootVars)?.[1].trim();
+      const dark = new RegExp(`--${k}:\\s*([^;]+)`).exec(darkVars)?.[1].trim();
+      expect(dark, `.dark --${k} differs from light`).not.toBe(light);
+    }
+  });
 });

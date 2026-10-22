@@ -37,6 +37,14 @@
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
+  /* 活动热力图色阶(GitHub 风)。--activity-0(未激活格)用 color-mix 从当前主题
+     background/foreground 派生 —— 变量引用延迟解析,16 个预设与 custom 主题
+     自动各自适配(明底浅灰/暗底深灰,均带主题色相),无需逐主题定义 */
+  --activity-0: color-mix(in oklab, var(--background) 92%, var(--foreground));
+  --activity-1: #9be9a8;
+  --activity-2: #40c463;
+  --activity-3: #30a14e;
+  --activity-4: #216e39;
 }
 
 .dark {
@@ -69,6 +77,12 @@
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
+  /* 暗色热力图梯度反向提亮(GitHub dark 同款):低量深绿、高量亮绿,
+     避免深绿格在暗底上沉底不可见 */
+  --activity-1: #0e4429;
+  --activity-2: #006d32;
+  --activity-3: #26a641;
+  --activity-4: #39d353;
 }
 
 /* Cyber theme — dark tech/cyberpunk */
