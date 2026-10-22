@@ -20,6 +20,7 @@
     "@tanstack/table-core": "^8.21.3",
     "@types/d3-contour": "^3.0.6",
     "@types/marked": "^6.0.0",
+    "@types/node": "^26.6.5",
     "@types/three": "^0.185.3",
     "embla-carousel-svelte": "^8.6.0",
     "formsnap": "^2.0.1",
