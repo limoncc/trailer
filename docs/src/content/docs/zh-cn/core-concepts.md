@@ -32,15 +32,11 @@ Run 状态由心跳机制管理:SDK 每 30s 发一次心跳,server 60s 未收到
 
 ## Sweep
 
-超参搜索分组。实际使用 [Explore 工作台](/zh-cn/ui/explore/) 的 **Parallel(平行坐标)** 图对比超参组合。
+超参扫描分组。给多个 run 传相同的 `sweep_id` 即归为一组，前端 [Sweeps 页](/zh-cn/ui/sweeps/) 用平行坐标图展示"参数 → 指标"的关系。跨项目的自由分析仍用 [Explore 工作台](/zh-cn/ui/explore/)。
 
 ## 配置(Config)
 
-`Tracker(config={...})` 记录超参,支持:
-
-- 显式 dict
-- 自动捕获 `argparse` / OmegaConf / Hydra 参数
-- 前端 Config Tab 查看,Compare 页支持配置差异对比
+`Tracker(config={...})` 记录超参（任意嵌套 JSON dict），前端 Config Tab 查看，Compare 页支持配置差异对比。
 
 ## 数据流
 

@@ -32,15 +32,11 @@ Incremental statistics per run per metric: `last`, `min`, `max`, `best`, `best_s
 
 ## Sweep
 
-A hyperparameter search group. In practice, compare hyperparameter combinations with the **Parallel** chart in the [Explore workspace](/ui/explore/).
+A hyperparameter sweep group. Pass the same `sweep_id` to multiple runs to group them; the [Sweeps page](/ui/sweeps/) visualizes the parameter → metric relationship with a parallel coordinates chart. For free-form cross-project analysis, use the [Explore workspace](/ui/explore/).
 
 ## Config
 
-`Tracker(config={...})` logs hyperparameters. It supports:
-
-- Explicit dicts
-- Automatic capture of `argparse` / OmegaConf / Hydra parameters
-- A Config tab in the run view, and config-diff comparison in the Compare page
+`Tracker(config={...})` logs hyperparameters (an arbitrarily nested JSON dict), shown in the run's Config tab and diffable on the Compare page.
 
 ## Data flow
 

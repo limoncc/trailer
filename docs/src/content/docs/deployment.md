@@ -129,7 +129,6 @@ data/[project]/[run_id]/
 |----------|---------|
 | `TRAILER_HOST` | Remote SDK server address (default 127.0.0.1:5120) |
 | `TRAILER_TOKEN` | Remote SDK auth token |
-| `TRAILER_DB` | SQLite path (default `trailer.db`) |
 | `TRAILER_STORAGE` | `sqlite` / `file` / `pg` (default: **sqlite**) |
 | `TRAILER_DATA_DIR` | File-mode data directory (default `data`) |
 | `TRAILER_DATABASE_URL` | Database URL (SQLite path or PostgreSQL connection string) |
@@ -145,3 +144,5 @@ Precedence: CLI args > environment variables > config file > defaults.
 - `experimenter`: sees only runs owned by them (`owner_id`)
 - Writes require admin or project owner
 - Anonymous sharing: run / Explore pages generate `?token=` links for read-only access
+
+For the full story on roles, API tokens, and anonymous sharing, see [Sharing and permissions](/ui/sharing/).
