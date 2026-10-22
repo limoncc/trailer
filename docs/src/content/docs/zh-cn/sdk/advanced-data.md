@@ -5,6 +5,22 @@ description: 文本、图表、表格、图像、视频、音频、直方图、�
 
 除了标量指标,`Tracker` 还支持完整的数据类型记录。
 
+## 该用哪种？
+
+| 你想记录 | 用 | 页面 |
+|---------|-----|------|
+| 数值随 step 变化 | `log()` | Metrics |
+| 一段文字/结论 | `log_text()` | Texts |
+| 一张图(matplotlib / G2 spec) | `log_figure()` | Figures |
+| 结构化数据(样本、预测) | `log_table()` | Tables |
+| 图片(样本、中间结果) | `log_image()` | Media |
+| 视频(生成结果、回放) | `log_video()` | Media |
+| 音频(TTS、音频生成) | `log_audio()` | Media |
+| 权重/激活分布随时间 | `log_histogram()` | Histograms |
+| 高维向量降维散点 | `log_embedding()` / `log_pca()` | Figures / PCA |
+| 模型结构 | `log_model()` | Model |
+| 权重附近损失曲面 | `log_loss_landscape()` | Landscape |
+
 ## 文本
 
 ```python
@@ -34,11 +50,16 @@ t.log_table([{"a": 1, "b": "x"}, {"a": 2, "b": "y"}], name="samples")
 
 ## 图像 / 视频 / 音频
 
+三者共用 Media 标签页,均从**磁盘文件**或内存对象读取:
+
 ```python
 t.log_image(img, name="sample")       # PIL / numpy / 文件路径
-t.log_video("output.mp4", name="demo")
-t.log_audio("audio.wav", name="tts")
+t.log_video("output.mp4", name="demo", step=epoch)   # 磁盘视频文件,按扩展名识别格式
+t.log_audio("audio.wav", name="tts", step=epoch)     # 磁盘音频文件
 ```
+
+- `log_image` 接受 PIL Image、numpy 数组或路径;`log_video` / `log_audio` 接受磁盘路径(扩展名即格式,默认 mp4 / wav)
+- 生成式实验常用:图像生成记样本、视频生成记成片、TTS 记音色试听,配合 step 可回放生成质量随训练的演化
 
 ## 直方图
 
@@ -51,17 +72,22 @@ t.log_histogram(torch.randn(1000), name="w1", step=step)
 
 Histograms 标签页以三栏展示权重演化。
 
-## 嵌入向量
+## 嵌入向量（2D 散点）
 
-PCA 降维的嵌入可视化(需 `trailer[embedding]` 启用真实 PCA):
+高维向量 PCA 降到 2D，以 G2 散点图渲染在 Figures 页（需 `trailer[embedding]` 启用真实 PCA，未装 sklearn 时退回取前两列）：
 
 ```python
-t.log_embedding(vectors, name="embeddings", step=step)
+t.log_embedding(vectors, name="embeddings", step=step)     # (n_samples, n_features)
+t.log_embedding(vectors, metadata=labels, name="by-class") # metadata 作为点的 label 着色
 ```
 
-## PCA(3D 散点)
+- `vectors`：二维数组 `(n_samples, n_features)`，至少 2 个样本
+- `metadata`：可选标签列表，用于按类别着色（如样本真实类别、聚类结果）
+- 与下面的 `log_pca`（3D + 聚类）二选一即可：2D 快速看分布用 `log_embedding`，需要交互旋转与自动聚类用 `log_pca`
 
-PCA 降到 3 维 + k-means 聚类,Three.js 渲染:
+## PCA（3D 散点）
+
+PCA 降到 3 维 + k-means 聚类，Three.js 渲染在 PCA 标签页：
 
 ```python
 t.log_pca(vectors, name="embeddings", step=step)

@@ -52,6 +52,20 @@ t.finish()   # mark the run finished (state → finished)
 - The SDK heartbeats every 30s in the background; after 60s without a heartbeat the server marks a run `crashed`
 - `finish()` flushes the remaining buffer and joins the sampler thread, so the last step is never lost
 
+## Hardware monitoring (automatic)
+
+With no code changes at all, the SDK automatically collects CPU / memory / GPU data by default and aligns it with metrics on the same axis:
+
+- **When sampling happens**: each new step triggers one sample (bound to that step), plus a 5s time-based fallback — this keeps the system charts on the same x-axis as the metric charts, and the Wall Time view has data too
+- **Device probe**: written to `env.hardware` once at run creation (GPU model, total VRAM, etc.) so the UI can identify the device
+- **Naming**: `system/cpu_util`, `system/mem_used`, `system/mem_util` (0–1), `system/cpu/temp_c`, `system/cpu/power_w`; each GPU is recorded under `system/<vendor>/gpu<i>/` (`gpu_util`, `vram_used`, `vram_util`, `temp_c`, `power_w`)
+
+```python
+t = Tracker(project="demo", auto_collect=False)   # disable automatic hardware monitoring
+```
+
+Failed probes degrade silently (e.g. CPU only when there's no GPU) and never block training.
+
 ## Performance
 
 - Writes go through a thread-safe `RingBuffer` (100k entries, P99 < 100µs) — `log()` never blocks training
